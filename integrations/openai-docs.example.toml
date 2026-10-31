@@ -1,0 +1,5 @@
+# Необязательный публичный MCP документации. Этот файл сам ничего не подключает.
+# Добавляйте только эту таблицу в нужный профиль по запросу, не заменяйте config.
+# Сверено с official subagents docs 2026-10-31, раздел Global settings.
+[mcp_servers.openaiDeveloperDocs]
+url = "https://developers.openai.com/mcp"

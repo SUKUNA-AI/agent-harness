@@ -1,0 +1,3 @@
+# C++, CUDA и производительность
+
+Сначала correctness, затем сравнимый baseline и контролируемый эксперимент. Зафиксируй hardware/OS/compiler/toolkit/driver, команду, inputs/model/dtype, warmup, repetitions, метрику, разброс и нагрузку. На общей GPU выполняй benchmark эксклюзивно; один удачный замер не доказательство. Не меняй смысл задачи, accuracy/tolerance или workload ради ускорения. Сохраняй исходные измерения и привязку к candidate. Раздели measured/derived/unknown; CPU fixture не подтверждает GPU. После исправления повтори correctness и сопоставимые измерения. Не устанавливай весь toolchain без необходимости и полномочий.

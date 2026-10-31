@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Recoverable context checkpoint v1, not hidden reasoning",
+  "type": "object",
+  "required": ["schema_version", "version", "created_at", "state", "contract", "actual_snapshot", "note", "next_safe_step", "native_resume_claim", "digest"],
+  "properties": {
+    "schema_version": {"const": 1}, "version": {"type": "integer", "minimum": 1},
+    "created_at": {"type": "string"}, "state": {"type": "object"}, "contract": {"type": "object"},
+    "actual_snapshot": {"type": "object"}, "note": {"type": "string", "minLength": 1},
+    "next_safe_step": {"type": "string", "minLength": 1}, "native_resume_claim": {"const": false},
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

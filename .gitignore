@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+.test-tmp/
+*.egg-info/
+build/
+dist/
+.venv/
+# Machine-specific report is retained locally, outside the portable source set.
+docs/REPORT.md
+
+# Private runtime/configuration must stay outside this package.
+.env
+.env.*
+!.env.example
+auth.json
+credentials*
+machine.json
+harness-machine.json
+private/
+runs/
+backups/
+*.log

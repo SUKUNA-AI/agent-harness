@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Captured evidence plus identified assessment v1",
+  "type": "object",
+  "required": ["schema_version", "run_id", "task_id", "attempt_id", "check_id", "kind", "contract_digest", "candidate_digest", "status", "artifacts", "digest"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "kind": {"enum": ["command", "source", "content", "visual", "runtime"]},
+    "status": {"enum": ["passed", "failed", "timeout", "missing_dependency", "cancelled", "not_run", "inputs_changed", "toolchain_changed", "budget_exhausted", "satisfied"]},
+    "method": {"enum": ["source_review", "agent_assessment", "human_assessment", "agent_visual_review", "human_visual_review", "observed_runtime"]},
+    "assessor": {"type": "string"}, "assessment": {"type": "string"},
+    "criteria": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}},
+    "artifacts": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["path", "sha256", "size"], "properties": {"path": {"type": "string"}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "size": {"type": "integer", "minimum": 0}}}},
+    "sources": {"type": "array", "items": {"type": "object", "required": ["url", "retrieved_at", "claim", "support", "artifact"]}},
+    "input_before": {"type": "string"}, "input_after": {"type": "string"},
+    "argv": {"type": "array", "items": {"type": "string"}},
+    "cwd": {"type": "string"}, "exit_code": {"type": ["integer", "null"]}
+  },
+  "allOf": [{"if": {"properties": {"kind": {"const": "command"}}}, "then": {"required": ["argv", "cwd", "input_before", "input_after"]}, "else": {"required": ["method", "assessor", "assessment", "criteria"]}}]
+}

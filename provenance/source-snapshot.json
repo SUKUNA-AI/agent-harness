@@ -1,0 +1,180 @@
+{
+  "schema_version": 1,
+  "source_version": "1.0.1",
+  "release_version": "1.0.2",
+  "source_commit": "1c7aff3219372346b60fc9d2b9508c6e1ee511d7",
+  "includes_working_tree_changes": true,
+  "captured_date": "2026-10-31",
+  "excluded": [
+    ".codex/",
+    "adapters/projects/",
+    "tests/test_study_scope.py",
+    "untracked files",
+    "ignored machine reports",
+    "Git history",
+    "private state and credentials"
+  ],
+  "note": "Hashes describe source bytes before export changes, not release integrity.",
+  "source_files": [
+    {
+      "path": ".gitignore",
+      "sha256": "a0690a6ee3570e0a292fc8c9dd8d5ae03e08a229d1b7afac3da4ac9f525810ff"
+    },
+    {
+      "path": "README.md",
+      "sha256": "eeb6fee5ef97b028bb0baaa1abead49786105872a058b6ee6cdabea94620ad0f"
+    },
+    {
+      "path": "adapters/chatgpt-work/README.md",
+      "sha256": "f21a1fd185b91bbd793cb763c35e73a535103a1ca58bf053f89df913d4e93e8f"
+    },
+    {
+      "path": "adapters/codex/SKILL.md",
+      "sha256": "8824255fcb9b1e4cb541494ab048cc608091f6e2a625ba692ba8385456371b23"
+    },
+    {
+      "path": "adapters/codex/agents/delivery_helper.toml",
+      "sha256": "65fe17b4546ba4fee3f565e637c0d1509728721f6449e075e1f2715777af18cb"
+    },
+    {
+      "path": "adapters/codex/agents/delivery_owner.toml",
+      "sha256": "cc3619f1272afa87614ad158b8699d126f8494de18fc1bf706a1f836f002d8cd"
+    },
+    {
+      "path": "adapters/codex/agents/delivery_reviewer.toml",
+      "sha256": "eea4ffb21a29a7f1e3a411f14fc1dafc9c26becc6a3431d0a23ac6b99f2b7738"
+    },
+    {
+      "path": "adapters/codex/bootstrap.md",
+      "sha256": "9cc5f95435b1061f5136120df222e029505f784f99bcb45e0bcd23a645e7e420"
+    },
+    {
+      "path": "adapters/domains/README.md",
+      "sha256": "38d705b0e80973334906bd1fd35f0ab5555282857f51734dccbba80cef769de7"
+    },
+    {
+      "path": "docs/ACCEPTANCE.md",
+      "sha256": "1bda01cf8f8a451ce4a43b40b8c822df9670c64c7f19efe09ce6595243f93548"
+    },
+    {
+      "path": "docs/OPERATIONS.md",
+      "sha256": "d00cfef74cd319e715846a85e43fec2b02e661f17cbb2114a3bebf11cde62552"
+    },
+    {
+      "path": "policies/global.md",
+      "sha256": "934952d1258147d4f6793f7187025d4d8efd0f433a359560fbd94cea215c4fc5"
+    },
+    {
+      "path": "pyproject.toml",
+      "sha256": "6d3626479ac0282725d0dd567a4e24d59b1946e576bffbcefa121c7ba303b534"
+    },
+    {
+      "path": "roles/helper.md",
+      "sha256": "dbc723c0675f3c5f9c90b383b87c68826dc19aa16b1c6486070194021f45b17f"
+    },
+    {
+      "path": "roles/lane-owner.md",
+      "sha256": "0cc57f042f6e9909ee5e7586ea09c518dc0642e6d1af9e6db27b49c17db58a16"
+    },
+    {
+      "path": "roles/reviewer.md",
+      "sha256": "07b635212bb188bda5497cc9cb42f88b69e132fc06565650c2b065640d90ad41"
+    },
+    {
+      "path": "schemas/checkpoint.schema.json",
+      "sha256": "4307366315ec87de4cb7d7cb036f79c6e97e8f609390068082f860cb6e8271fd"
+    },
+    {
+      "path": "schemas/contract.schema.json",
+      "sha256": "8665631c30dd797d6e2fb978a0cf84cbaffb6bc8dbc34a8c875a6800c4aa9008"
+    },
+    {
+      "path": "schemas/evidence.schema.json",
+      "sha256": "1a7d775bc6ff26e565321df01c745a2f4292047fe23c128b66d180b068522b88"
+    },
+    {
+      "path": "schemas/result.schema.json",
+      "sha256": "512849ae267f87db9b2a5af5d6f14ee497f0165d02f284179777433af1b3b909"
+    },
+    {
+      "path": "src/agent_harness/__init__.py",
+      "sha256": "ed527a7a40107c8884c8e1bb88a1fecaa36a988ce3f2e8bd5a1f18ef88b5aad3"
+    },
+    {
+      "path": "src/agent_harness/__main__.py",
+      "sha256": "935a1c1166b0c1ea35a82256345000bf2c73ded718d77773bc27a71ecce28f7d"
+    },
+    {
+      "path": "src/agent_harness/cli.py",
+      "sha256": "0cfbd7887b9faa4630eeaf26d277f56e5925b1c53663145db93b53334ae873d8"
+    },
+    {
+      "path": "src/agent_harness/core.py",
+      "sha256": "ac2997841585852dfea3902688b280271987458ff186c4895c1a3d3322cdf385"
+    },
+    {
+      "path": "src/agent_harness/installation.py",
+      "sha256": "1edf1ace7279ab877e3c2fae097a44eab9bddf1760bdec5bd60c192b531e6484"
+    },
+    {
+      "path": "src/agent_harness/runner.py",
+      "sha256": "7495bfa639597593125f5fe6b41526fa79de536f010490a21f996226fb919b53"
+    },
+    {
+      "path": "tests/test_core.py",
+      "sha256": "52846d741cb5e144a929ad6ab165a7f2b11f0031e50b29a8635afb6d5c794c2e"
+    },
+    {
+      "path": "tests/test_install.py",
+      "sha256": "3b79a3377902774a518257c380a598076446f0041bd04b965eb7d4c7bcae1458"
+    },
+    {
+      "path": "tools/actions.py",
+      "sha256": "525e197c94a0aef0ed7eadb5fb81f10fb4e4b680b3b955404f4c5d27819747f0"
+    },
+    {
+      "path": "tools/harness.py",
+      "sha256": "dc5bbdae65dd1a7682d0a74c03c2f9a4211c0940a2e39074cab06a9fe1efa44a"
+    },
+    {
+      "path": "workflows/delivery.md",
+      "sha256": "ce4c93ec729d636f70c74401916795869417435c15c00e11221975be4623529f"
+    },
+    {
+      "path": "workflows/direct.md",
+      "sha256": "8b49650b1c5798c594a2685b6c187a5344ab7812fb619a24f21338ddf7a4a1a0"
+    },
+    {
+      "path": "workflows/document.md",
+      "sha256": "fa3c36766c8519402a1547eee90c6cd573b4af559f84acc29bf80a28cc277566"
+    },
+    {
+      "path": "workflows/learning.md",
+      "sha256": "c069c24eae5ca1e79ba8e9a9d3de7b0676b8d042b3a8d8b4f128b6bd3ac0e4b9"
+    },
+    {
+      "path": "workflows/operations.md",
+      "sha256": "357d5c80caab5c63ef87aa7aab1868f92917b14fb35942168b4d42df6f8ae22e"
+    },
+    {
+      "path": "workflows/performance.md",
+      "sha256": "7f68ac7e75869c9079c1bc1abc0bc7216a2cb5d4c2e2b4a45ed91d66faee0e17"
+    },
+    {
+      "path": "workflows/planning.md",
+      "sha256": "f2f19c52a9a36fff7c4c9a3b4b64a30b3e757768be45dda02f8d2b2eeed66678"
+    },
+    {
+      "path": "workflows/recovery.md",
+      "sha256": "a816c2d4539196d6563e1db2c94dfd52f42b02e28ff14c178cd71c8a157121d8"
+    },
+    {
+      "path": "workflows/research.md",
+      "sha256": "b0928a0712394f07e5953505e77091089a5ba95f55c4478759392be2a9a78570"
+    },
+    {
+      "path": "workflows/review.md",
+      "sha256": "c6bd4ede452075f10c6ba6f209b2c118b6607505df47f2a38060519cf3595be5"
+    }
+  ]
+}

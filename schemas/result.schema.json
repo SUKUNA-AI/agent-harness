@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Owner result v1; ready_for_review is not acceptance",
+  "type": "object",
+  "required": ["run_id", "task_id", "attempt_id", "contract_digest", "candidate_digest", "status", "summary", "limitations", "next_safe_step", "evidence_ids"],
+  "properties": {
+    "run_id": {"type": "string"}, "task_id": {"type": "string"}, "attempt_id": {"type": "string"},
+    "lane_id": {"type": "string"}, "native_ref": {"type": "string"},
+    "contract_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "candidate_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "status": {"const": "ready_for_review"},
+    "summary": {"type": "string", "minLength": 1},
+    "limitations": {"type": "string", "minLength": 1},
+    "next_safe_step": {"type": "string", "minLength": 1},
+    "evidence_ids": {"type": "array", "items": {"type": "string"}},
+    "commits": {"type": "array", "items": {"type": "string"}},
+    "patches": {"type": "array", "items": {"type": "string"}},
+    "sources": {"type": "array"}
+  }
+}
