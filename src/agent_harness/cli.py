@@ -21,9 +21,13 @@ def main(argv=None):
     if argv and argv[0] in INSTALL_COMMANDS:
         from .installation import dispatch
         return dispatch(argv[0], argv[1:])
+    if argv and argv[0] == "plan":
+        from .orchestration import dispatch
+        return dispatch(argv[1:])
     parser = argparse.ArgumentParser(description="Native Codex harness: state and verification, never a second agent engine")
     parser.add_argument("--version", action="version", version=__version__)
     commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("plan", help="Read-only orchestration helpers; use plan --help")
     for name in ("init", "attempt"):
         p = commands.add_parser(name)
         p.add_argument("--run-dir", required=True)
