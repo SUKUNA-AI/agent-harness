@@ -18,7 +18,7 @@ import tempfile
 import tomllib
 import uuid
 
-VERSION = "1.0.2"
+VERSION = "1.1.0"
 START = "<!-- agent-harness:begin -->"
 END = "<!-- agent-harness:end -->"
 MANAGED = {"enabled": True, "max_concurrent_threads_per_session": 4, "interrupt_message": True}
@@ -354,7 +354,7 @@ def plan(package: Path, home: Path, skills: Path, state: Path, overlay: Path, ma
         # This is a machine-local document, so preserve all user capability/resource
         # additions and update only our explicitly managed fields.
         machine = dict(existing_machine)
-        fields = {"installation_state": str(state)}
+        fields = {"installation_state": str(state), "package_root": str(package), "codex_home": str(home)}
         if max_child_threads is not None or "preferred_native_child_cap" not in machine:
             fields["preferred_native_child_cap"] = preferred_cap
         edits = {}

@@ -17,3 +17,5 @@ description: Условные рабочие процедуры для соде�
 8. Для создания skills используй `harness-skill-creator`, для большой координации — `harness-token-economy`, для подбора tools/коннекторов — `harness-integrations`. Читай их только по задаче. Они не требуют подключать внешние сервисы или запускать агентов для обычного ответа.
 
 Эксплуатация: `{{PACKAGE_ROOT}}/docs/OPERATIONS.md`. Установка/проверка: `python "{{PACKAGE_ROOT}}/tools/harness.py" doctor|install|verify|rollback|uninstall --help`. Версия не распространяется автоматически на уже запущенные сессии или hosted Work.
+
+Для содержательных задач по умолчанию применяй `harness-orchestrate`: сам постановка → краткий план → независимые owners → интеграция → независимая проверка. Python только готовит/проверяет данные; native tools выполняют spawn/follow-up. Последовательный fallback допустим по наблюдаемой причине.

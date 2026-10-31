@@ -318,6 +318,7 @@ class InstallerTests(unittest.TestCase):
             with contextlib.redirect_stdout(out):
                 code = install.dispatch(command, args)
             self.assertEqual(code, 0, out.getvalue())
+
             obj = json.loads(out.getvalue())
             if command == "doctor":
                 self.assertEqual(Path(obj["state_dir"]), self.state.resolve())
@@ -334,6 +335,24 @@ class InstallerTests(unittest.TestCase):
         state, overlay = install.installed_locations(self.package, self.home)
         self.assertEqual(state, self.state.resolve())
         self.assertEqual(overlay, self.overlay.resolve())
+
+    def test_relocated_package_updates_overlay_and_rolls_back(self):
+        self.apply()
+        before = json.loads(self.overlay.read_text(encoding="utf-8"))
+        before["user_capability"] = "keep"
+        self.overlay.write_bytes(install.canonical(before))
+        relocated = self.base / "новый пакет"
+        shutil.copytree(self.package, relocated)
+        planned = install.plan(relocated, self.home, self.skills, self.state, self.overlay)
+        install.apply_plan(planned, self.state, relocated)
+        after = json.loads(self.overlay.read_text(encoding="utf-8"))
+        self.assertEqual(after["package_root"], str(relocated))
+        self.assertEqual(after["codex_home"], str(self.home))
+        self.assertEqual(after["user_capability"], "keep")
+        self.assertEqual(install.verify(relocated, self.home, self.skills, self.state)["status"], "structural_verified")
+        rollback = install.rollback_plan(install.active_manifest(self.state))
+        restored = json.loads(next(row["after"] for row in rollback if row["path"] == self.overlay))
+        self.assertEqual(restored, before)
 
     def test_cli_rejects_invalid_child_cap_before_writes(self):
         args = ["--package-root", str(self.package), "--codex-home", str(self.home), "--skills-home", str(self.skills), "--state-dir", str(self.state), "--max-child-threads", "0", "--apply"]
