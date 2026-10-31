@@ -538,6 +538,87 @@ def _shared_scope_errors(run, state, contract):
     return errors, receipts
 
 
+
+def _check_evidence_errors(run, state, contract, candidate, toolchains):
+    """Shared read-only validation; never starts a command or changes run state."""
+    errors, receipts = [], []
+    for check in contract["checks"]:
+        path = _result_path(run, state, check["id"])
+        if not path.is_file():
+            if check["required"]:
+                errors.append(f"required check missing: {check['id']}")
+            continue
+        result = read_json(path)
+        sha = result.pop("digest", None)
+        if digest(result) != sha:
+            errors.append(f"result integrity failed: {check['id']}")
+        result["digest"] = sha
+        for key, expected in {"run_id": contract["run_id"], "task_id": contract["task_id"], "lane_id": contract.get("lane_id"), "attempt_id": contract["attempt_id"], "check_id": check["id"], "kind": check["kind"], "contract_digest": state["contract_digest"], "candidate_digest": candidate["digest"]}.items():
+            if result.get(key) != expected:
+                errors.append(f"wrong {key} in {check['id']}")
+        artifacts_errors = validate_artifacts(run, result)
+        artifacts_errors.extend(_unknown_artifacts(run, state, check["id"], result))
+        errors.extend(f"{check['id']}: {message}" for message in artifacts_errors)
+        passed_status = "passed" if check["kind"] == "command" else "satisfied"
+        if check["required"] and result.get("status") != passed_status:
+            errors.append(f"required check not satisfied: {check['id']} ({result.get('status')})")
+        if check["kind"] == "command":
+            if result.get("tools") != toolchains.get(check["id"]) or result.get("tools_after") != result.get("tools") or result.get("toolchain_digest") != state["toolchain_digest"]:
+                errors.append(f"toolchain identity mismatch: {check['id']}")
+            if result.get("argv") != check["argv"] or result.get("cwd") != check.get("cwd", contract.get("cwd")) or result.get("timeout") != check["timeout"]:
+                errors.append(f"runner command contract mismatch: {check['id']}")
+            if result.get("status") == "passed" and (result.get("exit_code") != check.get("expected_exit", 0) or result.get("input_before") != candidate["digest"] or result.get("input_after") != candidate["digest"]):
+                errors.append(f"invalid command success: {check['id']}")
+            artifact_names = [Path(p["path"]).name for p in result.get("artifacts", [])]
+            if artifact_names.count("stdout.log") != 1 or artifact_names.count("stderr.log") != 1:
+                errors.append(f"runner logs missing or duplicated: {check['id']}")
+        elif set(result.get("criteria", {})) != set(check["criteria"]) or not result.get("assessor") or not result.get("method") or not result.get("assessment"):
+            errors.append(f"typed assessment incomplete: {check['id']}")
+        receipts.append({"check_id": check["id"], "result_digest": sha, "status": result.get("status")})
+    return errors, receipts
+
+def accepted_evidence_errors(run: Run, verdict_digest, *, _ancestors=()):
+    """Revalidate existing evidence without running checks, a new gate or run mutations."""
+    if str(run.path) in _ancestors:
+        return ["accepted dependency cycle"]
+    try:
+        state = run.state()
+        contract = run.contract(state)
+        candidate = run.assert_current(state, contract)
+        accepted = state.get("accepted")
+        if not accepted or accepted.get("verdict_digest") != verdict_digest:
+            return ["accepted verdict identity changed"]
+        path = (run.path / accepted["verdict_path"]).resolve()
+        if run.path not in path.parents:
+            return ["accepted verdict escaped run store"]
+        verdict = read_json(path)
+        supplied = verdict.pop("digest", None)
+        errors = []
+        if supplied != verdict_digest or digest(verdict) != verdict_digest or verdict.get("verdict") != "accepted":
+            errors.append("accepted verdict integrity failed")
+        for key, expected in {"run_id": contract["run_id"], "task_id": contract["task_id"], "attempt_id": contract["attempt_id"], "contract_digest": state["contract_digest"], "candidate_digest": candidate["digest"]}.items():
+            if verdict.get(key) != expected:
+                errors.append("accepted verdict wrong " + key)
+        toolchains = read_json(run.attempt_dir(state) / "toolchains.json")
+        if digest(toolchains) != state.get("toolchain_digest"):
+            errors.append("frozen toolchain integrity failed")
+        check_errors, receipts = _check_evidence_errors(run, state, contract, candidate, toolchains)
+        errors.extend(check_errors)
+        # Receipts bind result metadata to the accepted gate, even if a result was rehashed.
+        for receipt in receipts:
+            if receipt not in verdict.get("receipts", []):
+                errors.append("accepted check receipt changed: " + receipt["check_id"])
+        for dependency in contract.get("dependencies", []):
+            errors.extend(accepted_evidence_errors(Run(dependency["run_dir"]), dependency["verdict_digest"], _ancestors=(*_ancestors, str(run.path))))
+        if any(o["status"] in {"planned", "unknown"} for o in state.get("operations", {}).values()):
+            errors.append("unknown operation outcome")
+        if snapshot(contract)["digest"] != candidate["digest"] or run.state() != state:
+            errors.append("accepted inputs/state changed during read-only validation")
+        return errors
+    except (HarnessError, OSError, ValueError, KeyError, TypeError) as error:
+        return ["accepted evidence unavailable: " + str(error)]
+
+
 def gate(run: Run, *, actor="orchestrator"):
     if actor != "orchestrator":
         raise HarnessError("Only the orchestrator accepts a result; owners submit ready_for_review")
@@ -554,45 +635,12 @@ def gate(run: Run, *, actor="orchestrator"):
         shared_errors, shared_receipts = _shared_scope_errors(run, state, contract)
         errors.extend(shared_errors)
         receipts.extend(shared_receipts)
-        for check in contract["checks"]:
-            path = _result_path(run, state, check["id"])
-            if not path.is_file():
-                if check["required"]:
-                    errors.append(f"required check missing: {check['id']}")
-                continue
-            result = read_json(path)
-            sha = result.pop("digest", None)
-            if digest(result) != sha:
-                errors.append(f"result integrity failed: {check['id']}")
-            result["digest"] = sha
-            for key, expected in {"run_id": contract["run_id"], "task_id": contract["task_id"], "lane_id": contract.get("lane_id"), "attempt_id": contract["attempt_id"], "check_id": check["id"], "kind": check["kind"], "contract_digest": state["contract_digest"], "candidate_digest": candidate["digest"]}.items():
-                if result.get(key) != expected:
-                    errors.append(f"wrong {key} in {check['id']}")
-            artifacts_errors = validate_artifacts(run, result)
-            artifacts_errors.extend(_unknown_artifacts(run, state, check["id"], result))
-            errors.extend(f"{check['id']}: {message}" for message in artifacts_errors)
-            passed_status = "passed" if check["kind"] == "command" else "satisfied"
-            if check["required"] and result.get("status") != passed_status:
-                errors.append(f"required check not satisfied: {check['id']} ({result.get('status')})")
-            if check["kind"] == "command":
-                if result.get("tools") != toolchains.get(check["id"]) or result.get("tools_after") != result.get("tools") or result.get("toolchain_digest") != state["toolchain_digest"]:
-                    errors.append(f"toolchain identity mismatch: {check['id']}")
-                if result.get("argv") != check["argv"] or result.get("cwd") != check.get("cwd", contract.get("cwd")) or result.get("timeout") != check["timeout"]:
-                    errors.append(f"runner command contract mismatch: {check['id']}")
-                if result.get("status") == "passed" and (result.get("exit_code") != check.get("expected_exit", 0) or result.get("input_before") != candidate["digest"] or result.get("input_after") != candidate["digest"]):
-                    errors.append(f"invalid command success: {check['id']}")
-                artifact_names = [Path(p["path"]).name for p in result.get("artifacts", [])]
-                if artifact_names.count("stdout.log") != 1 or artifact_names.count("stderr.log") != 1:
-                    errors.append(f"runner logs missing or duplicated: {check['id']}")
-            elif set(result.get("criteria", {})) != set(check["criteria"]) or not result.get("assessor") or not result.get("method") or not result.get("assessment"):
-                errors.append(f"typed assessment incomplete: {check['id']}")
-            receipts.append({"check_id": check["id"], "result_digest": sha, "status": result.get("status")})
+        check_errors, check_receipts = _check_evidence_errors(run, state, contract, candidate, toolchains)
+        errors.extend(check_errors)
+        receipts.extend(check_receipts)
         for dependency in contract.get("dependencies", []):
-            dependency_run = Run(dependency["run_dir"])
-            observed = dependency_run.status()
-            accepted = observed.get("accepted")
-            if not observed.get("evidence_current") or not accepted or accepted.get("verdict_digest") != dependency["verdict_digest"]:
-                errors.append(f"dependency not accepted/current: {dependency['run_dir']}")
+            dependency_errors = accepted_evidence_errors(Run(dependency["run_dir"]), dependency["verdict_digest"])
+            errors.extend(f"dependency not accepted/current: {dependency['run_dir']}: {message}" for message in dependency_errors)
         unresolved = [key for key, value in state.get("operations", {}).items() if value["status"] in {"planned", "unknown"}]
         if unresolved:
             errors.append("unknown operation outcomes: " + ", ".join(unresolved))

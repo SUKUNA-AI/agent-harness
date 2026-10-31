@@ -8,11 +8,12 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from agent_harness.core import HarnessError, Run, digest, snapshot
-from agent_harness.orchestration import brief, dispatch, next_wave, observe_capacity, repair_brief, validate_plan
-from agent_harness.runner import gate, run_check
+from agent_harness.core import HarnessError, Run, digest, file_hash, snapshot
+from agent_harness.orchestration import _conflict, _parent_binding, brief, dispatch, next_wave, observe_capacity, repair_brief, validate_plan
+from agent_harness.runner import accepted_evidence_errors, gate, run_check
 
 
 class OrchestrationTests(unittest.TestCase):
@@ -26,15 +27,21 @@ class OrchestrationTests(unittest.TestCase):
         for name in ("owner-a", "owner-b", "owner-c"):
             (self.base / name).mkdir()
         self.contract = {"schema_version": 1, "run_id": "orchestration-test", "task_id": "task", "attempt_id": "a1", "workflow": "change", "process_level": "coordinated", "goal": "Bounded test", "cwd": str(self.source), "permissions": ["read", "write", "test"], "scope": {"write_paths": ["a/**", "b/**", "c/**"], "protected_paths": ["a/private/**"]}, "checks": [{"id": "unit", "kind": "command", "required": True, "argv": [sys.executable, "-I", "-B", "-c", "print('real execution')"], "timeout": 10}], "budget": {"max_attempts": 3, "native_cap": 6, "root_counts": True, "native_cap_source": "test fixture, not actual native runtime"}}
-        self.plan = {"schema_version": 1, "plan_revision": 1, "contract_digest": digest(self.contract), "input_digest": snapshot(self.contract)["digest"], "nodes": [self.node("a"), self.node("b")]}
+        self.plan = {"schema_version": 1, "plan_revision": 1, "contract_digest": digest(self.contract), "input_digest": snapshot(self.contract)["digest"], "common_context": [self.context_ref()], "nodes": [self.node("a"), self.node("b")]}
         self.observation = {"complete": True, "source": "fixture observation, not actual native receipt", "observed_at": datetime.now(timezone.utc).isoformat(), "cap": 6, "root_ref": "root", "threads": [{"native_ref": "root", "status": "running"}]}
 
     def node(self, key):
-        return {"id": key, "role": "owner", "goal": "Deliver " + key, "cwd": str(self.base / ("owner-" + key)), "permissions": ["read", "write", "test"], "write_paths": [key + "/public/**"], "depends_on": [], "checks": ["unit"]}
+        return {"id": key, "role": "owner", "goal": "Deliver " + key, "cwd": str(self.base / ("owner-" + key)), "permissions": ["read", "write", "test"], "write_paths": [key + "/public/**"], "depends_on": [], "checks": ["unit"], "read_sections": [{**self.context_ref(), "sections": ["value definition"]}], "outputs": [{"path": str(self.base / ("owner-" + key) / key / "public/out.json"), "description": "Concrete verified output for " + key}]}
+
+    def context_ref(self):
+        return {"path": str(self.source / "main.py"), "sha256": file_hash(self.source / "main.py")}
 
     def refresh(self):
         self.plan["contract_digest"] = digest(self.contract)
         self.plan["input_digest"] = snapshot(self.contract)["digest"]
+        self.plan["common_context"] = [self.context_ref()]
+        for node in self.plan["nodes"]:
+            node["read_sections"] = [{**self.context_ref(), "sections": ["value definition"]}]
 
     def test_two_ready_owners_and_no_side_effects(self):
         before = snapshot(self.contract)
@@ -103,6 +110,7 @@ class OrchestrationTests(unittest.TestCase):
 
     def test_same_checkout_different_claims_serialized(self):
         self.plan["nodes"][1]["cwd"] = self.plan["nodes"][0]["cwd"]
+        self.plan["nodes"][1]["outputs"][0]["path"] = str(Path(self.plan["nodes"][0]["cwd"]) / "b/public/out.json")
         result = next_wave(self.plan, self.contract, self.observation)
         self.assertEqual("ownership_conflict", result["blocked"]["b"])
 
@@ -180,23 +188,143 @@ class OrchestrationTests(unittest.TestCase):
         result = next_wave(self.plan, self.contract, self.observation)
         self.assertEqual("dependency_not_accepted_current", result["blocked"]["b"])
 
-    def test_actual_accepted_dependency_then_stale(self):
+    def accepted_upstream(self, binding=None):
         upstream = self.base / "upstream"
         upstream.mkdir()
         (upstream / "file.txt").write_text("upstream\n", encoding="utf-8")
         contract = deepcopy(self.contract)
-        contract.update(cwd=str(upstream), run_id="upstream")
+        contract.update(cwd=str(upstream), run_id="upstream", lane_id="a", orchestration_binding=binding or _parent_binding(self.plan["nodes"][0], self.plan, self.contract))
         contract["scope"] = {"write_paths": ["**"]}
         run = Run.create(self.base / "upstream-run", contract)
         run.freeze()
         self.assertEqual("passed", run_check(run, "unit")["status"])
         accepted = gate(run)
         self.assertEqual("accepted", accepted["verdict"])
-        self.plan["nodes"][0].update(state="accepted", accepted_result={"run_dir": str(run.path), "verdict_digest": accepted["digest"]})
+        self.plan["nodes"][0].update(state="accepted", accepted_result={"run_dir": str(run.path), "verdict_digest": accepted["digest"]}, expected_child={"run_id": contract["run_id"], "task_id": contract["task_id"], "attempt_id": contract["attempt_id"], "contract_digest": digest(contract)})
         self.plan["nodes"][1]["depends_on"] = ["a"]
+        return run, upstream
+
+    def test_actual_accepted_dependency_then_stale(self):
+        run, upstream = self.accepted_upstream()
         self.assertEqual("b", next_wave(self.plan, self.contract, self.observation)["selected"][0]["node_id"])
+        folder = run.attempt_dir() / "checks/unit"
+        result_path = folder / "result.json"
+        original = result_path.read_bytes()
+        changed = json.loads(original)
+        changed.pop("digest")
+        changed["elapsed_seconds"] = 999
+        changed["digest"] = digest(changed)
+        result_path.write_text(json.dumps(changed), encoding="utf-8")
+        self.assertEqual("dependency_not_accepted_current", next_wave(self.plan, self.contract, self.observation)["blocked"]["b"])
+        result_path.write_bytes(original)
         (upstream / "file.txt").write_text("changed\n", encoding="utf-8")
         self.assertEqual("dependency_not_accepted_current", next_wave(self.plan, self.contract, self.observation)["blocked"]["b"])
+
+    def test_gate_dependency_uses_same_readonly_integrity_and_cycle_guard(self):
+        child, _ = self.accepted_upstream()
+        accepted = child.state()["accepted"]
+        contract = deepcopy(self.contract)
+        contract["dependencies"] = [{"run_dir": str(child.path), "verdict_digest": accepted["verdict_digest"]}]
+        parent = Run.create(self.base / "parent-run", contract)
+        parent.freeze()
+        self.assertEqual("passed", run_check(parent, "unit")["status"])
+        self.assertEqual("accepted", gate(parent)["verdict"])
+        next((child.attempt_dir() / "checks/unit").rglob("stdout.log")).write_text("tampered log", encoding="utf-8")
+        self.assertEqual("rejected", gate(parent)["verdict"])
+        self.assertEqual(["accepted dependency cycle"], accepted_evidence_errors(child, accepted["verdict_digest"], _ancestors=(str(child.path),)))
+    def test_dependency_missing_tampered_logs_results_toolchain_read_only(self):
+        run, _ = self.accepted_upstream()
+        state_before = run.state_path.read_bytes()
+        folder = run.attempt_dir() / "checks/unit"
+        for path in (next(folder.rglob("stdout.log")), next(folder.rglob("stderr.log")), folder / "result.json", run.attempt_dir() / "toolchains.json"):
+            original = path.read_bytes()
+            for mutation in ("missing", "tampered"):
+                with self.subTest(path=path.name, mutation=mutation):
+                    if mutation == "missing":
+                        path.unlink()
+                    else:
+                        path.write_bytes(original + b' altered')
+                    result = next_wave(self.plan, self.contract, self.observation)
+                    self.assertEqual("dependency_not_accepted_current", result["blocked"]["b"])
+                    self.assertEqual(state_before, run.state_path.read_bytes())
+                    path.write_bytes(original)
+        self.assertEqual("b", next_wave(self.plan, self.contract, self.observation)["selected"][0]["node_id"])
+
+    def test_dependency_expected_identity_and_current_parent_binding(self):
+        run, _ = self.accepted_upstream()
+        node = self.plan["nodes"][0]
+        original = deepcopy(node["expected_child"])
+        for key in ("run_id", "task_id", "attempt_id", "contract_digest"):
+            node["expected_child"][key] = "f" * 64 if key == "contract_digest" else "foreign"
+            self.assertEqual("dependency_not_accepted_current", next_wave(self.plan, self.contract, self.observation)["blocked"]["b"])
+            node["expected_child"] = deepcopy(original)
+        self.plan["plan_revision"] += 1
+        self.assertEqual("dependency_not_accepted_current", next_wave(self.plan, self.contract, self.observation)["blocked"]["b"])
+        self.plan["plan_revision"] -= 1
+        self.contract["attempt_id"] = "a2"
+        self.refresh()
+        self.assertEqual("dependency_not_accepted_current", next_wave(self.plan, self.contract, self.observation)["blocked"]["b"])
+
+    def test_accepted_foreign_node_binding_does_not_release(self):
+        binding = _parent_binding(self.plan["nodes"][0], self.plan, self.contract)
+        binding["node_id"] = "foreign"
+        self.accepted_upstream(binding=binding)
+        self.assertEqual("dependency_not_accepted_current", next_wave(self.plan, self.contract, self.observation)["blocked"]["b"])
+
+    def test_nested_cwd_absolute_claim_and_all_inventory_guards(self):
+        child = self.source / "src"
+        child.mkdir()
+        a, b = self.plan["nodes"]
+        a.update(cwd=str(self.source), write_paths=["src/agent_harness/**"], outputs=[{"path": str(self.source / "out-a.json"), "description": "a output"}])
+        b.update(cwd=str(child), write_paths=["agent_harness/**"], outputs=[{"path": str(child / "out-b.json"), "description": "b output"}])
+        self.contract["scope"] = {"write_paths": ["**"]}
+        self.refresh()
+        self.assertTrue(_conflict(a, b))
+        self.assertEqual("ownership_conflict", next_wave(self.plan, self.contract, self.observation)["blocked"]["b"])
+        self.observation["threads"].append({"native_ref": "external", "status": "idle", "write_cwd": str(self.source)})
+        self.assertEqual([], next_wave(self.plan, self.contract, self.observation)["selected"])
+        self.observation["threads"].append({"native_ref": "nested", "status": "idle", "write_cwd": str(child)})
+        with self.assertRaisesRegex(HarnessError, "checkout conflict"):
+            observe_capacity(self.observation, self.contract)
+
+    def test_sibling_cwds_in_one_actual_checkout_conflict(self):
+        root = self.base / "owner-a"
+        (root / ".git").mkdir()
+        (root / "one").mkdir()
+        (root / "two").mkdir()
+        left = {"cwd": str(root / "one"), "write_paths": ["left.py"]}
+        right = {"cwd": str(root / "two"), "write_paths": ["right.py"]}
+        self.assertTrue(_conflict(left, right))
+
+    def test_windows_case_alias_checkout_and_original_symlink_spelling(self):
+        a, b = deepcopy(self.plan["nodes"])
+        a["write_paths"], b["write_paths"] = ["one.py"], ["two.py"]
+        if os.name == "nt":
+            b["cwd"] = a["cwd"].upper()
+            self.assertTrue(_conflict(a, b))
+        self.contract["scope"] = {"write_paths": ["**"]}
+        self.refresh()
+        self.plan["nodes"][0]["write_paths"] = ["Src/Link/**"]
+        probed = []
+        def probe(path):
+            spelling = path.as_posix()
+            probed.append(spelling)
+            return spelling.endswith("/Src/Link")
+        with patch.object(Path, "is_symlink", probe), self.assertRaisesRegex(HarnessError, "Symlink"):
+            validate_plan(self.plan, self.contract)
+        self.assertTrue(any(p.endswith("/Src/Link") for p in probed))
+
+    def test_brief_context_reading_output_and_invalid_context(self):
+        text = brief(self.plan, self.contract, "a")
+        for value in (self.plan["common_context"][0]["path"], "value definition", self.plan["nodes"][0]["outputs"][0]["path"], "Concrete verified output for a"):
+            self.assertIn(value.replace("\\", "\\\\"), text)
+        self.plan["common_context"][0]["sha256"] = "0" * 64
+        with self.assertRaisesRegex(HarnessError, "hash is stale"):
+            validate_plan(self.plan, self.contract)
+        self.plan["common_context"] = [self.context_ref()]
+        self.plan["nodes"][0]["read_sections"] = []
+        with self.assertRaisesRegex(HarnessError, "read_sections"):
+            validate_plan(self.plan, self.contract)
 
     def test_duplicate_active_owner_and_unavailable_followup(self):
         for node in self.plan["nodes"]:
@@ -211,9 +339,13 @@ class OrchestrationTests(unittest.TestCase):
     def test_brief_deterministic_and_repair_same_owner_current(self):
         self.plan["nodes"][0]["native_ref"] = "owner-a"
         self.assertEqual(brief(self.plan, self.contract, "a"), brief(self.plan, self.contract, "a"))
-        packet = {"node_id": "a", "native_ref": "owner-a", "contract_digest": self.plan["contract_digest"], "candidate_digest": self.plan["input_digest"], "attempt_id": "a1", "check_id": "unit", "status": "failed", "log": "Observed check failed: assertion mismatch", "expected": "Check succeeds on current candidate"}
+        packet = {"node_id": "a", "plan_revision": 1, "native_ref": "owner-a", "contract_digest": self.plan["contract_digest"], "candidate_digest": self.plan["input_digest"], "attempt_id": "a1", "check_id": "unit", "status": "failed", "log": "Observed check failed: assertion mismatch", "expected": "Check succeeds on current candidate"}
         self.assertIn("safely update", repair_brief(self.plan, self.contract, "a", packet))
-        for field, wrong in (("native_ref", "someone-else"), ("candidate_digest", "0" * 64), ("attempt_id", "old"), ("check_id", "missing")):
+        repair = repair_brief(self.plan, self.contract, "a", packet)
+        self.assertIn("Common context:", repair)
+        self.assertIn("value definition", repair)
+        self.assertIn("Concrete verified output for a", repair)
+        for field, wrong in (("native_ref", "someone-else"), ("candidate_digest", "0" * 64), ("attempt_id", "old"), ("plan_revision", 99), ("check_id", "missing")):
             bad = {**packet, field: wrong}
             with self.subTest(field=field), self.assertRaises(HarnessError):
                 repair_brief(self.plan, self.contract, "a", bad)

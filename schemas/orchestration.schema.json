@@ -3,24 +3,28 @@
   "$id": "https://local.invalid/native-agent-harness/orchestration-v1",
   "title": "Read-only native orchestration plan, additive to contract-v1",
   "type": "object",
-  "required": ["schema_version", "plan_revision", "contract_digest", "input_digest", "nodes"],
+  "required": ["schema_version", "plan_revision", "contract_digest", "input_digest", "common_context", "nodes"],
   "properties": {
     "schema_version": {"const": 1},
     "plan_revision": {"type": "integer", "minimum": 1},
     "contract_digest": {"$ref": "#/$defs/sha"},
     "input_digest": {"$ref": "#/$defs/sha"},
+    "common_context": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/local_ref"}},
     "target_owners": {"type": "integer", "minimum": 2, "maximum": 3, "default": 2},
     "fallback_reason": {"enum": [null, "indivisible", "capacity", "native_unavailable", "user_constraint"]},
     "nodes": {
       "type": "array", "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["id", "role", "goal", "cwd", "permissions"],
+        "required": ["id", "role", "goal", "cwd", "permissions", "read_sections", "outputs"],
+        "dependentRequired": {"accepted_result": ["expected_child"]},
         "properties": {
           "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"},
           "role": {"enum": ["owner", "helper", "reviewer"]},
           "goal": {"type": "string", "minLength": 1},
           "cwd": {"type": "string", "description": "Existing absolute cwd; independent Git writers require isolated worktrees"},
+          "read_sections": {"type": "array", "minItems": 1, "items": {"allOf": [{"$ref": "#/$defs/local_ref"}, {"required": ["sections"], "properties": {"sections": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}}}]}},
+          "outputs": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["path", "description"], "properties": {"path": {"type": "string", "description": "Concrete absolute path within assigned cwd; may not exist yet"}, "description": {"type": "string", "minLength": 1}}}},
           "permissions": {"type": "array", "uniqueItems": true, "items": {"enum": ["read", "write", "test", "external"]}},
           "write_paths": {"type": "array", "items": {"type": "string", "description": "Relative exact path, ** or directory/**; conservative overlap checks"}},
           "depends_on": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
@@ -28,10 +32,14 @@
           "state": {"enum": ["planned", "running", "verifying", "ready_for_review", "accepted", "integrated", "blocked", "failed", "cancelled"], "default": "planned"},
           "native_ref": {"type": "string", "minLength": 1},
           "base_revision": {"type": "string", "description": "Observed Git base for this isolated worktree; context alone does not update it"},
-          "accepted_result": {"type": "object", "required": ["run_dir", "verdict_digest"], "properties": {"run_dir": {"type": "string"}, "verdict_digest": {"$ref": "#/$defs/sha"}}}
+          "accepted_result": {"type": "object", "required": ["run_dir", "verdict_digest"], "properties": {"run_dir": {"type": "string"}, "verdict_digest": {"$ref": "#/$defs/sha"}}},
+          "expected_child": {"type": "object", "required": ["run_id", "task_id", "attempt_id", "contract_digest"], "properties": {"run_id": {"type": "string", "minLength": 1}, "task_id": {"type": "string", "minLength": 1}, "attempt_id": {"type": "string", "minLength": 1}, "contract_digest": {"$ref": "#/$defs/sha"}}}
         }
       }
     }
   },
-  "$defs": {"sha": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+  "$defs": {
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "local_ref": {"type": "object", "required": ["path", "sha256"], "properties": {"path": {"type": "string", "description": "Existing absolute local file inside assigned workspace or explicitly declared contract input"}, "sha256": {"$ref": "#/$defs/sha"}}}
+  }
 }
