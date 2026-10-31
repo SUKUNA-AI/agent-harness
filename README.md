@@ -1,14 +1,54 @@
-# Agent Harness 1.1.0
+# Native Agent Harness 1.1.0
 
-Переносимые рабочие правила и детерминированные служебные команды для **локального Codex**. Оркестратор и исполнители — native агенты клиента; Python не вызывает LLM, не создаёт сервер и не заменяет Codex. Установленная глобальная политика выбирает глубину процесса под обычный запрос; простой вопрос не требует агентов или каталога запуска.
+Общая система работы в локальном Codex: постановка задачи, краткий план,
+полезная делегация, изолированные исполнители, проверка результата и восстановление
+контекста. Пользователь формулирует результат обычным сообщением; служебные
+контракты, брифы и команды готовит основной агент.
 
-Canonical policy: `policies/global.md`; workflows — условные процедуры; domains — отдельные адаптеры; проектные адаптеры подключаются отдельно; пути компьютера — machine overlay; приватные runs и backups находятся вне portable package. Версия политики и установщика — 1.1.0. Подтверждённый охват и фактические проверки описывает `docs/RELEASE_REVIEW.md`; этот README не является доказательством установки или поддержки ОС.
+Для содержательной задачи по умолчанию работают два native владельца; третий
+подключается при независимой части и доступной ёмкости. Короткие задачи идут
+напрямую. Неделимость, ограничения пользователя или нехватка native slots дают
+последовательный путь. Все потомки и idle/open refs учитываются вместе.
+Модель/provider и безопасность наследуются. Усилие координатора сохраняется;
+узкая механика — medium, содержательная реализация и ревью — high.
 
-В 1.1.0 усилие координатора сохраняется по явному выбору пользователя; native роли содержательной реализации и ревью используют `high`, узкий helper — `medium`. Для механической работы используйте helper либо встроенного агента с `medium`. Длительные команды ожидаются без частого опроса, после завершения проверяются журнал, код выхода и выходные файлы. Установщик по-прежнему не меняет общий model/reasoning: машинные значения по умолчанию настраиваются отдельно по запросу пользователя.
+```mermaid
+flowchart LR
+    U[Задача пользователя] --> R[Постановка и краткий план]
+    R -->|короткая задача| D[Прямое выполнение и проверка]
+    R -->|независимые части| P[Брифы и зависимости]
+    P --> A[Владелец 1]
+    P --> B[Владелец 2]
+    A --> I[Интеграция]
+    B --> I
+    I --> V[Независимая проверка]
+    V -->|исправление прежнему владельцу| P
+    V -->|актуальные доказательства| G[Итоговая приёмка]
+```
+
+## Состав
+
+| Компонент | Назначение |
+|---|---|
+| `policies/global.md`, `adapters/codex/bootstrap.md` | Общая политика и короткий автоматически подключаемый prompt |
+| `workflows/`, `roles/` | Процедуры исследования, реализации, review, документов, эксплуатации и recovery |
+| `src/agent_harness/`, `schemas/` | Contracts, snapshots, checks/evidence/gates, ledger, checkpoints и read-only DAG helpers |
+| `skills/` | Создание skills, экономия контекста, integrations и автоматическая orchestration |
+| `plugins/harness-assistant/` | Отдельный переносимый plugin с двумя самостоятельными skills |
+| `integrations/` | Маршрутизация tools, public docs MCP и пример локального read-only connector |
+| `profiles/` | Справочные пользовательские правила и настройки без credentials |
+| `provenance/` | Происхождение исходника и pinned реестр изученных upstream |
+
+Python не вызывает LLM и не создаёт native agents. Он детерминированно проверяет
+план/состояние и готовит briefs; spawn/follow-up выполняют штатные tools Codex.
+Файлы и worktrees обеспечивают координацию, а не отдельный OS sandbox.
 
 ## Установка
 
-Нужен Python 3.11+ (stdlib). Для native verify — установленный Codex. Git/Node/Go/браузеры нужны только соответствующим задачам. Распакуйте пакет в выбранный каталог; не переносите auth, credentials и чужую историю. В примерах `<package>`, `<codex-home>`, `<skills-home>` и `<private-state>` заменяет агент по обследованию, пользователь не обязан вести JSON вручную.
+Нужен Python 3.11+; ядро использует stdlib. Работайте из полного source checkout:
+wheel без policy/workflow assets не является самостоятельной поставкой.
+Ниже `<package>`, `<codex-home>`, `<skills-home>` и `<private-state>` заменяет
+агент по текущей среде. Private state хранится вне репозитория.
 
 ```text
 python <package>/tools/harness.py doctor --codex-home <codex-home> --state-dir <private-state>
@@ -17,29 +57,21 @@ python <package>/tools/harness.py install --codex-home <codex-home> --skills-hom
 python <package>/tools/harness.py verify --codex-home <codex-home> --skills-home <skills-home> --state-dir <private-state> --native --cwd <empty-project>
 ```
 
-Первый `install` — dry-run с точными paths, hashes и адресным diff; второй применяет уже проверенный план с backups/manifest. Только изменяемые файлы резервируются. Установщик сохраняет неизвестные ключи/комментарии TOML, старые инструкции и пользовательские роли. Меняются только `agents.enabled`, cap `agents.max_concurrent_threads_per_session` и отсутствующий `agents.interrupt_message`. Portable default — 4 дочерних thread; более строгий существующий cap и пользовательское `interrupt_message=false` сохраняются. `enabled=false`, неподдерживаемый inline/quoted agents table, невалидный TOML и совпадение имени чужой роли — blocker, без перезаписи. Sandbox/approval/model/provider/network/credentials не меняются.
+Первый install — dry-run с адресным diff; apply создаёт backups/manifest.
+Сохраняются неизвестные TOML keys, comments, пользовательский текст и чужие роли.
+Установщик управляет `agents.enabled`, cap и отсутствующим `interrupt_message`;
+model/provider/reasoning/security не меняет. Portable default cap — 4 children;
+существующий более строгий cap сохраняется. Явный `--max-child-threads N` адресно
+разрешает иной cap. Число логических направлений, target active owners и backend
+slots — разные значения; фактическую ёмкость наблюдают в текущем клиенте.
 
-Для явно разрешённого пользователем машинного лимита, например **пять дочерних потоков**, используйте `install --max-child-threads 5` сначала как dry-run, затем с `--apply`. Флаг принимает положительное целое и явно разрешает повышение cap. Желаемое значение сохраняется в machine overlay `preferred_native_child_cap`; plain reinstall не возвращает его к 4. Без флага последующий более строгий пользовательский cap не повышается. Лимит native children отличается от четырёх **логических направлений** и фактической ёмкости уже запущенного runtime; горячее изменение старых сессий не обещается. Несогласованный legacy `agents.max_threads` требует отдельного адресного разрешения alias, а не скрытой записи четвёртого config key.
-
-Непустой `AGENTS.override.md` имеет приоритет; иначе управляемый блок добавляется в `AGENTS.md`. Устанавливаются short bootstrap, machine pointer, три собственных standalone native role TOML и четыре skills: `agent-harness`, `harness-skill-creator`, `harness-token-economy`, `harness-integrations`. Полные логи, workflows, private project content не вкладываются в каждый prompt. По умолчанию CODEX_HOME берётся из environment или `~/.codex`; персональные skills — `~/.agents/skills`. Machine overlay можно задать через `--machine-overlay`; существующая schema 1 сохраняется. Настоящий private state необходимо выбрать явно на подходящем диске.
-
-`verify` без `--native` доказывает только структуру. Native verify запускает новый процесс штатного parser и `debug prompt-input`, подтверждает маркер политики в model input и сохраняет hashes вывода. Он не доказывает поведение desktop, discovery custom role, реальный spawn и успешную задачу — их проверяют отдельно. Новая политика не гарантирует hot reload старого чата. ChatGPT Work не читает эту локальную установку; граница описана в `adapters/chatgpt-work/README.md`. После установки doctor/verify/rollback/uninstall без `--state-dir` находят реальный каталог из installed pointer/overlay `installation_state`; расположение private state не предполагается соседним с package.
-
-## Повседневная работа
-
-Откройте новую сессию локального Codex и сформулируйте цель без стартового промпта:
-
-- «Исправь эту ошибку и проверь результат».
-- «Проверь этот PR, ничего не меняй».
-- «Сравни варианты по актуальным источникам и обоснуй выбор».
-- «Переведи приложенный раздел полностью, сохранив термины и формат».
-- «Помоги разобраться с заданием, пока без готового решения».
-
-Для продолжительной работы агент создаёт контракт/состояние и сообщает run reference. «Покажи статус этого run» читает состояние; «Останови этот run в безопасной точке» сохраняет checkpoint и согласованно останавливает свои процессы; «Продолжи выбранную задачу по сохранённому состоянию» сверяет реальные inputs, owners и неизвестные операции. Если подходящих runs несколько, агент предлагает выбор. Команды описаны в `docs/OPERATIONS.md` и `workflows/recovery.md`. Для пользователя терминал и ручные JSON не обязательны.
-
-## Обновление, перенос и удаление
-
-Перед обновлением измените версию политики/установщика согласованным diff, запустите tests и dry-run. Reinstall без изменения версии/файлов не создаёт дубликатов. Изменение управляемого участка пользователем вызывает конфликт; его правка не стирается. Backups и manifests остаются в private state, не коммитятся в переносимый пакет.
+Непустой `AGENTS.override.md` имеет приоритет над `AGENTS.md`. Ставятся managed
+bootstrap, machine pointer, три native роли и skills. Пути обновляются через
+installer/machine overlay. Одноимённые чужие skills или ручные изменения managed
+файлов вызывают конфликт без перезаписи. Если новый пакет удалил прежний owned
+skill/resource, обновление останавливается до явной миграции: старый активный
+skill не оставляется незаметно. Новая установка не гарантирует hot reload старого
+чата; локальные файлы не настраивают hosted ChatGPT Work.
 
 ```text
 python <package>/tools/harness.py rollback --state-dir <private-state>
@@ -48,55 +80,63 @@ python <package>/tools/harness.py uninstall --state-dir <private-state>
 python <package>/tools/harness.py uninstall --state-dir <private-state> --apply
 ```
 
-`rollback` отменяет последнюю установочную транзакцию, `uninstall` последовательно все сохранённые версии, сохраняя посторонние правки. Предварительно проверяется вся затронутая область и целостность backups; конфликт прекращает запись. Оба действия без `--apply` — dry-run. Не удаляются broad directories, репозитории, runs, неизвестные worktrees или процессы. Значимые пользовательские артефакты требуют отдельной политики очистки.
+Rollback/uninstall сначала проверяют всю транзакцию и backups. Чужие edits,
+репозитории, runs, процессы и файлы, созданные самим Codex, не удаляются.
 
-Перенос пакета: скопируйте только tracked portable package, запустите tests в новом расположении, укажите новый private state и выполните новую установку/verify. Исходники core не меняются. Абсолютные пути обновляются через overlay/installer. На Arch используйте доступный `python`/`python3` и штатные средства системы; не предполагайте apt, Bash на Windows или автоматический WSL. Выполнение тестов на Windows не подтверждает Arch — до реального прогона она unverified.
+## Повседневное использование
 
-## Проверки
+Примеры обычных запросов:
+
+- «Реализуй изменение и проверь конечный сценарий».
+- «Проверь этот PR, исходники не меняй».
+- «Исследуй варианты по актуальным первичным источникам».
+- «Подготовь документ полностью и проверь оформление».
+- «Покажи статус задачи» или «Продолжи по сохранённому checkpoint».
+
+Root сам определяет intent/scope, план, общие inputs, owners и достаточную
+приёмку. Review/plan/research не разрешают product edits. Внешние действия
+выполняются при действующем основании задачи; зелёные tests его не создают.
+Подробности: [orchestration](docs/ORCHESTRATION_RU.md),
+[операции](docs/OPERATIONS.md), [критерии приёмки](docs/ACCEPTANCE.md).
+
+## Plugin и бесплатный локальный MCP
+
+[Plugin](docs/PLUGIN_RU.md) можно установить отдельно через включённый marketplace.
+Он содержит самостоятельные coordination/status skills и не подменяет global
+bootstrap. Lifecycle hooks и автоматическое подключение аккаунтов отсутствуют.
+
+[Read-only MCP](docs/MCP_RU.md) предоставляет ограниченные metadata статусов из
+явно выбранного private store. Нет raw prompts, goals, файлов, логов, network
+или выполнения команд. Optional dependency — официальный `mcp==2.3.0`.
+Он не включается в live profile автоматически. [Другие integrations](integrations/README.md)
+подключаются по конкретной задаче после проверки уже доступных tools.
+
+## Готовые open source решения
+
+[Обзор](docs/ECOSYSTEM_RU.md) содержит source screening нескольких десятков
+репозиториев, pins, лицензии и решения по применимости. ECC/Superpowers полезны
+выборочными skills; Spec Kit/OpenSpec/GSD — проектными процессами; Worktrunk,
+Serena и browser tools — специализированными возможностями. Их source support
+не считается нашей runtime-проверкой. LangGraph/Langfuse не обязательны для
+нынешнего native control plane; rationale и ограничения приведены в обзоре.
+Отдельно разобраны [Claude-Mem и TokenEconomizer](docs/MEMORY_TOKENS_RU.md):
+native Codex support подтверждён исходниками, подготовлен conservative профиль
+оптимизатора без auto-prune; глобальная память и фоновые sidecalls не включены.
+
+## Проверки и доказательства
 
 ```text
-python -m unittest discover -s tests -v
-```
-
-При запуске из source checkout установите `PYTHONPATH=<package>/src` либо используйте изолированную editable install согласно `pyproject.toml`. Для fixtures используйте TEMP/TMP/TMPDIR на разрешённом диске. Tests проверяют runner/state/gate/install и отрицательные случаи; они не заменяют native runtime/behavioral probes. Матрица приёмки — `docs/ACCEPTANCE.md`.
-
-
-## Состав переносимой поставки 1.1.0
-
-- `adapters/codex/bootstrap.md` и `policies/global.md` — общий промпт и политика.
-- `workflows/`, `roles/`, `schemas/`, `src/`, `tools/`, `tests/` — процедуры и рабочее ядро.
-- `skills/` — создание skills, экономия ресурсов и выбор интеграций.
-- `integrations/` — каталог возможностей и шаблон наблюдений без credentials.
-- `profiles/` — безопасные примеры личных правил и настроек, применяются отдельно.
-- `provenance/source-snapshot.json` — хэши исходной 1.0.1 до экспортных правок.
-- `docs/RELEASE_REVIEW.md` — объём ревью и реально выполненные проверки.
-
-Это экспорт текущей 1.0.1 с незакоммиченными исправлениями, оформленный как 1.1.0:
-добавлены переносимые skills и их транзакционная установка. Убраны проектные
-адаптеры и локальная конфигурация окружения. Текущая установленная настройка
-исходного компьютера этим экспортом не изменялась.
-
-`harness-skill-creator` самодостаточен и может использовать штатный `$skill-creator`,
-если тот доступен. Системные skills OpenAI и сторонние плагины не копируются;
-skills для документов, браузера и т. п. подключаются по реальной задаче.
-
-Из source checkout проверки можно запускать без установки Python package:
-
-```text
-python tools/run_tests.py
 python tools/release_check.py
+python tools/run_tests.py
+python -m pip install "mcp==2.3.0"
+python -I -B tools/check_mcp.py
 ```
 
-Рекомендуемый способ использования — clone/source checkout, затем `tools/harness.py`.
-Wheel не является полной переносимой поставкой: policy/workflows остаются рядом
-с source. Архив или clone содержит весь комплект. Установка — сначала dry-run,
-затем `--apply` с явным private state вне checkout. Не копируйте пример TOML поверх
-своего config. Существующие одноимённые чужие skills вызывают конфликт; installer
-не принимает их во владение и не перезаписывает. Native verify и поведение агентов
-в новом профиле проверяются отдельно; автоматическая готовность всех интеграций
-или поддержка другой ОС этим выпуском не заявляется.
+CI запускает эти проверки на Windows/Ubuntu и Python 3.11/3.13. Наличие YAML не
+равно успешному запуску — сверяйте Actions конкретного commit. Реально выполненные
+проверки и ограничения: [RELEASE_REVIEW](docs/RELEASE_REVIEW.md).
+Tests не заменяют native/visual/runtime acceptance. Unknown/not_run/skipped
+не passed; ускорение и экономия токенов не объявляются без измерения.
 
-Если в новой версии удалён/переименован ранее установленный skill или его ресурс,
-reinstall и verify останавливаются: старый skill не должен оставаться активным
-незаметно. Проверьте dry-run uninstall старой установки и сохраните нужные ручные
-правки, затем выполните разрешённую миграцию. Пакет не удаляет такие файлы сам.
+Исходный snapshot 1.0.1 сохранён в provenance; проектные адаптеры, auth,
+machine state, приватные runs и история исходного Git в поставку не входят.

@@ -1331,6 +1331,80 @@
       "readme_url": "https://github.com/microsoft/playwright-cli/blob/faf6bc58769f524fb8f1c9c1e38e36c9c00cfc1b/README.md",
       "license_url": "https://github.com/microsoft/playwright-cli/blob/faf6bc58769f524fb8f1c9c1e38e36c9c00cfc1b/LICENSE",
       "extra_source_urls": []
+    },
+    {
+      "repository": "thedotmack/claude-mem",
+      "group": "planning_memory",
+      "url": "https://github.com/thedotmack/claude-mem",
+      "archived": false,
+      "fork": false,
+      "default_branch": "main",
+      "sha": "70aa40042cfb8157a0d84954b9c0d2b30b50af80",
+      "commit_date": "2026-10-30T18:19:15Z",
+      "pushed_at": "2026-10-31T08:56:15Z",
+      "stars_popularity_only": 107020,
+      "license_spdx": "Apache-2.0",
+      "license_name": "Apache License 2.0",
+      "latest_release": {
+        "tag_name": "v15.7.0",
+        "published_at": "2026-10-30T18:18:54Z",
+        "prerelease": false,
+        "draft": false,
+        "html_url": "https://github.com/thedotmack/claude-mem/releases/tag/v15.7.0"
+      },
+      "release_status": "published",
+      "runtime_status": "NOT_RUN",
+      "assessment_scope": "focused_source_review_NOT_RUNTIME_user_requested",
+      "classification": "native_codex_memory_observer",
+      "native_codex_fit": "Native plugin/hooks and Codex subscription observer exist; conditional isolated project pilot only",
+      "cost_boundary": "Codex observer shares existing ChatGPT allowance; no mandatory extra API key; optional hosted providers separate",
+      "caveat": "PostHog telemetry ON, redaction OFF, worker pool2; historical Codex ingestion OFF; defaults unsuitable for automatic live install",
+      "license_interpretation": "Apache-2.0",
+      "assessment_sources": [
+        "https://github.com/thedotmack/claude-mem/blob/70aa40042cfb8157a0d84954b9c0d2b30b50af80/README.md",
+        "https://github.com/thedotmack/claude-mem/blob/70aa40042cfb8157a0d84954b9c0d2b30b50af80/LICENSE",
+        "https://github.com/thedotmack/claude-mem/blob/70aa40042cfb8157a0d84954b9c0d2b30b50af80/docs/codex-provider.md"
+      ],
+      "readme_url": "https://github.com/thedotmack/claude-mem/blob/70aa40042cfb8157a0d84954b9c0d2b30b50af80/README.md",
+      "license_url": "https://github.com/thedotmack/claude-mem/blob/70aa40042cfb8157a0d84954b9c0d2b30b50af80/LICENSE",
+      "extra_source_urls": []
+    },
+    {
+      "repository": "microsoft/TokenEconomizer",
+      "group": "observability_evals",
+      "url": "https://github.com/microsoft/TokenEconomizer",
+      "archived": false,
+      "fork": false,
+      "default_branch": "main",
+      "sha": "e428fc91b0f8ffecb5a596d56b14fe2f1485a5f9",
+      "commit_date": "2026-10-30T23:30:09Z",
+      "pushed_at": "2026-10-31T00:09:32Z",
+      "stars_popularity_only": 2508,
+      "license_spdx": "Apache-2.0",
+      "license_name": "Apache License 2.0",
+      "latest_release": {
+        "tag_name": "v0.1.0",
+        "published_at": "2026-10-26T17:03:30Z",
+        "prerelease": false,
+        "draft": false,
+        "html_url": "https://github.com/microsoft/TokenEconomizer/releases/tag/v0.1.0"
+      },
+      "release_status": "published",
+      "runtime_status": "NOT_RUN",
+      "assessment_scope": "focused_source_review_NOT_RUNTIME_user_requested",
+      "classification": "native_codex_optimizer_plugin",
+      "native_codex_fit": "Native plugin/hooks/skills exist; no-extra-call ledger/envfacts with pruning off/propose preferred",
+      "cost_boundary": "stdlib plugin; optional judge/proposer subprocesses share signed-in agent plan/API; no quota expansion",
+      "caveat": "Pruning AUTO can disable collaboration/goals/image_media; generic toolprune_protect not confirmed in Codex branch; live not benchmark",
+      "license_interpretation": "Apache-2.0",
+      "assessment_sources": [
+        "https://github.com/microsoft/TokenEconomizer/blob/e428fc91b0f8ffecb5a596d56b14fe2f1485a5f9/README.md",
+        "https://github.com/microsoft/TokenEconomizer/blob/e428fc91b0f8ffecb5a596d56b14fe2f1485a5f9/LICENSE",
+        "https://github.com/microsoft/TokenEconomizer/blob/e428fc91b0f8ffecb5a596d56b14fe2f1485a5f9/docs/PLUGIN.md"
+      ],
+      "readme_url": "https://github.com/microsoft/TokenEconomizer/blob/e428fc91b0f8ffecb5a596d56b14fe2f1485a5f9/README.md",
+      "license_url": "https://github.com/microsoft/TokenEconomizer/blob/e428fc91b0f8ffecb5a596d56b14fe2f1485a5f9/LICENSE",
+      "extra_source_urls": []
     }
   ]
 }

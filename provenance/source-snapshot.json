@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "source_version": "1.0.1",
-  "release_version": "1.0.2",
+  "release_version": "1.1.0",
   "source_commit": "1c7aff3219372346b60fc9d2b9508c6e1ee511d7",
   "includes_working_tree_changes": true,
   "captured_date": "2026-10-31",
@@ -176,5 +176,6 @@
       "path": "workflows/review.md",
       "sha256": "c6bd4ede452075f10c6ba6f209b2c118b6607505df47f2a38060519cf3595be5"
     }
-  ]
+  ],
+  "base_export_commit": "6b260578649fadd6ecf4150573810d99bd63cfb6"
 }

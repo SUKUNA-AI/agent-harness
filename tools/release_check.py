@@ -80,7 +80,8 @@ def main():
                 dest = (path.parent / target.split("#")[0]).resolve()
                 if not dest.is_relative_to(ROOT) or not dest.exists():
                     errors.append(f"{rel}: broken/outside link {target}")
-    for path in sorted((ROOT / "skills").glob("*/SKILL.md")):
+    skills = sorted([*(ROOT / "skills").glob("*/SKILL.md"), *(ROOT / "plugins").glob("*/skills/*/SKILL.md")])
+    for path in skills:
         errors.extend(skill_errors(path))
     required = ["skills/harness-skill-creator/SKILL.md", "skills/harness-token-economy/SKILL.md", "skills/harness-integrations/SKILL.md", "integrations/README.md", "adapters/codex/SKILL.md", "policies/global.md"]
     errors.extend(f"missing {name}" for name in required if not (ROOT / name).is_file())
@@ -90,7 +91,7 @@ def main():
     project_version = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
     if len({__version__, VERSION, project_version}) != 1:
         errors.append("package/installer/project version mismatch")
-    print(json.dumps({"status": "failed" if errors else "passed", "files_checked": len(files), "skills_checked": len(list((ROOT / "skills").glob("*/SKILL.md"))), "errors": errors}, ensure_ascii=False, indent=2))
+    print(json.dumps({"status": "failed" if errors else "passed", "files_checked": len(files), "skills_checked": len(skills), "errors": errors}, ensure_ascii=False, indent=2))
     return int(bool(errors))
 
 

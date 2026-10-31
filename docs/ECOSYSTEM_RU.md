@@ -1,7 +1,7 @@
 # Готовые решения и выбор для общего harness
 
-Проверено 31.10.2026: **37 canonical GitHub repositories в 7 группах**. Для всех
-зафиксированы metadata, SHA и README; для 34 найдены root license snapshots.
+Проверено 31.10.2026: **39 canonical GitHub repositories в 7 группах**. Для всех
+зафиксированы metadata, SHA и README; для 36 найдены root license snapshots.
 Четыре harness и четыре смежных инструмента разобраны по профильным исходникам,
 остальные прошли screening. Это ограниченный обзор, не полный каталог GitHub и
 не результат запуска каждого продукта. Точные pins и источники —
@@ -20,6 +20,8 @@
 | [Beads](https://github.com/gastownhall/beads) | Граф задач, ready queue, долговременная память | Имеет смысл для большого backlog; наш ближайший план остаётся локальным и ограниченным |
 | [Serena](https://github.com/oraios/serena) | LSP/symbol tools для больших codebases, Codex CLI/App | Подключать под нужный язык; проверить license и language servers |
 | [Playwright CLI](https://github.com/microsoft/playwright-cli) | Browser CLI + skills без нового LLM engine | Подключать при браузерной задаче, если текущих tools недостаточно |
+| [Claude-Mem](https://github.com/thedotmack/claude-mem) | Native Codex memory и отдельный observer | [Project-private pilot и ограничения](MEMORY_TOKENS_RU.md); автоматически не установлен |
+| [TokenEconomizer](https://github.com/microsoft/TokenEconomizer) | Native plugin, учёт traces и оптимизация context/tools | [Профиль propose/off](MEMORY_TOKENS_RU.md) с сохранением collaboration; экономия у нас не измерена |
 
 Готовые решения существуют. Наш выбор — native Codex для исполнения, небольшое
 детерминированное ядро для состояния/плана/приёмки и opt-in внешние modules.
@@ -32,7 +34,7 @@
 - Старый `affaan-m/everything-claude-code` перенаправляет в ECC. Codex hooks
   требуют отдельного trust; default Chrome DevTools MCP и пример security
   settings нельзя считать нашими настройками. [Codex guide](https://github.com/affaan-m/ECC/blob/b38be6a7f6350964d59328b52f0624e1d1d552d1/.codex-plugin/README.md).
-- Исторический GSD archived и направляет в GSD Core. Для исследованной default branch
+- Исторический GSD archived и направляет в GSD Core. Исследованная default branch
   `next` совпадение с опубликованным release не проверено. Docs и package расходятся по
   минимальному Node; emitter/install надо проверять на выбранном pin.
   [package.json](https://github.com/open-gsd/gsd-core/blob/1ec5c812b79dc1cc487d0873d18b03449b11c106/package.json).
@@ -113,6 +115,8 @@ module → pin и просмотр конфигурации → изолиров
 | observability_evals | [confident-ai/deepeval](https://github.com/confident-ai/deepeval) | `90e230cbe916` | Apache-2.0 | README_and_license_screening |
 | agent_engines | [microsoft/agent-framework](https://github.com/microsoft/agent-framework) | `b7884ad88eb8` | MIT | README_and_license_screening |
 | mcp_servers | [microsoft/playwright-cli](https://github.com/microsoft/playwright-cli) | `faf6bc58769f` | Apache-2.0 | README_and_license_screening |
+| planning_memory | [thedotmack/claude-mem](https://github.com/thedotmack/claude-mem) | `70aa40042cfb` | Apache-2.0 | focused_source_review_NOT_RUNTIME_user_requested |
+| observability_evals | [microsoft/TokenEconomizer](https://github.com/microsoft/TokenEconomizer) | `e428fc91b0f8` | Apache-2.0 | focused_source_review_NOT_RUNTIME_user_requested |
 
 Исходные installation/runtime/Windows/WSL проверки этих upstream не запускались.
 Публикуемый реестр не содержит private paths, auth, исходных transcript или raw logs.
