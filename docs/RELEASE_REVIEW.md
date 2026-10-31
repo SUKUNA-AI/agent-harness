@@ -17,6 +17,7 @@
 | Plugin native install/discovery | Codex 0.166.0-alpha.5.1, отдельные homes; portable manifest и compatibility-only fallback; два skills обнаружены |
 | CLI install/reinstall/uninstall | Отдельный пустой профиль; dry-run без targets, повторный план пустой, все harness-owned targets сняты при uninstall |
 | CLI native verify 1.1 | Новый parser и prompt-input: marker политики найден, `native_input_verified` |
+| Глобальное подключение в новых cwd | Три свежих Windows CLI prompt-input: empty, Git project AGENTS, другой project с nested override; общий marker 1.1.0, пять skills и три роли присутствуют, глобальные файлы не изменены; модельные ходы не запускались |
 | Независимое review | Policy, source claims, installer migration, orchestration, adjacent gate, MCP, plugin и memory/token profiles проверены; подтверждённые findings исправлены и повторно рассмотрены |
 | Portable release audit | JSON/TOML, metadata всех шести authored skills, относительные Markdown links, версии, portable/private exclusions и ограниченный secret-pattern scan |
 
@@ -64,6 +65,8 @@ Arch/macOS не квалифицирована.
 это отдельный объём наблюдения, не гарантия поведения всех будущих запросов.
 Local policy не настраивает hosted Work, не гарантирует hot reload старого чата
 и не обещает работу после закрытия приложения.
+Глобальная загрузка по разным cwd и приоритеты инструкций отдельно описаны в
+[AUTOLOAD_RU](AUTOLOAD_RU.md). Вызов harness в каждом новом проекте не требуется.
 
 Live MCP attachment и внешние accounts не подключены. Claude-Mem,
 TokenEconomizer и прочие upstream прошли source screening, не runtime pilot.
