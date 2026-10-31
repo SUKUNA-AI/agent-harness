@@ -10,6 +10,7 @@
 | Объект | Результат и граница |
 |---|---|
 | Полная интегрированная suite | **138 tests, OK, 0 skipped**, Windows / Python 3.13; `python tools/run_tests.py` |
+| Linux core suite | **138 tests, OK, 1 skipped**, Arch Linux / WSL2 / Python 3.14.7; skipped относится к Windows containment; это не native-квалификация клиента Linux |
 | Orchestration repair | 31 targeted tests и 55 core regressions прошли; затем включены в общий прогон |
 | MCP + plugin unit checks | 17 tests прошли без SDK и без skipped cases |
 | Actual MCP protocol | Официальный SDK 2.3.0, stdio, protocol 2026-07-28; два tools, два успешных и один отрицательный вызов; private fixture не изменена |
@@ -48,7 +49,14 @@ private visibility, совпадение remote/local/canonical heads, Actions �
 
 CI задан для Windows/Ubuntu и Python 3.11/3.13: stdlib suite, release audit и
 actual SDK smoke. Platform-specific Windows containment test на другой ОС не
-подтверждается и должен оставаться явно skipped. Arch/macOS не квалифицированы.
+подтверждается и должен оставаться явно skipped. Полная native-установка на
+Arch/macOS не квалифицирована.
+
+Для commit `cd9bec34fe04d5db568a7b87cd393ba052245444` все четыре jobs
+[Actions run](https://github.com/SUKUNA-AI/agent-harness/actions/runs/41202240868)
+не стартовали: GitHub сообщил о failed account payments или spending limit.
+Это ограничение биллинга аккаунта, не провал выполненного теста. GitHub CI
+остаётся **NOT RUN**; локальные Windows/Linux результаты не подменяют этот gate.
 
 Полный fresh-session native auto-spawn/repair/recovery benchmark этой версии
 не выполнялся. В текущем чате наблюдалась реальная работа native owners в двух
@@ -59,6 +67,9 @@ Local policy не настраивает hosted Work, не гарантируе�
 
 Live MCP attachment и внешние accounts не подключены. Claude-Mem,
 TokenEconomizer и прочие upstream прошли source screening, не runtime pilot.
+Переносимый main не содержит Claude-Mem bridge/router/importer. Их отдельный
+эксперимент отменён пользователем до интеграции; БД, импорт истории и фоновые
+службы не входят в установку.
 Экономия токенов/ускорение не измерены. Summaries и metadata не заменяют primary
 evidence. Secret scan ограничен известными patterns; это не доказательство
 отсутствия любого возможного секрета или OS sandbox для недоверенного кода.

@@ -1,11 +1,11 @@
-# Справочный профиль наблюдённой настройки 2026-10-31, НЕ замена config.toml.
-# Применять отдельные значения только по запросу, после проверки schema клиента.
-model_reasoning_effort = "xhigh"
+# Переносимый пример, НЕ замена config.toml. Без путей, секретов и MCP.
+# Model/provider/reasoning/security сохраняются из текущего профиля устройства.
+# Применять отдельные значения после проверки schema установленного клиента.
 
 [agents]
 default_subagent_reasoning_effort = "medium"
 enabled = true
-max_concurrent_threads_per_session = 5
+max_concurrent_threads_per_session = 4
 interrupt_message = true
 
 # cap в файле не гарантирует runtime slots. Installer по умолчанию сохраняет
