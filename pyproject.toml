@@ -9,6 +9,9 @@ description = "Deterministic state, verification and installation tools for nati
 requires-python = ">=3.11"
 dependencies = []
 
+[project.optional-dependencies]
+mcp = ["mcp==2.3.0"]
+
 [project.scripts]
 agent-harness = "agent_harness.cli:main"
 

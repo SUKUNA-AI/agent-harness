@@ -1,0 +1,7 @@
+# Opt-in only. Use the Python executable of a dedicated venv containing .[mcp].
+# Replace the store placeholder with ONE existing absolute private run-store path.
+# Copy this section intentionally; it neither installs nor enables other services.
+[mcp_servers.harness_runs]
+command = "python"
+args = ["-I", "-B", "-m", "agent_harness.mcp_server", "--store", "/path/to/private/run-store"]
+enabled_tools = ["list_runs", "run_status"]

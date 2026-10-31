@@ -1,0 +1,21 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "harness-assistant",
+  "version": "1.1.0",
+  "description": "Proportionate task coordination and honest run status for local Codex.",
+  "author": {"name": "Agent Harness contributors"},
+  "keywords": ["coordination", "verification", "run-status"],
+  "extensions": {
+    "com.openai": {
+      "hooks": {},
+      "interface": {
+        "displayName": "Harness Assistant",
+        "shortDescription": "Постановка задач, координация и статус запусков",
+        "developerName": "Agent Harness contributors",
+        "category": "Productivity",
+        "capabilities": ["Read", "Write"],
+        "defaultPrompt": ["Сформулируй результат и организуй выполнение этой задачи.", "Покажи подтверждённый статус моего запуска."]
+      }
+    }
+  }
+}
