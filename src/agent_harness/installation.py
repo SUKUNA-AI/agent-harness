@@ -12,13 +12,14 @@ from pathlib import Path
 import platform
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import tomllib
 import uuid
 
-VERSION = "1.1.1"
+VERSION = "1.2.0"
 START = "<!-- agent-harness:begin -->"
 END = "<!-- agent-harness:end -->"
 AUTO_COMPACT_TOKEN_LIMIT = 500000
@@ -29,6 +30,12 @@ SENSITIVE = re.compile(r"(?i)(token|secret|password|credential|authorization|api
 
 class InstallError(ValueError):
     pass
+
+
+class RollbackError(InstallError):
+    def __init__(self, report: dict):
+        super().__init__(report["error"])
+        self.report = report
 
 
 def digest(data: bytes) -> str:
@@ -47,7 +54,24 @@ def encode_like(text: str, original: bytes | None) -> bytes:
     return text.encode("utf-8-sig" if original and original.startswith(b"\xef\xbb\xbf") else "utf-8")
 
 
+def regular_target(path: Path) -> None:
+    """Never replace a link/special file with a regular file byte backup.
+
+    lstat also detects dangling links. Windows reparse attributes cover junctions
+    and other link-like entries on Python versions without Path.is_junction.
+    """
+    try:
+        observed = path.lstat()
+    except FileNotFoundError:
+        return
+    if stat.S_ISLNK(observed.st_mode) or getattr(observed, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400):
+        raise InstallError(f"Unsupported symlink/reparse installation target; no link replaced: {path}")
+    if not stat.S_ISREG(observed.st_mode):
+        raise InstallError(f"Installation target is not a regular file: {path}")
+
+
 def atomic(path: Path, data: bytes) -> None:
+    regular_target(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, name = tempfile.mkstemp(prefix=".harness-", dir=path.parent)
     try:
@@ -55,6 +79,7 @@ def atomic(path: Path, data: bytes) -> None:
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
+        regular_target(path)
         if path.exists():
             os.chmod(name, path.stat().st_mode)
         os.replace(name, path)
@@ -411,6 +436,8 @@ def manifest_chain(manifest: dict | None) -> list[dict]:
 def plan(package: Path, home: Path, skills: Path, state: Path, overlay: Path, max_child_threads: int | None = None) -> list[dict]:
     if not (package / "policies/global.md").is_file() or not (package / "tools/harness.py").is_file():
         raise InstallError("Package policy or executable entrypoint missing")
+    for target in (home / "config.toml", selected_instructions(home), overlay, state / "active.json"):
+        regular_target(target)
     old_active = active_manifest(state)
     if old_active is None and ((home / "harness-machine.json").exists() or managed_block(decode(read(selected_instructions(home))))):
         raise InstallError(
@@ -425,6 +452,7 @@ def plan(package: Path, home: Path, skills: Path, state: Path, overlay: Path, ma
     plans = []
     desired = set()
     def add(path: Path, new: bytes, kind: str, meta: dict | None = None):
+        regular_target(path)
         desired.add(str(path))
         old = read(path)
         if kind == "owned" and old is not None:
@@ -512,6 +540,7 @@ def plan(package: Path, home: Path, skills: Path, state: Path, overlay: Path, ma
 
 
 def apply_plan(plans: list[dict], state: Path, package: Path) -> dict:
+    regular_target(state / "active.json")
     previous = active_manifest(state)
     previous_ref = read(state / "active.json")
     if not plans:
@@ -523,6 +552,7 @@ def apply_plan(plans: list[dict], state: Path, package: Path) -> dict:
     transaction.mkdir(parents=True)
     files = []
     for i, p in enumerate(plans):
+        regular_target(p["path"])
         if read(p["path"]) != p["before"]:
             raise InstallError(f"Concurrent edit before installation: {p['path']}")
         backup = transaction / f"{i:02d}.before"
@@ -538,6 +568,7 @@ def apply_plan(plans: list[dict], state: Path, package: Path) -> dict:
     new_ref = None
     try:
         for p in plans:
+            regular_target(p["path"])
             if read(p["path"]) != p["before"]:
                 raise InstallError(f"Concurrent edit while installing: {p['path']}")
             # Track even an atomic implementation which commits then raises.
@@ -554,15 +585,17 @@ def apply_plan(plans: list[dict], state: Path, package: Path) -> dict:
         # The pointer is part of the transaction, too. Never overwrite a ref
         # which an external writer changed to something other than our value.
         try:
+            regular_target(state / "active.json")
             if new_ref is not None and read(state / "active.json") == new_ref:
                 if previous_ref is None:
                     (state / "active.json").unlink()
                 else:
                     atomic(state / "active.json", previous_ref)
-        except OSError:
+        except (OSError, InstallError):
             recovery_errors.append("active manifest pointer")
         for p in reversed(written):
             try:
+                regular_target(p["path"])
                 current = read(p["path"])
                 if current == p["after"]:
                     if p["before"] is None:
@@ -571,12 +604,12 @@ def apply_plan(plans: list[dict], state: Path, package: Path) -> dict:
                         atomic(p["path"], p["before"])
                 elif current != p["before"]:
                     recovery_errors.append(str(p["path"]) + " (concurrent edit preserved)")
-            except OSError:
+            except (OSError, InstallError):
                 recovery_errors.append(str(p["path"]))
         manifest["status"] = "failed_recovery_required" if recovery_errors else "failed_restored_unchanged_targets"
         try:
             atomic(manifest_path, canonical(manifest))
-        except OSError:
+        except (OSError, InstallError):
             recovery_errors.append("transaction status")
         if recovery_errors:
             raise InstallError(
@@ -591,6 +624,7 @@ def rollback_plan(manifest: dict, current_files: dict | None = None) -> list[dic
     plans = []
     for p in reversed(manifest["files"]):
         path = Path(p["path"])
+        regular_target(path)
         current = current_files.get(str(path), read(path)) if current_files is not None else read(path)
         installed = Path(p["installed_copy"]).read_bytes()
         before = Path(p["backup"]).read_bytes() if p["backup"] else None
@@ -622,6 +656,109 @@ def rollback_plan(manifest: dict, current_files: dict | None = None) -> list[dic
             raise InstallError(f"Rollback conflict: manually modified {path}; no file overwritten")
         plans.append({"path": path, "before": current, "after": new, "kind": p["kind"]})
     return plans
+
+
+def apply_rollback(plans: list[dict], state: Path, manifest: dict, source_ref: dict, command: str, active_before: bytes | None) -> dict:
+    """Journal rollback writes and compensate only bytes still owned by this attempt.
+
+    The installer lock coordinates harness writers. Per-target guards detect
+    intervening external edits; they are not filesystem CAS against an editor.
+    """
+    pointer = state / "active.json"
+    regular_target(pointer)
+    if read(pointer) != active_before:
+        raise InstallError("Concurrent edit to the active installation reference before rollback")
+    previous = None if command == "uninstall" else manifest.get("previous_manifest")
+    next_ref = canonical(previous) if previous else None
+    changes = [dict(p) for p in plans]
+    changes.append({"path": pointer, "before": active_before, "after": next_ref, "kind": "active_pointer"})
+    # Reject unsupported object types and stale plans before changing any target.
+    for p in changes:
+        regular_target(p["path"])
+        if read(p["path"]) != p["before"]:
+            raise InstallError(f"Concurrent edit before rollback: {p['path']}")
+    if not plans and active_before == next_ref:
+        return {"status": "rolled_back", "files_changed": 0, "preserved_user_edits": True}
+
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
+    transaction = state / "rollbacks" / stamp
+    transaction.mkdir(parents=True)
+    rows = []
+    for i, p in enumerate(changes):
+        row = {"path": str(p["path"]), "kind": p.get("kind", "target"), "progress": "pending"}
+        for label in ("before", "after"):
+            data = p[label]
+            copy = transaction / f"{i:02d}.{label}"
+            if data is not None:
+                atomic(copy, data)
+            row[label + "_copy"] = str(copy) if data is not None else None
+            row[label + "_sha256"] = digest(data) if data is not None else None
+        rows.append(row)
+    journal = {"schema_version": 1, "operation": command, "status": "prepared", "source_manifest": source_ref, "files": rows}
+    journal_path = transaction / "manifest.json"
+    atomic(journal_path, canonical(journal))
+
+    def write_target(path: Path, data: bytes | None) -> None:
+        regular_target(path)
+        if data is None:
+            path.unlink(missing_ok=True)
+        else:
+            atomic(path, data)
+
+    attempted = []
+    try:
+        journal["status"] = "applying"
+        for i, p in enumerate(changes):
+            rows[i]["progress"] = "started"
+            atomic(journal_path, canonical(journal))
+            regular_target(p["path"])
+            if read(p["path"]) != p["before"]:
+                rows[i]["progress"] = "concurrent_edit_preserved"
+                raise InstallError(f"Concurrent edit while rolling back; user edit preserved: {p['path']}")
+            # A write/unlink may commit and then raise, so include it in recovery.
+            attempted.append(i)
+            if p["before"] != p["after"]:
+                write_target(p["path"], p["after"])
+            rows[i]["progress"] = "applied"
+            atomic(journal_path, canonical(journal))
+        journal["status"] = "rolled_back"
+        atomic(journal_path, canonical(journal))
+    except BaseException as original_error:
+        recovery_errors = []
+        for i in reversed(attempted):
+            p = changes[i]
+            try:
+                regular_target(p["path"])
+                current = read(p["path"])
+                if current == p["before"]:
+                    rows[i]["progress"] = "restored"
+                elif current == p["after"]:
+                    write_target(p["path"], p["before"])
+                    rows[i]["progress"] = "restored"
+                else:
+                    rows[i]["progress"] = "concurrent_edit_preserved"
+                    recovery_errors.append({"path": str(p["path"]), "reason": "concurrent_edit_preserved"})
+            except (OSError, InstallError) as error:
+                rows[i]["progress"] = "recovery_required"
+                recovery_errors.append({"path": str(p["path"]), "reason": type(error).__name__})
+        journal["status"] = "rollback_failed_recovery_required" if recovery_errors else "rollback_failed_compensated"
+        journal["error_type"] = type(original_error).__name__
+        journal["recovery_errors"] = recovery_errors
+        try:
+            atomic(journal_path, canonical(journal))
+        except (OSError, InstallError) as error:
+            recovery_errors.append({"path": str(journal_path), "reason": "recovery_progress_unrecorded", "error_type": type(error).__name__})
+        report = {
+            "status": "rollback_failed_recovery_required" if recovery_errors else "rollback_failed_compensated",
+            "error": str(original_error), "journal": str(journal_path), "source_manifest": source_ref,
+            "files_attempted": sum(changes[i].get("kind") != "active_pointer" for i in attempted),
+            "recovery_required": bool(recovery_errors), "recovery_errors": recovery_errors,
+            "recovery": "Inspect the journal and reconcile listed conflicts before retrying the original command with --manifest and --state-dir. Backups describe this attempt's pre-rollback bytes.",
+        }
+        if not isinstance(original_error, Exception):
+            raise
+        raise RollbackError(report) from original_error
+    return {"status": "rolled_back", "files_changed": len(plans), "preserved_user_edits": True, "journal": str(journal_path)}
 
 
 def verify(package: Path, home: Path, skills: Path, state: Path, native: bool = False, cwd: Path | None = None) -> dict:
@@ -806,12 +943,20 @@ def dispatch(command: str, argv: list[str]) -> int:
                 result = apply_plan(planned, state, package) if args.apply else preview
         elif command in ("rollback", "uninstall"):
             with lock(state):
+                regular_target(state / "active.json")
+                active_before = read(state / "active.json")
                 if args.manifest:
-                    manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
+                    source_path = args.manifest.resolve()
+                    source_data = source_path.read_bytes()
+                    manifest = json.loads(source_data)
+                    source_ref = {"manifest": str(source_path), "sha256": digest(source_data)}
                 else:
                     manifest = active_manifest(state)
+                    source_ref = json.loads(active_before) if manifest and active_before is not None else None
                 if not manifest:
                     raise InstallError("No active installation manifest; nothing removed")
+                if read(state / "active.json") != active_before:
+                    raise InstallError("Concurrent edit to the active installation reference while planning rollback")
                 planned = rollback_plan(manifest)
                 if command == "uninstall":
                     virtual = {}
@@ -819,30 +964,18 @@ def dispatch(command: str, argv: list[str]) -> int:
                     for previous in manifest_chain(manifest):
                         for p in rollback_plan(previous, virtual):
                             key = str(p["path"])
-                            initial.setdefault(key, read(p["path"]))
+                            # Keep the exact bytes used to derive this rollback;
+                            # a fresh read could silently adopt an intervening edit.
+                            initial.setdefault(key, p["before"])
                             virtual[key] = p["after"]
                     planned = [{"path": Path(p), "before": initial[p], "after": value} for p, value in virtual.items() if initial[p] != value]
                 result = {"status": "rollback_dry_run", "changes": [{"path": str(p["path"]), "remove": p["after"] is None, "diff": redacted_diff(p["path"], p["before"], p["after"] or b"")} for p in planned]}
                 if args.apply:
-                    # Entire transaction is preflighted before any write.
-                    for p in planned:
-                        if read(p["path"]) != p["before"]:
-                            raise InstallError(f"Concurrent edit before rollback: {p['path']}")
-                    for p in planned:
-                        if p["after"] is None:
-                            p["path"].unlink()
-                        else:
-                            atomic(p["path"], p["after"])
-                    previous = None if command == "uninstall" else manifest.get("previous_manifest")
-                    if previous:
-                        atomic(state / "active.json", canonical(previous))
-                    else:
-                        (state / "active.json").unlink(missing_ok=True)
-                    result = {"status": "rolled_back", "files_changed": len(planned), "preserved_user_edits": True}
+                    result = apply_rollback(planned, state, manifest, source_ref, command, active_before)
         else:
             raise InstallError(f"Unknown install command {command}")
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 1 if result.get("status") == "failed" else 0
     except (InstallError, OSError, ValueError, KeyError) as ex:
-        print(json.dumps({"status": "blocked", "error": str(ex)}, ensure_ascii=False))
+        print(json.dumps(ex.report if isinstance(ex, RollbackError) else {"status": "blocked", "error": str(ex)}, ensure_ascii=False))
         return 2

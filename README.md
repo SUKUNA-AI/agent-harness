@@ -1,4 +1,7 @@
-# Native Agent Harness 1.1.1
+# Native Agent Harness 1.2.0
+
+[Исправления и проверка 1.2.0](docs/REVIEW_1_2_0.md): корректность приёмки,
+rollback, независимое ревью, файловый контекст и измеренные локальные оптимизации.
 
 [Предыдущий релиз v1.1.0](https://github.com/SUKUNA-AI/agent-harness/releases/tag/v1.1.0)
 · [История изменений](CHANGELOG.md) · [Автоподключение](docs/AUTOLOAD_RU.md)
@@ -41,6 +44,11 @@ flowchart LR
 ```
 
 ## Состав
+
+Выбранные механизмы long-running agents, Playwright, файловой wiki и bounded
+experiments описаны в [практиках развития](docs/SELECTED_PATTERNS_RU.md).
+Локальные source packets: `agent-harness context --help`. Они не требуют БД,
+сети, нового agent runtime или установки eval frameworks.
 
 | Компонент | Назначение |
 |---|---|

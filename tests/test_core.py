@@ -55,7 +55,7 @@ class CoreIntegrationTests(unittest.TestCase):
         self.assertIn("Python", evidence["tools"]["python"]["version"])
         self.assertEqual(evidence["input_before"], evidence["input_after"])
         self.assertEqual("accepted", gate(run)["verdict"])
-        self.assertTrue(run.status()["evidence_current"])
+        self.assertTrue(run.status(verify_evidence=True)["evidence_current"])
 
     def test_nonzero_exit_is_failed(self):
         self.contract["checks"][0]["argv"][-1] = "import sys; print('one real case'); sys.exit(7)"

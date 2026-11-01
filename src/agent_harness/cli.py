@@ -24,10 +24,14 @@ def main(argv=None):
     if argv and argv[0] == "plan":
         from .orchestration import dispatch
         return dispatch(argv[1:])
+    if argv and argv[0] == "context":
+        from .context import dispatch
+        return dispatch(argv[1:])
     parser = argparse.ArgumentParser(description="Native Codex harness: state and verification, never a second agent engine")
     parser.add_argument("--version", action="version", version=__version__)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("plan", help="Read-only orchestration helpers; use plan --help")
+    commands.add_parser("context", help="Bounded local source packets; use context --help")
     for name in ("init", "attempt"):
         p = commands.add_parser(name)
         p.add_argument("--run-dir", required=True)
@@ -37,6 +41,8 @@ def main(argv=None):
     for name in ("freeze", "gate", "status", "resume", "capacity"):
         p = commands.add_parser(name)
         p.add_argument("--run-dir", required=True)
+        if name == "status":
+            p.add_argument("--verify-evidence", action="store_true", help="Read-only source, verdict and artifact validation")
     p = commands.add_parser("check")
     p.add_argument("--run-dir", required=True)
     p.add_argument("--check", required=True)
@@ -87,7 +93,7 @@ def main(argv=None):
             elif args.command == "resume":
                 result = run.resume()
             elif args.command == "status":
-                result = run.status()
+                result = run.status(verify_evidence=args.verify_evidence)
             elif args.command == "capacity":
                 result = run.capacity()
             elif args.command == "operation":
@@ -108,6 +114,8 @@ def main(argv=None):
             return 0 if result.get("verdict") == "accepted" else 1
         if args.command == "resume":
             return 0 if result.get("safe_to_start_new_owner") else 1
+        if args.command == "status" and args.verify_evidence:
+            return 0 if result.get("evidence_current") is True else 1
         return 0
     except (HarnessError, ValueError, OSError, KeyError) as error:
         print(json.dumps({"error": str(error), "type": type(error).__name__}, ensure_ascii=False), file=sys.stderr)

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "purpose": "Offline experiment planning template; not an execution grant",
+  "hypothesis": "",
+  "baseline_revision": "",
+  "candidate_revision": "",
+  "evaluator_sha256": "",
+  "development_cases": [],
+  "holdout_cases": [],
+  "budget": {"max_candidates": 2, "max_trials": 12, "deadline": "", "paid_runs_authorized": false},
+  "controls": {"model": "preserve", "provider": "preserve", "effort": "preserve", "permissions": "preserve", "auto_compact_token_limit": 500000},
+  "primary_metric": "verified task success under fixed acceptance criteria",
+  "secondary_metrics": ["wall_seconds", "tool_calls", "tokens_if_observed"],
+  "decision": "not_run",
+  "evidence": []
+}

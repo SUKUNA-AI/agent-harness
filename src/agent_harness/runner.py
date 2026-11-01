@@ -267,6 +267,7 @@ def _verify_assertions(check, stdout, stderr, report_paths):
                 root = ET.parse(path).getroot()
                 cases = list(root.iter("testcase"))
                 names = [f"{case.get('classname', '')}::{case.get('name', '')}" for case in cases]
+                passed_names = [name for name, case in zip(names, cases) if all(case.find(tag) is None for tag in ("skipped", "failure", "error"))]
                 skipped = sum(case.find("skipped") is not None for case in cases)
                 failed = sum(case.find("failure") is not None or case.find("error") is not None for case in cases)
                 report = {"format": "junit", "cases": names, "tests": len(cases), "skipped": skipped, "failed": failed}
@@ -279,6 +280,8 @@ def _verify_assertions(check, stdout, stderr, report_paths):
                 for expected in definition.get("required_cases", []):
                     if not any(re.search(expected, name) for name in names):
                         errors.append(f"mandatory case missing: {expected}")
+                    elif not any(re.search(expected, name) for name in passed_names):
+                        errors.append(f"mandatory case did not pass: {expected}")
                 reports.append(report)
             elif definition["format"] == "json":
                 value = read_json(path)
@@ -298,19 +301,65 @@ def _verify_assertions(check, stdout, stderr, report_paths):
     return errors, reports
 
 
-def _versions(check):
+def _executable(command, cwd):
+    # POSIX exec searches relative paths after chdir. Windows Popen uses the
+    # parent's search context even when the child has a different cwd.
+    resolution_cwd = Path.cwd() if os.name == "nt" else Path(cwd)
+    if os.path.dirname(command):
+        executable = shutil.which(str(resolution_cwd / command))
+    elif os.name == "nt":
+        executable = shutil.which(command)
+    else:
+        search = os.pathsep.join(str(resolution_cwd / entry) for entry in os.get_exec_path())
+        executable = shutil.which(command, path=search)
+    # Keep the invoked symlink path: resolving it can change virtualenv semantics.
+    return os.path.abspath(executable) if executable else None
+
+
+def _executable_hash(executable, cache):
+    if not executable:
+        return None
+    stamp = _report_stamp(Path(executable))
+    if stamp is None:
+        return None
+    # Hash a physical file once per phase while its identity/metadata is stable.
+    # Symlink spelling stays in the evidence's resolved executable field.
+    key = (os.path.normcase(str(Path(executable).resolve())), tuple(stamp.items()))
+    if key not in cache:
+        cache[key] = file_hash(executable)
+    return cache[key]
+
+
+def _versions(check, *, cwd=None, probe_cache=None, fingerprint_cache=None):
+    cwd = str(Path(check.get("cwd") or cwd or Path.cwd()).resolve())
     result = {}
-    executable = shutil.which(check["argv"][0])
-    result["executable"] = {"requested": check["argv"][0], "resolved": executable, "version": "unknown", "sha256": file_hash(executable) if executable and Path(executable).is_file() else None}
+    fingerprints = {} if fingerprint_cache is None else fingerprint_cache
+    executable = _executable(check["argv"][0], cwd)
+    result["executable"] = {"requested": check["argv"][0], "resolved": executable, "version": "unknown", "sha256": _executable_hash(executable, fingerprints)}
+    cache = {} if probe_cache is None else probe_cache
     for name, argv in check.get("tool_versions", {}).items():
-        if not isinstance(argv, list) or not argv:
+        if not isinstance(argv, list) or not argv or any(not isinstance(arg, str) or "\x00" in arg for arg in argv):
             raise HarnessError("tool_versions entries must be argv arrays")
-        try:
-            proc = _contained_capture(argv, timeout=10)
-            result[name] = {"argv": argv, "exit_code": proc.returncode, "version": redact((proc.stdout + proc.stderr).decode("utf-8", errors="replace"))[:2000].strip()}
-        except (OSError, subprocess.TimeoutExpired) as error:
-            result[name] = {"argv": argv, "status": type(error).__name__}
+        probe_executable = _executable(argv[0], cwd)
+        probe_hash = _executable_hash(probe_executable, fingerprints)
+        # Environment values never enter persisted evidence. This digest only
+        # separates inherited environments in this short-lived phase cache.
+        environment = digest(json.dumps(dict(os.environ), ensure_ascii=True, sort_keys=True))
+        key = (cwd, environment, tuple(argv), probe_executable, probe_hash)
+        if key not in cache:
+            try:
+                proc = _contained_capture(argv, cwd=cwd, timeout=10)
+                cache[key] = {"exit_code": proc.returncode, "version": redact((proc.stdout + proc.stderr).decode("utf-8", errors="replace"))[:2000].strip()}
+            except (OSError, subprocess.TimeoutExpired) as error:
+                cache[key] = {"status": type(error).__name__}
+        result[name] = {"argv": argv, **cache[key]}
     return result
+
+
+def _toolchains(contract):
+    """One freeze phase; no probe result survives this call for reuse later."""
+    probes, fingerprints = {}, {}
+    return {check["id"]: _versions(check, cwd=contract.get("cwd"), probe_cache=probes, fingerprint_cache=fingerprints) for check in contract["checks"] if check["kind"] == "command"}
 
 
 def run_check(run: Run, check_id, *, cancel_file=None):
@@ -328,14 +377,15 @@ def run_check(run: Run, check_id, *, cancel_file=None):
         stack.enter_context(run.workspace_lock(contract))
         for resource in sorted(set(check.get("resources", []))):
             stack.enter_context(lock(run.resource_path("resource:" + resource), purpose="check resource: " + resource))
-        stack.enter_context(lock(folder / ".check.lock", purpose="command check " + check_id))
+        check_lease = run.path / ".check-locks" / (digest({"attempt": state["current_attempt"], "check": check_id}) + ".lock")
+        stack.enter_context(lock(check_lease, purpose="command check " + check_id))
         if _result_path(run, state, check_id).exists():
             raise HarnessError("Check already has immutable evidence; use a new attempt to repeat it")
         before = run.assert_current(state, contract)
         frozen_toolchains = read_json(run.attempt_dir(state) / "toolchains.json")
         if digest(frozen_toolchains) != state.get("toolchain_digest"):
             raise HarnessError("Frozen toolchain manifest integrity failed")
-        actual_tools = _versions(check)
+        actual_tools = _versions(check, cwd=contract.get("cwd"))
         if frozen_toolchains.get(check_id) != actual_tools:
             raise HarnessError("Toolchain changed after candidate freeze; create a new attempt")
         run_dir = folder / uuid.uuid4().hex
@@ -427,7 +477,7 @@ def run_check(run: Run, check_id, *, cancel_file=None):
                         path.write_text("", encoding="utf-8")
                 after = snapshot(contract)
                 record["input_after"] = after["digest"]
-                record["tools_after"] = _versions(check)
+                record["tools_after"] = _versions(check, cwd=contract.get("cwd"))
                 if record["tools_after"] != record["tools"]:
                     record["status"] = "toolchain_changed"
                 if before["digest"] != after["digest"]:
@@ -549,6 +599,26 @@ def record_evidence(run: Run, check_id, supplied):
         return record
 
 
+def _shared_record_id(value):
+    if type(value) not in (str, int) or value == "":
+        raise ValueError("record IDs must be nonempty strings or integers (not booleans)")
+    return value
+
+
+def _shared_record_map(rows, id_key, label):
+    if not isinstance(rows, list):
+        raise ValueError(f"{label} records must be an array")
+    result = {}
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict) or id_key not in row:
+            raise ValueError(f"{label} record {index} must be an object with ID field {id_key}")
+        record_id = _shared_record_id(row[id_key])
+        if record_id in result:
+            raise ValueError(f"{label} contains duplicate record ID: {record_id}")
+        result[record_id] = row
+    return result
+
+
 def _shared_scope_errors(run, state, contract):
     errors = []
     receipts = []
@@ -563,20 +633,32 @@ def _shared_scope_errors(run, state, contract):
             errors.append(f"shared baseline content integrity failed: {definition['path']}")
             continue
         if definition["format"] == "json-records":
-            left, right = read_json(baseline), read_json(current)
-            key = definition.get("records_key")
-            if key:
-                left, right = left[key], right[key]
-            id_key = definition.get("id_key", "id")
-            a, b = ({row[id_key]: row for row in rows} for rows in (left, right))
+            try:
+                full_a, full_b = read_json(baseline), read_json(current)
+                left, right = full_a, full_b
+                key = definition.get("records_key")
+                if key is not None:
+                    if not isinstance(key, str) or not key or any(not isinstance(value, dict) or key not in value for value in (left, right)):
+                        raise ValueError("records_key must identify an array in both object roots")
+                    left, right = left[key], right[key]
+                id_key = definition.get("id_key", "id")
+                if not isinstance(id_key, str) or not id_key:
+                    raise ValueError("id_key must be a nonempty string")
+                allowed = definition["allowed_records"]
+                if not isinstance(allowed, list) or not allowed:
+                    raise ValueError("allowed_records must be a nonempty array of IDs")
+                allowed = {_shared_record_id(value) for value in allowed}
+                a, b = _shared_record_map(left, id_key, "baseline"), _shared_record_map(right, id_key, "candidate")
+            except (OSError, ValueError, KeyError, TypeError) as error:
+                errors.append(f"invalid shared records {definition['path']}: {error}")
+                continue
             if set(a) != set(b):
                 errors.append(f"shared record IDs changed: {definition['path']}")
             for record_id in set(a) | set(b):
-                if a.get(record_id) != b.get(record_id) and record_id not in definition["allowed_records"]:
+                if a.get(record_id) != b.get(record_id) and record_id not in allowed:
                     errors.append(f"foreign shared record changed: {record_id}")
             # Preserve all non-record sections too.
             if key:
-                full_a, full_b = read_json(baseline), read_json(current)
                 full_a.pop(key, None)
                 full_b.pop(key, None)
                 if full_a != full_b:

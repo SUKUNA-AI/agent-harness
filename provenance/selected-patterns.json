@@ -1,0 +1,162 @@
+{
+  "schema_version": 1,
+  "accessed_utc": "2026-11-01",
+  "scope": "Selected file-based mechanisms; not full upstream qualification",
+  "repositories": [
+    {
+      "repo": "earendil-works/pi",
+      "url": "https://github.com/earendil-works/pi",
+      "sha": "6291b9bcc3ee9480c2caba8676fc2f6cd321eaa9",
+      "commit_date": "2026-11-01T11:12:44Z",
+      "license": "MIT",
+      "license_path": "LICENSE",
+      "license_source_url": "https://github.com/earendil-works/pi/blob/6291b9bcc3ee9480c2caba8676fc2f6cd321eaa9/LICENSE",
+      "mechanism": "compact handoff, file references, native compaction preserved",
+      "adoption": "independent mechanism implementation; no upstream code vendored",
+      "runtime_status": "not_installed_or_executed"
+    },
+    {
+      "repo": "langchain-ai/deepagents",
+      "url": "https://github.com/langchain-ai/deepagents",
+      "sha": "220aff708682ad0883469a00531e5c4d958b47ec",
+      "commit_date": "2026-11-01T08:05:44Z",
+      "license": "MIT",
+      "license_path": "LICENSE",
+      "license_source_url": "https://github.com/langchain-ai/deepagents/blob/220aff708682ad0883469a00531e5c4d958b47ec/LICENSE",
+      "mechanism": "offload long tool output into permitted files",
+      "adoption": "independent mechanism implementation; no upstream code vendored",
+      "runtime_status": "not_installed_or_executed"
+    },
+    {
+      "repo": "microsoft/playwright-cli",
+      "url": "https://github.com/microsoft/playwright-cli",
+      "sha": "0a808078d96496cf2a8fa725143c870354f63cda",
+      "commit_date": "2026-10-31T15:20:36Z",
+      "license": "Apache-2.0",
+      "license_path": "LICENSE",
+      "license_source_url": "https://github.com/microsoft/playwright-cli/blob/0a808078d96496cf2a8fa725143c870354f63cda/LICENSE",
+      "mechanism": "optional browser workflow and actual scenario evidence",
+      "adoption": "independent mechanism implementation; no upstream code vendored",
+      "runtime_status": "not_installed_or_executed"
+    },
+    {
+      "repo": "obra/superpowers",
+      "url": "https://github.com/obra/superpowers",
+      "sha": "2ce8aa15d05bd57213e6f746f953aafb7ded7a8b",
+      "commit_date": "2026-10-21T21:00:49Z",
+      "license": "MIT",
+      "license_path": "LICENSE",
+      "license_source_url": "https://github.com/obra/superpowers/blob/2ce8aa15d05bd57213e6f746f953aafb7ded7a8b/LICENSE",
+      "mechanism": "hypothesis, counterexample, review packet and consolidated repair",
+      "adoption": "independent mechanism implementation; no upstream code vendored",
+      "runtime_status": "not_installed_or_executed"
+    },
+    {
+      "repo": "anthropics/cwc-long-running-agents",
+      "url": "https://github.com/anthropics/cwc-long-running-agents",
+      "sha": "ad107a974bced5244f74dd283dbf2bfd3baee3a1",
+      "commit_date": "2026-05-13T00:54:24Z",
+      "license": "Apache-2.0",
+      "license_path": "LICENSE",
+      "license_source_url": "https://github.com/anthropics/cwc-long-running-agents/blob/ad107a974bced5244f74dd283dbf2bfd3baee3a1/LICENSE",
+      "mechanism": "default-fail criteria, independent evaluator and handoff",
+      "adoption": "independent mechanism implementation; no upstream code vendored",
+      "runtime_status": "not_installed_or_executed"
+    },
+    {
+      "repo": "karpathy/autoresearch",
+      "url": "https://github.com/karpathy/autoresearch",
+      "sha": "228791fb499afffb54b46200aca536f79142f117",
+      "license": {
+        "status": "README declares MIT; no LICENSE file in pinned tree",
+        "path": "README.md",
+        "source_url": "https://github.com/karpathy/autoresearch/blob/228791fb499afffb54b46200aca536f79142f117/README.md"
+      },
+      "mechanism": "bounded experiment and keep/discard record",
+      "adoption": "independent mechanism implementation; no upstream code vendored",
+      "runtime_status": "not_installed_or_executed"
+    },
+    {
+      "repo": "karpathy/llm-council",
+      "url": "https://github.com/karpathy/llm-council",
+      "sha": "92e1fccb1bdcf1bab7221aa9ed90f9dc72529131",
+      "license": {
+        "status": "No LICENSE file or license declaration found in inspected README/tree",
+        "path": null,
+        "source_url": "https://github.com/karpathy/llm-council/tree/92e1fccb1bdcf1bab7221aa9ed90f9dc72529131"
+      },
+      "mechanism": "optional independent review, synthesis from evidence",
+      "adoption": "independent mechanism implementation; no upstream code vendored",
+      "runtime_status": "not_installed_or_executed"
+    },
+    {
+      "repo": "karpathy/rendergit",
+      "url": "https://github.com/karpathy/rendergit",
+      "sha": "14d7a58c0f4d815a3447f25e9ef1088c7e9ade84",
+      "license": {
+        "status": "README says BSD0; no separate LICENSE text",
+        "path": "README.md",
+        "source_url": "https://github.com/karpathy/rendergit/blob/14d7a58c0f4d815a3447f25e9ef1088c7e9ade84/README.md"
+      },
+      "mechanism": "bounded explicit source packet",
+      "adoption": "independent mechanism implementation; no upstream code vendored",
+      "runtime_status": "not_installed_or_executed"
+    },
+    {
+      "repo": "multica-ai/andrej-karpathy-skills",
+      "url": "https://github.com/multica-ai/andrej-karpathy-skills",
+      "sha": "2c606141936f1eeef17fa3043a72095b4765b9c2",
+      "license": {
+        "status": "README declares MIT; no LICENSE file in pinned tree",
+        "path": "README.md",
+        "source_url": "https://github.com/multica-ai/andrej-karpathy-skills/blob/2c606141936f1eeef17fa3043a72095b4765b9c2/README.md"
+      },
+      "mechanism": "community minimal-change and verifiable-goal conventions",
+      "adoption": "independent mechanism implementation; no upstream code vendored",
+      "runtime_status": "not_installed_or_executed"
+    },
+    {
+      "repo": "SWE-agent/mini-swe-agent",
+      "url": "https://github.com/SWE-agent/mini-swe-agent",
+      "sha": "04d809ceab9df28f9adaed044884180159172930",
+      "license": {
+        "status": "MIT, license text inspected",
+        "path": "LICENSE.md",
+        "source_url": "https://github.com/SWE-agent/mini-swe-agent/blob/04d809ceab9df28f9adaed044884180159172930/LICENSE.md"
+      },
+      "mechanism": "simple observable loop and typed outcomes with budgets",
+      "adoption": "independent mechanism implementation; no upstream code vendored",
+      "runtime_status": "not_installed_or_executed"
+    },
+    {
+      "repo": "gepa-ai/gepa",
+      "url": "https://github.com/gepa-ai/gepa",
+      "sha": "8c7b697a71977980afc7537dac0881e784eef99f",
+      "license": {
+        "status": "MIT terms, license text inspected",
+        "path": "LICENSE",
+        "source_url": "https://github.com/gepa-ai/gepa/blob/8c7b697a71977980afc7537dac0881e784eef99f/LICENSE"
+      },
+      "mechanism": "offline feedback and held-out evaluation procedure",
+      "adoption": "independent mechanism implementation; no upstream code vendored",
+      "runtime_status": "not_installed_or_executed"
+    }
+  ],
+  "llm_wiki": {
+    "url": "https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f",
+    "revision": "ac46de1ad27f92b28ac95459c782c07f6b8c964a",
+    "created": "2026-04-04T16:25",
+    "license": "No explicit license observed in single-file gist",
+    "qualification": "idea document, not executable harness"
+  },
+  "excluded_dependencies": [
+    "promptfoo/promptfoo",
+    "NVIDIA/SkillEvaluator",
+    "harbor-framework/harbor"
+  ],
+  "notes": [
+    "Do not infer model performance from static policy or unit tests",
+    "Community Karpathy skills are not an official Karpathy package",
+    "No source copied from repositories/gist with unclear license"
+  ]
+}

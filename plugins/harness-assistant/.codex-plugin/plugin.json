@@ -1,6 +1,6 @@
 {
   "name": "harness-assistant",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "Proportionate task coordination and honest run status for local Codex.",
   "skills": "./skills/",
   "hooks": {},

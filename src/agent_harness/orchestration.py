@@ -10,6 +10,7 @@ import re
 import sys
 
 from .core import HarnessError, Run, digest, file_hash, read_json, snapshot, validate_contract
+from .core import checkout_identity as _checkout, checkout_overlap as _checkout_overlap
 from .runner import accepted_evidence_errors
 
 SHA = re.compile(r"^[0-9a-f]{64}$")
@@ -58,51 +59,6 @@ def _within(claim, allowed):
 def _cwd(value):
     _require(isinstance(value, str) and Path(value).is_absolute() and Path(value).is_dir(), "Node cwd must be an existing absolute directory")
     return Path(value).resolve().as_posix().rstrip("/").casefold()
-
-
-def _checkout(value):
-    """Find physical Git checkout without executing Git; nested cwd shares its writer."""
-    path = Path(value).resolve()
-    for parent in (path, *path.parents):
-        if _git_metadata(parent / ".git"):
-            return parent
-    return path
-
-
-def _git_metadata(marker):
-    """Recognize real repository/worktree metadata, not an empty .git placeholder."""
-    try:
-        if marker.is_dir():
-            git_dir = marker
-        elif marker.is_file():
-            pointer = marker.read_text(encoding="utf-8", errors="surrogateescape").strip()
-            if not pointer.startswith("gitdir: ") or not pointer[8:].strip():
-                return False
-            git_dir = (marker.parent / pointer[8:]).resolve()
-        else:
-            return False
-        head = git_dir / "HEAD"
-        if head.is_symlink():
-            valid_head = bool(re.fullmatch(r"refs/[^\s]+", head.readlink().as_posix()))
-        elif head.is_file():
-            value = head.read_text(encoding="ascii", errors="surrogateescape").strip()
-            valid_head = bool(re.fullmatch(r"ref: refs/[^\s]+|[0-9a-fA-F]{40}|[0-9a-fA-F]{64}", value))
-        else:
-            return False
-        common = git_dir
-        common_pointer = git_dir / "commondir"
-        if common_pointer.is_file():
-            relative = common_pointer.read_text(encoding="utf-8", errors="surrogateescape").strip()
-            if not relative:
-                return False
-            common = (git_dir / relative).resolve()
-        return valid_head and (common / "objects").is_dir() and ((common / "refs").is_dir() or (common / "reftable").is_dir())
-    except OSError as exc:
-        raise HarnessError(f"Cannot inspect Git checkout metadata at {marker}: {exc}") from exc
-
-
-def _checkout_overlap(left, right):
-    return _overlap(_cwd(left), _cwd(right)) or _overlap(_cwd(str(_checkout(left))), _cwd(str(_checkout(right))))
 
 
 def _absolute_claim(node, claim):
@@ -256,20 +212,25 @@ def _accepted(node, plan, contract):
     record = node.get("accepted_result", {})
     if not isinstance(record, dict) or not record.get("run_dir") or not _sha(record.get("verdict_digest")):
         return False
-    run = Run(record["run_dir"])
-    state = run.status()
-    accepted = state.get("accepted")
-    if not state.get("evidence_current") or not accepted or accepted.get("verdict_digest") != record["verdict_digest"]:
+    try:
+        run = Run(record["run_dir"])
+        # The validator below checks source and evidence. A status snapshot here
+        # would duplicate that work, and missing state must block only dependants.
+        state = run.state()
+        accepted = state.get("accepted")
+        if not accepted or accepted.get("verdict_digest") != record["verdict_digest"]:
+            return False
+        child = run.contract(state)
+        expected = node.get("expected_child", {})
+        if not isinstance(expected, dict) or not _sha(expected.get("contract_digest")):
+            return False
+        if any(child.get(key) != expected.get(key) for key in ("run_id", "task_id", "attempt_id")) or state["contract_digest"] != expected["contract_digest"]:
+            return False
+        if child.get("lane_id") != node["id"] or child.get("orchestration_binding") != _parent_binding(node, plan, contract):
+            return False
+        return not accepted_evidence_errors(run, record["verdict_digest"])
+    except (HarnessError, OSError, ValueError, KeyError, TypeError, AttributeError):
         return False
-    child = run.contract(state)
-    expected = node.get("expected_child", {})
-    if not isinstance(expected, dict) or not _sha(expected.get("contract_digest")):
-        return False
-    if any(child.get(key) != expected.get(key) for key in ("run_id", "task_id", "attempt_id")) or state["contract_digest"] != expected["contract_digest"]:
-        return False
-    if child.get("lane_id") != node["id"] or child.get("orchestration_binding") != _parent_binding(node, plan, contract):
-        return False
-    return not accepted_evidence_errors(run, record["verdict_digest"])
 
 
 def _conflict(left, right):
@@ -292,12 +253,15 @@ def next_wave(plan, contract, observation):
         if node.get("write_paths") and item.get("write_cwd"):
             _require(_cwd(node["cwd"]) == _cwd(item["write_cwd"]), "Native writer checkout differs from assigned owner")
     executing_refs = {ref for ref, item in capacity["refs"].items() if ref != observation["root_ref"] and item["status"] in {"open", "running"}} | {n["native_ref"] for n in active}
-    chosen, blocked = [], {}
+    chosen, blocked, accepted_dependencies = [], {}, {}
     remaining = capacity["remaining"]
     for key, node in sorted(nodes.items()):
         if node.get("state", "planned") != "planned":
             continue
-        if any(not _accepted(nodes[d], plan, contract) for d in node.get("depends_on", [])):
+        for dependency in node.get("depends_on", []):
+            if dependency not in accepted_dependencies:
+                accepted_dependencies[dependency] = _accepted(nodes[dependency], plan, contract)
+        if any(not accepted_dependencies[d] for d in node.get("depends_on", [])):
             blocked[key] = "dependency_not_accepted_current"
             continue
         if any(_conflict(node, other) for other in active + [nodes[x["node_id"]] for x in chosen]):

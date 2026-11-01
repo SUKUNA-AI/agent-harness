@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 import ctypes
+import errno
 import fnmatch
 import hashlib
 import json
@@ -141,39 +142,130 @@ def identity_alive(identity):
 
 
 @contextmanager
+def _os_lock(path):
+    """Hold a stable kernel lock; never unlink its anchor or replace its inode."""
+    # Locking the JSON lease itself would fail when stale recovery replaces it:
+    # another process could then lock a different inode at the same path.
+    with Path(path).open("a+b") as guard:
+        try:
+            if os.name == "nt":
+                import msvcrt
+                guard.seek(0)
+                # Byte-range locks may extend past EOF; no racy initialization write.
+                msvcrt.locking(guard.fileno(), msvcrt.LK_NBLCK, 1)
+            elif os.name == "posix":
+                import fcntl
+                fcntl.flock(guard.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            else:
+                raise HarnessError(f"OS file locking is unsupported: {os.name}")
+        except OSError as exc:
+            if exc.errno in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                raise HarnessError(f"Resource busy: {path}") from exc
+            raise HarnessError(f"Cannot acquire OS lock at {path}: {exc}") from exc
+        try:
+            yield
+        finally:
+            if os.name == "nt":
+                guard.seek(0)
+                msvcrt.locking(guard.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(guard.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
 def lock(path, *, purpose="state"):
-    """Exclusive cross-process lease; stale lease removal requires a dead identity."""
+    """Serialize recovery and ownership; keep legacy leases and stale receipts."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    token = uuid.uuid4().hex
-    record = {"identity": process_identity(os.getpid()), "token": token, "purpose": purpose, "created_at": now()}
-    for _ in range(3):
+    # The anchor survives normal release and crashes. Its OS lock is released
+    # on descriptor close/process exit, without a second stale-recovery race.
+    with _os_lock(path.with_name(path.name + ".guard")):
+        token = uuid.uuid4().hex
+        record = {"identity": process_identity(os.getpid()), "token": token, "purpose": purpose, "created_at": now()}
+        for _ in range(3):
+            try:
+                atomic_json(path, record, exclusive=True)
+                break
+            except FileExistsError:
+                try:
+                    old = read_json(path)
+                    if not isinstance(old, dict):
+                        raise ValueError("Lease must be an object")
+                    identity = old.get("identity")
+                    if identity and (not isinstance(identity, dict) or type(identity.get("pid")) is not int or identity["pid"] <= 0 or not isinstance(identity.get("created"), str) or not identity["created"]):
+                        raise ValueError("Invalid lease identity")
+                except (ValueError, OSError):
+                    raise HarnessError(f"Unreadable lock; inspect it rather than removing blindly: {path}")
+                if not identity or identity_alive(identity):
+                    raise HarnessError(f"Resource busy ({old.get('purpose', 'unknown')}): {path}")
+                # Check and replacement are serialized, including the new owner's
+                # entire critical section. Never archive a concurrent live lease.
+                archive = path.with_name(path.name + ".stale-" + uuid.uuid4().hex + ".json")
+                try:
+                    os.replace(path, archive)
+                except FileNotFoundError:
+                    continue
+        else:
+            raise HarnessError(f"Could not acquire lock: {path}")
         try:
-            atomic_json(path, record, exclusive=True)
-            break
-        except FileExistsError:
+            yield record
+        finally:
             try:
-                old = read_json(path)
-            except (ValueError, OSError):
-                raise HarnessError(f"Unreadable lock; inspect it rather than removing blindly: {path}")
-            if not old.get("identity") or identity_alive(old["identity"]):
-                raise HarnessError(f"Resource busy ({old.get('purpose', 'unknown')}): {path}")
-            # An old process is gone. Preserve a receipt before replacing its lease.
-            archive = path.with_name(path.name + ".stale-" + uuid.uuid4().hex + ".json")
-            try:
-                os.replace(path, archive)
-            except FileNotFoundError:
-                continue
-    else:
-        raise HarnessError(f"Could not acquire lock: {path}")
+                if read_json(path).get("token") == token:
+                    path.unlink()
+            except (FileNotFoundError, ValueError):
+                pass
+
+
+def _git_metadata(marker):
+    """Recognize a checkout/worktree, including gitdir pointers and reftables."""
     try:
-        yield record
-    finally:
-        try:
-            if read_json(path).get("token") == token:
-                path.unlink()
-        except (FileNotFoundError, ValueError):
-            pass
+        if marker.is_dir():
+            git_dir = marker
+        elif marker.is_file():
+            pointer = marker.read_text(encoding="utf-8", errors="surrogateescape").strip()
+            if not pointer.startswith("gitdir: ") or not pointer[8:].strip():
+                return False
+            git_dir = (marker.parent / pointer[8:]).resolve()
+        else:
+            return False
+        head = git_dir / "HEAD"
+        if head.is_symlink():
+            valid_head = bool(re.fullmatch(r"refs/[^\s]+", head.readlink().as_posix()))
+        elif head.is_file():
+            value = head.read_text(encoding="ascii", errors="surrogateescape").strip()
+            valid_head = bool(re.fullmatch(r"ref: refs/[^\s]+|[0-9a-fA-F]{40}|[0-9a-fA-F]{64}", value))
+        else:
+            return False
+        common = git_dir
+        common_pointer = git_dir / "commondir"
+        if common_pointer.is_file():
+            relative = common_pointer.read_text(encoding="utf-8", errors="surrogateescape").strip()
+            if not relative:
+                return False
+            common = (git_dir / relative).resolve()
+        return valid_head and (common / "objects").is_dir() and ((common / "refs").is_dir() or (common / "reftable").is_dir())
+    except OSError as exc:
+        raise HarnessError(f"Cannot inspect Git checkout metadata at {marker}: {exc}") from exc
+
+
+def checkout_identity(value):
+    """Physical checkout root, not its shared Git common directory; no Git process."""
+    if not isinstance(value, (str, os.PathLike)) or not Path(value).is_absolute() or not Path(value).is_dir():
+        raise HarnessError("Workspace must be an existing absolute directory")
+    path = Path(value).resolve()
+    for parent in (path, *path.parents):
+        if _git_metadata(parent / ".git"):
+            return parent
+    return path
+
+
+def checkout_overlap(left, right):
+    """One writer per checkout, also excluding physically nested workspaces."""
+    first, second = checkout_identity(left), checkout_identity(right)
+    left, right = Path(left).resolve(), Path(right).resolve()
+    return (left == right or left in right.parents or right in left.parents
+            or first == second or first in second.parents or second in first.parents)
 
 
 def _identifier(value, name):
@@ -321,6 +413,18 @@ def _entry(path):
     return {"kind": "directory"}
 
 
+def _git_settings(cwd):
+    """Read all snapshot-relevant config in one process, preserving last-value semantics."""
+    settings = dict.fromkeys(("core.autocrlf", "core.eol", "core.filemode"))
+    raw = _git(cwd, "config", "--null", "--get-regexp", r"^(core\.autocrlf|core\.eol|core\.filemode)$") or b""
+    for entry in raw.split(b"\0"):
+        key, _, value = entry.partition(b"\n")
+        name = os.fsdecode(key).lower()
+        if name in settings:
+            settings[name] = os.fsdecode(value).strip()
+    return settings
+
+
 def snapshot(contract):
     """Actual bytes, including tracked deletion and nonignored untracked files."""
     cwd_value = contract.get("cwd")
@@ -336,10 +440,7 @@ def snapshot(contract):
         if is_root:
             raw = _git(cwd, "ls-files", "--cached", "--others", "--exclude-standard", "-z") or b""
             names.update(os.fsdecode(n).replace("\\", "/") for n in raw.split(b"\0") if n)
-            settings = {}
-            for key in ("core.autocrlf", "core.eol", "core.filemode"):
-                value = _git(cwd, "config", "--get", key)
-                settings[key] = os.fsdecode(value).strip() if value is not None else None
+            settings = _git_settings(cwd)
             result["git"] = {"head": os.fsdecode(head).strip() if head else None, "branch": os.fsdecode(_git(cwd, "symbolic-ref", "--short", "HEAD") or b"").strip() or None, "settings": settings}
             # Gitlinks need the actual submodule tree as well as the recorded SHA.
             stages = _git(cwd, "ls-files", "--stage", "-z") or b""
@@ -439,7 +540,9 @@ class Run:
     @contextmanager
     def workspace_lock(self, contract=None):
         contract = contract or self.contract()
-        name = "workspace:" + str(Path(contract["cwd"]).resolve()) if contract.get("cwd") else "run:" + str(self.path)
+        # Subdirectories of one Git checkout share a lock; linked worktrees do
+        # not. Non-Git callers must agree on the same workspace root/namespace.
+        name = "workspace:" + os.path.normcase(str(checkout_identity(contract["cwd"]))) if contract.get("cwd") else "run:" + str(self.path)
         with lock(self.resource_path(name), purpose=name):
             yield
 
@@ -542,8 +645,8 @@ class Run:
                 errors = scope_errors(contract, baseline, candidate)
                 if errors:
                     raise HarnessError("; ".join(errors))
-                from .runner import _versions
-                toolchains = {check["id"]: _versions(check) for check in contract["checks"] if check["kind"] == "command"}
+                from .runner import _toolchains
+                toolchains = _toolchains(contract)
                 if snapshot(contract)["digest"] != candidate["digest"]:
                     raise HarnessError("Source changed while freezing toolchain")
                 toolchain_path = self.attempt_dir(state) / "toolchains.json"
@@ -654,12 +757,22 @@ class Run:
                 state["accepted"] = None
         return {"run_id": state["run_id"], "resume": state["resume"], "safe_to_start_new_owner": not problems}
 
-    def status(self):
+    def status(self, *, verify_evidence=False):
         state = self.state()
         contract = self.contract(state)
         actual = snapshot(contract)
-        state["evidence_current"] = state.get("candidate_digest") == actual["digest"]
-        if not state["evidence_current"] and state.get("status") == "accepted":
+        state["source_current"] = state.get("candidate_digest") == actual["digest"]
+        # A cheap status observation cannot assert that logs/reports still exist.
+        # Full read-only validation is explicit, avoiding heavy repeated polling.
+        state["evidence_current"] = None if state["source_current"] else False
+        state["evidence_validation"] = {"status": "not_checked", "errors": []}
+        state["recorded_status"] = state.get("status")
+        if verify_evidence and state.get("accepted"):
+            from .runner import accepted_evidence_errors
+            errors = accepted_evidence_errors(self, state["accepted"]["verdict_digest"])
+            state["evidence_current"] = not errors
+            state["evidence_validation"] = {"status": "failed" if errors else "passed", "errors": errors}
+        if state["evidence_current"] is False and state.get("status") == "accepted":
             state["status"] = "stale"
         state["actual_snapshot"] = actual["digest"]
         state["run_dir"] = str(self.path)
@@ -717,7 +830,7 @@ class Run:
             writers = [v for v in open_owners if v.get("write_cwd")]
             for i, left in enumerate(writers):
                 for right in writers[i + 1:]:
-                    if Path(left["write_cwd"]).resolve() == Path(right["write_cwd"]).resolve():
+                    if checkout_overlap(left["write_cwd"], right["write_cwd"]):
                         # One mutable checkout gets one writer, independent of claimed paths.
                         raise HarnessError("Concurrent writers must not share a mutable checkout")
             state["owners"] = owners

@@ -1,5 +1,28 @@
 # Эксплуатация
 
+## Обновление на 1.2
+
+Сначала завершите активные команды прежней версии harness: старый процесс не
+участвует в новом OS-lock протоколе. Новые `.guard` anchors постоянны; удаление
+lease и удаление anchor — разные операции. Не удаляйте anchor у активного процесса.
+Git subdirectories одного checkout разделяют workspace lock, реальные worktrees
+остаются независимыми. Для non-Git работы разные cooperating callers должны
+использовать одинаковый workspace root и общий resource lock namespace.
+
+Rollback/uninstall записывает journal с before/after copies и progress. При
+`rollback_failed_compensated` изменения этой попытки компенсированы; при
+`rollback_failed_recovery_required` сначала сверяйте перечисленные пути и journal.
+Чужие новые bytes не заменяются при компенсации. Per-target guards обнаруживают
+изменения между этапами, но не являются filesystem CAS против внешнего редактора.
+Symlink/reparse targets установщик отклоняет до замены: используйте обычные файлы
+или отдельно выбранный способ установки, сохраняя исходные ссылки.
+
+Обычный `status` сообщает `source_current`, `recorded_status` и
+`evidence_current=null`, если artifacts ещё не сверены. Только явный
+`status --verify-evidence` проверяет accepted verdict, logs/reports и dependencies:
+exit 0 при текущем evidence, exit 1 при stale/непринятом run, exit 2 при ошибке
+чтения/параметров. Сохранённый accepted сам по себе не означает свежую приёмку.
+
 Bootstrap подключает короткую политику к новым локальным Codex sessions. Подробный процесс выбирается по задаче; полный doctor перед простым ответом не нужен. Root — основной чат. Native agents управляются его штатными инструментами, Python лишь проверяет/сохраняет инженерное состояние. Внутренний spawn API не имитируется.
 
 ## Команды служебного ядра
@@ -16,7 +39,10 @@ Bootstrap подключает короткую политику к новым �
 | `check --run-dir P --check ID [--cancel-file F]` | Реальная команда из контракта, timeout/logs/evidence |
 | `evidence --run-dir P --check ID --record F` | Типизированное evidence для source/content/visual/runtime с proof |
 | `gate --run-dir P` | Проверка exact contract/attempt/candidate, required checks, scope и integrity evidence |
-| `status --run-dir P` | Чтение состояния без запуска новой работы |
+| `status --run-dir P` | Быстрый source status; сохранённый accepted ещё не подтверждает текущее evidence |
+| `status --run-dir P --verify-evidence` | Read-only проверка accepted verdict, артефактов и dependencies; exit 1 если не подтверждены |
+| `context pack --root P --include FILE --output F` | Ограниченный private source packet вне source root |
+| `context verify --root P --packet F` | Проверка целостности и актуальности включённых файлов; не acceptance gate |
 | `checkpoint --run-dir P --note TEXT --next TEXT` | Версионированная точка восстановления |
 | `resume --run-dir P` | Сверка сохранённого состояния и входов; не подмена native resume |
 | `attempt --run-dir P --contract F` | Новая ревизия контракта/попытка; старое evidence не наследуется как passed |
