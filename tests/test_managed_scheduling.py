@@ -5,6 +5,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import os
+from unittest.mock import patch as environment_patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from agent_harness.core import HarnessError
@@ -26,6 +28,11 @@ def node(name, dependencies=(), scopes=None, seconds=60):
 
 class ManagedSchedulingTests(unittest.TestCase):
     def setUp(self):
+        isolated_profile = tempfile.TemporaryDirectory()
+        self.addCleanup(isolated_profile.cleanup)
+        environment = environment_patch.dict(os.environ, {"CODEX_HOME": str(Path(isolated_profile.name) / "codex-home")})
+        environment.start()
+        self.addCleanup(environment.stop)
         self.contract = normalize({"schema_version": 1, "task": {"id": "managed", "objective": "managed",
             "allowed_write_scopes": ["left.py", "right.py"]}, "mode": "managed",
             "budgets": {"max_concurrent_managed_agents": 2, "max_wall_seconds": 120},
@@ -44,7 +51,11 @@ class ManagedSchedulingTests(unittest.TestCase):
         unknown["tasks"][0]["depends_on"] = ["missing"]
         unsafe = deepcopy(self.plan)
         unsafe["tasks"][0]["write_scope"] = ["../config.toml"]
-        for plan in (cyclic, overlap, unknown, unsafe):
+        output_escape = deepcopy(self.plan)
+        output_escape["tasks"][0]["outputs"] = ["../outside.py"]
+        no_scope = deepcopy(self.plan)
+        no_scope["tasks"][0]["write_scope"] = []
+        for plan in (cyclic, overlap, unknown, unsafe, output_escape, no_scope):
             with self.subTest(plan=plan):
                 with self.assertRaises((HarnessError, ValueError)):
                     validate_plan(plan, self.contract)
@@ -84,6 +95,9 @@ class ManagedSchedulingTests(unittest.TestCase):
             self.assertNotEqual(result["cwd"], str(source))
             self.assertEqual((source / "left.py").read_text(), "VALUE = 0\n")
             self.assertEqual(result["metrics"]["managed_spawns"], 2)
+            self.assertGreater(result["metrics"]["spawn_seconds"], 0)
+            self.assertEqual(result["metrics"]["spawn_measurements"], 3)
+            self.assertGreater(result["metrics"]["worktree_seconds"], 0)
             agents = [supervisor.store.read("agents/" + name + ".yaml", "agent-state.schema.json") for name in ("left", "right")]
             self.assertNotEqual(agents[0]["worktree"]["path"], agents[1]["worktree"]["path"])
             self.assertTrue(all(agent["status"] == "integrated" for agent in agents))
@@ -175,3 +189,51 @@ class ManagedSchedulingTests(unittest.TestCase):
             self.assertNotEqual(agents[0]["thread_id"], agents[1]["thread_id"])
             self.assertEqual(fake.with_suffix(".calls").read_text().splitlines().count("resume"), 2)
             self.assertEqual((source / "left.py").read_text(), "VALUE = 0\n")
+
+    def test_recovery_rejects_foreign_worker_or_staging_before_any_model_spawn(self):
+        from unittest.mock import patch
+        from agent_harness.agent_lifecycle import Worktrees
+        class FakeManaged(CodexAdapter):
+            def capabilities(self):
+                return {**super().capabilities(), "native_children_disabled": True}
+        class ControllerCrash(BaseException):
+            pass
+        for corrupt in ("worker", "staging", "scope"):
+            with self.subTest(corrupt=corrupt), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                source, foreign = root / "source", root / "foreign"
+                for folder in (source, foreign):
+                    folder.mkdir()
+                    for name in ("left", "right"):
+                        (folder / (name + ".py")).write_text("VALUE = 0\n")
+                    for args in (["init"], ["add", "."], ["-c", "user.name=Fixture", "-c", "user.email=fixture@localhost", "commit", "-m", "fixture"]):
+                        subprocess.run(["git", *args], cwd=folder, check=True, capture_output=True)
+                fake = root / "fake.py"
+                # Exact session selection does not itself authorize a cwd. This
+                # fake honors the supplied ID, like a restored session adapter;
+                # the supervisor must prevent foreign writes before invocation.
+                fake.write_text(FAKE.replace("if 'resume' in args: assert args[args.index('resume')+1]==sid",
+                                             "if 'resume' in args: sid=args[args.index('resume')+1]"))
+                task, plan = root / "task.yaml", root / "plan.yaml"
+                dump(task, self.contract); dump(plan, self.plan)
+                adapter = FakeManaged((sys.executable, str(fake)))
+                supervisor = Supervisor.create(task, run_dir=root / "private" / "run", cwd=source,
+                                               state_dir=root / "state", adapter=adapter)
+                supervisor.plan_input = str(plan)
+                with patch.object(Worktrees, "integrate", side_effect=ControllerCrash):
+                    with self.assertRaises(ControllerCrash):
+                        supervisor.start()
+                calls_before = fake.with_suffix(".calls").read_bytes()
+                target = "integration.yaml" if corrupt == "staging" else "agents/left.yaml"
+                record = supervisor.store.read(target)
+                if corrupt == "staging":
+                    record["path"] = str(foreign)
+                elif corrupt == "worker":
+                    record["worktree"]["path"] = str(foreign)
+                else:
+                    record["allowed_write_scope"] = ["**"]
+                supervisor.store.write(target, record)
+                with self.assertRaises(HarnessError):
+                    Supervisor(supervisor.path, adapter=adapter).resume()
+                self.assertEqual(fake.with_suffix(".calls").read_bytes(), calls_before)
+                self.assertEqual((foreign / "left.py").read_text(), "VALUE = 0\n")

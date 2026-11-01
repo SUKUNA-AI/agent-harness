@@ -13,13 +13,17 @@ COUNTERS = ("model_turns", "model_invocations", "repair_attempts", "managed_spaw
 def initial():
     return {**{name: 0 for name in COUNTERS}, "input_tokens": None, "output_tokens": None,
             "reported_usage_turns": 0, "missing_usage_turns": 0,
-            "spawn_seconds": 0.0, "integration_seconds": 0.0}
+            "spawn_seconds": 0.0, "spawn_measurements": 0, "worktree_seconds": 0.0, "integration_seconds": 0.0}
 
 
 def observe(metrics, result):
     metrics["model_invocations"] = metrics.get("model_invocations", 0) + 1
     metrics["model_turns"] += int(result.get("turn_started", result.get("usage") is not None))
     usage = result.get("usage")
+    spawn_seconds = result.get("spawn_seconds")
+    if type(spawn_seconds) in (int, float) and spawn_seconds >= 0:
+        metrics["spawn_seconds"] += spawn_seconds
+        metrics["spawn_measurements"] = metrics.get("spawn_measurements", 0) + 1
     if usage is None:
         metrics["missing_usage_turns"] += 1
     else:
@@ -46,4 +50,5 @@ def report(state):
                     "usage_status": "unavailable" if not metrics["reported_usage_turns"] else
                         "partial" if metrics["missing_usage_turns"] else "reported",
                     "hidden_codex_tools": "unobservable", "cost": "unavailable"})
+    metrics["spawn_overhead_status"] = "measured" if metrics.get("spawn_measurements", 0) else "unavailable"
     return metrics

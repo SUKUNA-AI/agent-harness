@@ -10,7 +10,9 @@ from pathlib import Path
 import stat
 
 DEFAULT_MAX_BYTES = 16 * 1024 * 1024
-_VERIFY_CONTENT = os.name == "nt"
+# POSIX filesystems may coalesce rapid same-size writes into identical timestamp
+# observations too. Metadata alone is never proof of an unchanged bounded read.
+_VERIFY_CONTENT = True
 
 
 class FileReadError(ValueError):
@@ -45,13 +47,13 @@ def _read_bounded(fd, limit):
 
 
 def read_regular_file(path, max_bytes=DEFAULT_MAX_BYTES, missing_ok=False) -> bytes | None:
-    """Read at most max_bytes; only a missing path may produce None.
+    """Read a file of at most max_bytes; only a missing path may produce None.
 
     O_NONBLOCK prevents a raced FIFO from blocking before fstat rejects it.
     Both the opened descriptor and the final directory entry must retain the
     original identity and remain ordinary files throughout the bounded read.
-    Windows may defer timestamp updates while handles remain open, so compare
-    a second bounded read from the same descriptor before the final checks.
+    Timestamps may be deferred or coalesced, so compare a second bounded pass
+    from the same descriptor before final checks on every platform.
     """
     if type(max_bytes) is not int or max_bytes < 0:
         raise ValueError("max_bytes must be a nonnegative integer")

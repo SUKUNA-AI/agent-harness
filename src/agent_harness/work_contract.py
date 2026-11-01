@@ -23,6 +23,7 @@ def normalize(value):
     value.setdefault("mode", "native")
     value.setdefault("memory", False)
     value.setdefault("ledger", "inform")
+    value.setdefault("inputs", [])
     if isinstance(value.get("task"), dict):
         value["task"].setdefault("read_only", False)
         value["task"].setdefault("allowed_write_scopes", [])
@@ -43,6 +44,13 @@ def normalize(value):
         if any(part.casefold() in {".git", ".codex", ".agents"} for part in path.split("/")):
             raise HarnessError("Harness/Codex settings and Git internals are outside task write scope")
     checks = value["acceptance"]
+    for item in value["inputs"]:
+        from .supervisor_store import _parents, _ordinary
+        input_path = Path(item["path"])
+        if not input_path.is_absolute():
+            raise HarnessError("Declared input path must be absolute")
+        _parents(input_path)
+        _ordinary(input_path)
     if len({check["id"] for check in checks}) != len(checks):
         raise HarnessError("Duplicate acceptance IDs")
     if not any(check["required"] for check in checks):
@@ -102,7 +110,7 @@ def legacy_contract(contract, *, cwd, run_id, attempt, deadline, source_cwd=None
                        "protected_paths": [".codex/**", ".agents/**"],
                        "exclude": [".git/**", "**/__pycache__/**", "__pycache__/**"]},
              "budget": {"max_attempts": contract["budgets"]["max_attempts"], "deadline": deadline},
-             "checks": checks}
+             "checks": checks, "inputs": deepcopy(contract.get("inputs", []))}
     validate_contract(value)
     return value
 

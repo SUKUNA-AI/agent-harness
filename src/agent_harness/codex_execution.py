@@ -279,7 +279,9 @@ class CodexAdapter:
                         result.update(status="timed_out", error="Absolute task deadline expired before process start", outcome_known=True)
                         return result
                     timeout = min(timeout, remaining)
+                spawn_started = time.monotonic()
                 process, job = _start_contained(argv, str(cwd))
+                result["spawn_seconds"] = time.monotonic() - spawn_started
                 identity = process_identity(process.pid)
                 result["process"] = {"identity": identity, "tree_control": "windows_suspended_job_kill_on_close" if os.name == "nt" else "private_process_group", "started_at": now(), "cwd": str(cwd), "argv_digest": hashlib.sha256(json.dumps(argv, ensure_ascii=False).encode("utf-8")).hexdigest()}
                 if not identity:

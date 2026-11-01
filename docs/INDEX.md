@@ -71,5 +71,5 @@
 | [Memory/TokenEconomizer](MEMORY_TOKENS_RU.md) | Исследованные, но не включённые дополнительные системы |
 
 Числа тестов, benchmark и ограничения старого отчёта относятся к его версии.
-Состояние нового релиза проверяется по его commit, CI и `VERIFICATION.json`
-в соответствующем релизном архиве.
+Состояние нового релиза проверяется по его commit, CI, отдельному verification
+report и встроенному `release-manifest.json` с hashes payload файлов.

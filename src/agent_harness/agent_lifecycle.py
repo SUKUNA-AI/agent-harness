@@ -7,6 +7,7 @@ import os
 import subprocess
 import time
 import uuid
+import re
 
 from .core import HarnessError, _os_lock, process_identity, identity_alive, now, digest
 from .file_io import read_regular_file
@@ -51,11 +52,14 @@ class ModelLease:
 
 class GlobalSlots:
     """All managed planners/workers/reviewers share five OS-backed leases."""
-    def __init__(self, state_dir):
+    def __init__(self, state_dir, *, create=True):
         from .supervisor_store import SupervisorStore
-        self.store = SupervisorStore(Path(state_dir) / "global-model-slots")
+        self.directory = Path(state_dir) / "global-model-slots"
+        self.store = SupervisorStore(self.directory) if create or self.directory.exists() else None
 
     def inventory(self, run_id=None):
+        if self.store is None:
+            return []
         rows = []
         for slot in range(5):
             name = "slot-" + str(slot) + ".yaml"
@@ -72,6 +76,9 @@ class GlobalSlots:
     @contextmanager
     def acquire(self, run_id, task_id, role, *, cancel_file=None, timeout=60):
         from .strict_yaml import dump
+        if self.store is None:
+            from .supervisor_store import SupervisorStore
+            self.store = SupervisorStore(self.directory)
         start = time.monotonic()
         while True:
             if cancel_file and Path(cancel_file).exists():
@@ -134,12 +141,15 @@ def git(cwd, *args, input_bytes=None, timeout=30):
 class Worktrees:
     def __init__(self, repository, directory):
         self.repository = Path(repository).resolve(strict=True)
-        self.directory = Path(directory).resolve()
+        from .supervisor_store import _mkdir, _parents, _ordinary
+        raw_directory = Path(os.path.abspath(directory))
+        _mkdir(raw_directory)
+        _parents(raw_directory)
+        _ordinary(raw_directory, directory=True)
+        self.directory = raw_directory.resolve()
         if self.directory == self.repository or self.repository in self.directory.parents:
             raise HarnessError("Managed worktrees must be outside the source checkout")
-        self.directory.mkdir(parents=True, exist_ok=True)
-        if self.directory.is_symlink():
-            raise HarnessError("Unsafe managed worktree directory")
+        self.ownership = SupervisorWorktreeOwnership(self.directory.parent / "worktree-ownership")
 
     def create(self, task_id, base_revision, *, role="owner"):
         from .supervisor_store import SupervisorStore
@@ -149,14 +159,42 @@ class Worktrees:
         base = git(self.repository, "rev-parse", "--verify", base_revision + "^{commit}").decode().strip()
         path = self.directory / (task_id + "-" + uuid.uuid4().hex[:8])
         git(self.repository, "worktree", "add", "--detach", str(path), base)
-        return {"schema_version": 1, "id": task_id, "path": str(path), "base_revision": base,
+        record = {"schema_version": 1, "id": task_id, "path": str(path), "base_revision": base,
                 "branch": None, "role": role, "ownership_token": uuid.uuid4().hex,
                 "created_at": now()}
+        self.ownership.write(record)
+        self.validate(record, expected_id=task_id, expected_role=role, integrated=role == "integrator")
+        return record
+
+    def validate(self, record, *, expected_id, expected_role, integrated=False):
+        from .strict_yaml import validate
+        from .supervisor_store import _parents, _ordinary
+        validate(record, WORKTREE_SCHEMA)
+        raw = Path(record["path"])
+        if not raw.is_absolute():
+            raise HarnessError("Worktree path must be absolute")
+        _parents(raw)
+        _ordinary(raw, directory=True)
+        path = raw.resolve(strict=True)
+        if path.parent != self.directory or not re.fullmatch(re.escape(expected_id) + r"-[0-9a-f]{8}", path.name):
+            raise HarnessError("Worktree ownership boundary mismatch before model spawn")
+        if record["id"] != expected_id or record["role"] != expected_role:
+            raise HarnessError("Recovered worktree task/role binding mismatch")
+        if self.ownership.read(record["ownership_token"]) != record:
+            raise HarnessError("Recovered worktree differs from immutable ownership receipt")
+        def common(root):
+            value = Path(git(root, "rev-parse", "--git-common-dir").decode().strip())
+            return (Path(root) / value).resolve() if not value.is_absolute() else value.resolve()
+        if common(path) != common(self.repository):
+            raise HarnessError("Recovered worktree belongs to another Git repository")
+        if integrated:
+            git(path, "merge-base", "--is-ancestor", record["base_revision"], "HEAD")
+        elif git(path, "rev-parse", "HEAD").decode().strip() != record["base_revision"]:
+            raise HarnessError("Worker changed its exact base revision")
+        return path
 
     def patch(self, record, allowed_scopes):
-        path = Path(record["path"]).resolve(strict=True)
-        if path.parent != self.directory or path.is_symlink():
-            raise HarnessError("Worktree ownership boundary mismatch")
+        path = self.validate(record, expected_id=record["id"], expected_role=record["role"])
         if git(path, "rev-parse", "HEAD").decode().strip() != record["base_revision"]:
             raise HarnessError("Worker changed its base revision; proposed commits need explicit reconciliation")
         untracked = git(path, "ls-files", "--others", "--exclude-standard", "-z").split(b"\0")
@@ -174,11 +212,9 @@ class Worktrees:
         return git(path, "diff", "HEAD", "--binary", "--no-ext-diff", "--no-textconv")
 
     def integrate(self, staging, patch):
+        target = self.validate(staging, expected_id="integration", expected_role="integrator", integrated=True)
         if not patch:
             return {"status": "unchanged", "patch_digest": digest("")}
-        target = Path(staging["path"]).resolve(strict=True)
-        if target.parent != self.directory:
-            raise HarnessError("Integration worktree ownership mismatch")
         # Check before mutation. Conflict remains a task; no reset, force, or auto-overwrite.
         try:
             git(target, "apply", "--check", "--binary", "-", input_bytes=patch)
@@ -190,3 +226,26 @@ class Worktrees:
             return {"status": "reconciled_already_applied", "patch_digest": __import__("hashlib").sha256(patch).hexdigest()}
         git(target, "apply", "--binary", "-", input_bytes=patch)
         return {"status": "integrated", "patch_digest": __import__("hashlib").sha256(patch).hexdigest()}
+
+
+WORKTREE_SCHEMA = {"type": "object", "additionalProperties": False, "properties": {
+    "schema_version": {"const": 1}, "id": {"type": "string", "maxLength": 128},
+    "path": {"type": "string", "maxLength": 16384}, "base_revision": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
+    "branch": {"type": ["string", "null"]}, "role": {"enum": ["owner", "reviewer", "architect", "diagnostician", "integrator"]},
+    "ownership_token": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "created_at": {"type": "string", "format": "utc"}},
+    "required": ["schema_version", "id", "path", "base_revision", "branch", "role", "ownership_token", "created_at"]}
+
+
+class SupervisorWorktreeOwnership:
+    def __init__(self, directory):
+        from .supervisor_store import SupervisorStore
+        self.store = SupervisorStore(directory)
+
+    def write(self, record):
+        self.store.write(record["ownership_token"] + ".yaml", record, WORKTREE_SCHEMA, exclusive=True)
+
+    def read(self, token):
+        if not re.fullmatch(r"[0-9a-f]{32}", token):
+            raise HarnessError("Invalid worktree ownership token")
+        return self.store.read(token + ".yaml", WORKTREE_SCHEMA)

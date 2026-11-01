@@ -184,6 +184,7 @@ class Supervisor:
             "read_only": self.contract["task"]["read_only"],
             "acceptance": self.contract["acceptance"], "attempt": self.state["attempts_used"],
             "deadline": self.state["deadline"], "run_dir": str(self.path),
+            "budgets": self.contract["budgets"], "declared_inputs": self.contract.get("inputs", []),
             "failure": self.state["current_failure"], "previous_failures": [
                 {key: row[key] for key in ("category", "signature", "snapshot_id", "attempt")}
                 for row in self.state["failure_history"][-3:]]}
@@ -239,7 +240,7 @@ class Supervisor:
         if self.remaining() <= 0:
             self.transition("TIMED_OUT", "original deadline expired before model spawn")
             return False
-        if not self._model_budget_ok():
+        if not self._model_budget_ok(for_spawn=True):
             return False
         self.transition("EXECUTING", "exact session repair" if repair else "authorized model edit phase")
         self.state["attempts_used"] += 1
@@ -252,7 +253,12 @@ class Supervisor:
             # The old runner's workspace lease also prevents a model writer from
             # overlapping a cooperating frozen check on this checkout.
             with run.workspace_lock():
-                prompt = self._prompt(repair=repair)
+                try:
+                    prompt = self._prompt(repair=repair)
+                except (HarnessError, OSError, ValueError) as error:
+                    slot.complete()  # No adapter/model process has been invoked.
+                    self.transition("BLOCKED_AMBIGUOUS", "Required context could not be constructed safely: " + str(error))
+                    return False
                 fresh_remaining = self.remaining()
                 if fresh_remaining <= 0:
                     slot.complete()
@@ -293,7 +299,7 @@ class Supervisor:
         self.transition("FREEZING", "model stopped; capture actual edited source")
         return True
 
-    def _model_budget_ok(self):
+    def _model_budget_ok(self, *, for_spawn=False):
         limit = self.contract["budgets"].get("max_tokens")
         if limit is None:
             return True
@@ -302,12 +308,14 @@ class Supervisor:
             self.transition("BLOCKED_ENVIRONMENT", "Configured token budget cannot be verified: Codex usage unavailable")
             return False
         used = (metrics["input_tokens"] or 0) + (metrics["output_tokens"] or 0)
-        if used >= limit:
+        if used > limit or for_spawn and used == limit:
             self.transition("FAILED_TERMINAL", "Observed token budget exhausted at model-turn boundary")
             return False
         return True
 
     def _verify(self):
+        if not self._model_budget_ok():
+            return False
         run = self._core()
         if (run.attempt_dir(run.state()) / "candidate.json").is_file():
             # Recovery revalidates the exact current tree. Never overwrite immutable
@@ -463,7 +471,10 @@ class Supervisor:
             if identity_alive(self.state["process_identity"]):
                 raise HarnessError("Exact owned model process is still alive; refusing a second writer")
             from .agent_lifecycle import GlobalSlots
-            unresolved = [row["slot"] for row in GlobalSlots(self.state_dir).inventory(self.state["run_id"]) if row["unresolved"]]
+            registry = GlobalSlots(self.state_dir, create=False)
+            if registry.store is None and self.state["attempts_used"]:
+                raise HarnessError("Global model registry is missing; cannot prove previous writer outcomes")
+            unresolved = [row["slot"] for row in registry.inventory(self.state["run_id"]) if row["unresolved"]]
             if unresolved:
                 raise HarnessError("Global model registry has live or uncertain writers for this run: " + str(unresolved))
             unfinished_agents = []
@@ -503,6 +514,11 @@ class Supervisor:
                     "required": ["schema_version", "reason", "timestamp"]})
                 self.store.path("cancel.yaml").unlink()
             self.state["metrics"]["recoveries"] += 1
+            if self.state["process_status"] == "running":
+                # The process outcome was reconciled, but a lost usage checkpoint
+                # cannot be invented. A configured token cap blocks acceptance.
+                self.state["metrics"]["model_invocations"] = self.state["metrics"].get("model_invocations", 0) + 1
+                self.state["metrics"]["missing_usage_turns"] += 1
             self.state["process_identity"] = None
             self.state["process_status"] = "reconciled_dead"
             if self.state["status"] not in BLOCKED | {"UNKNOWN_OUTCOME", "RECOVERY_REQUIRED", "FREEZING"}:
@@ -533,7 +549,8 @@ class Supervisor:
             self.load()
         state = self.state
         from .agent_lifecycle import GlobalSlots
-        inventory = GlobalSlots(self.state_dir).inventory()
+        registry = GlobalSlots(self.state_dir, create=False)
+        inventory = registry.inventory()
         active = [row for row in inventory if row["child_alive"]]
         wave = self.store.read("plans/last-wave.yaml") if self.store.path("plans/last-wave.yaml").exists() else None
         required = [c for c in state["acceptance"] if c["required"]]
@@ -546,8 +563,9 @@ class Supervisor:
             "revision": state["revision"], "baseline_digest": state["baseline_digest"],
             "environment": state["environment"], "budgets": self.contract["budgets"],
             "recorded_status": state["status"],
-            "active_model_sessions": len(active),
-            "active_run_model_sessions": sum(row["run_id"] == state["run_id"] for row in active),
+            "global_registry_status": "observed" if registry.store else "absent",
+            "active_model_sessions": len(active) if registry.store else None,
+            "active_run_model_sessions": sum(row["run_id"] == state["run_id"] for row in active) if registry.store else None,
             "uncertain_model_slots": sum(row["unresolved"] and not row["child_alive"] for row in inventory),
             "critical_path": wave.get("critical_path", []) if wave else [],
             "native_children": "unobservable" if self.contract["mode"] == "native" else "disabled_per_process",

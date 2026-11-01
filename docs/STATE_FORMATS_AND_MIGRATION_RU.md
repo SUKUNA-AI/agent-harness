@@ -37,6 +37,10 @@ Parser ограничивает размер документа 2 MiB, глуб�
 и `work-contract`, `work-state`, `agent-plan`, `agent-state`, `ledger-event`,
 `memory-*`, `check-cache*` и `format-*` схемы текущего слоя.
 
+Check cache/proof используют `schema_version: 2`; legacy v1 даёт cache miss
+без удаления или переписывания оригиналов. `input-closure` v1 описывает полный
+ограниченный physical inventory, включая ignored/hidden files и directories.
+
 ## Private layout
 
 Выбирайте private state вне source checkout. Не помещайте реальные runs,

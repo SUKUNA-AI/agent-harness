@@ -115,7 +115,7 @@ py -3 tools/harness.py install --codex-home "$HarnessHome" --skills-home "$Harne
 | Активный глобальный `AGENTS.override.md` или `AGENTS.md` | Добавить/обновить только managed block между harness markers |
 | `config.toml` | Адресно управлять agent keys и отсутствующим compaction threshold |
 | `agents/delivery_owner.toml`, `delivery_helper.toml`, `delivery_reviewer.toml` | Установить bundled native-роли: high / medium / high, без закрепления модели |
-| Skills home | Установить `agent-harness` и четыре `harness-*` skills с их ресурсами |
+| Skills home | Установить `agent-harness` и шесть `harness-*` skills, включая doc-author/doc-review с их ресурсами |
 | `harness-machine.json` в Codex home | Записать package root, version, overlay и state location |
 | Private state | Сохранить `machine.json`, install history, byte backups и security metadata |
 

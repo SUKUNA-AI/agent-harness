@@ -1,0 +1,54 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "path": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "base_revision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40,64}$"
+    },
+    "branch": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "role": {
+      "enum": [
+        "owner",
+        "reviewer",
+        "architect",
+        "diagnostician",
+        "integrator"
+      ]
+    },
+    "ownership_token": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "utc"
+    }
+  },
+  "required": [
+    "schema_version",
+    "id",
+    "path",
+    "base_revision",
+    "branch",
+    "role",
+    "ownership_token",
+    "created_at"
+  ]
+}

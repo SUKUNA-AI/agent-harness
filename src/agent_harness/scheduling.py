@@ -30,6 +30,13 @@ def validate_plan(plan, contract):
             raise HarnessError("Reviewer must be read-only")
         if node["read_only"] and node["write_scope"]:
             raise HarnessError("Read-only task cannot claim write scopes")
+        if not node["read_only"] and (contract["task"]["read_only"] or not node["write_scope"]):
+            raise HarnessError("Writable worker needs a nonempty scope authorized by a writable parent")
+        for output in node["outputs"]:
+            _path(output)
+            permitted = node["read_scope"] if node["read_only"] else node["write_scope"]
+            if not any(_within(output, scope) for scope in permitted):
+                raise HarnessError("Planned output is outside the node's authorized scope")
         if node["max_attempts"] > budget["max_attempts"] or node["max_wall_seconds"] > budget["max_wall_seconds"]:
             raise HarnessError("Plan exceeds original attempt/deadline budget")
     order, visiting, done = [], set(), set()

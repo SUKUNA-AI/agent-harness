@@ -67,7 +67,18 @@ edit/commit/publish/delete/send/process control не подавляются по
 Вызывающий код может принудительно запросить fresh read для новой цели.
 Проверки acceptance по умолчанию выполняются заново; отдельный
 [`CheckCache`](../src/agent_harness/check_cache.py) требует явного allowlist,
-pure deterministic check и полного proof. Final runner/gate остаются authority.
+полного proof. Cache v2 допускает только изолированные literal Python probes
+через текущий interpreter с `-I -S`: constant print либо чтение относительного
+UTF-8 файла и сравнение с константой. Произвольные tests, imports и opaque
+commands не кэшируются. Перед записью и чтением proof заново проверяются source,
+binary и environment; physical closure включает hidden/ignored inputs.
+Неполная closure, links, special files и превышение bounds дают miss.
+Final runner/gate остаются authority и выполняют обязательные проверки заново.
+
+Для контролируемого `rg` reuse нужны явные `--no-config --no-ignore-parent
+--no-ignore-global --no-ignore-vcs`, разрешённые search flags и относительные
+пути внутри cwd. Govern не дописывает flags сам. Внешние paths, stdin,
+`--hidden`, `--no-ignore`, `--follow` и неизвестные flags требуют fresh execution.
 
 **Граница интеграции:** supervisor не перехватывает все встроенные tools Codex.
 Govern является advisory для этих tools. Значение contract `ledger: govern`

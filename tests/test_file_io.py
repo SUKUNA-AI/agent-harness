@@ -31,6 +31,23 @@ class RegularFileReadTests(unittest.TestCase):
         with self.assertRaises(FileReadError):
             read_regular_file(self.path, missing_ok=True)
 
+    def test_same_size_mutation_with_coalesced_metadata_is_detected_on_every_platform(self):
+        self.path.write_bytes(b"before")
+        native_read = os.read
+        changed = False
+        def mutate(fd, size):
+            nonlocal changed
+            value = native_read(fd, size)
+            if not changed:
+                changed = True
+                self.path.write_bytes(b"after!")
+            return value
+        # Model a filesystem returning identical identity/timestamp observations
+        # for two rapid same-size writes; metadata must not replace byte proof.
+        with patch.object(file_io, "_stamp", return_value=("same-observation",)), patch.object(os, "read", side_effect=mutate):
+            with self.assertRaisesRegex(FileReadError, "changed"):
+                read_regular_file(self.path, 6)
+
     @unittest.skipUnless(hasattr(os, "mkfifo"), "POSIX FIFO")
     def test_static_and_raced_fifo_are_rejected_without_blocking(self):
         os.mkfifo(self.path)

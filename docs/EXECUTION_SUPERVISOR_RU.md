@@ -73,6 +73,11 @@ ledger: inform
 Относительные argv исполняются из рабочего `cwd`. Для изолированного примера
 выберите новую тестовую копию проекта. Не используйте production-файлы для smoke.
 
+Внешние или ignored файлы, влияющие на acceptance, объявляйте в optional
+`inputs`: объекты с абсолютным `path` и при необходимости `sha256`.
+Эти ordinary files включаются в frozen evidence; изменение их bytes делает
+прежнюю приёмку stale. Prompt получает объявленные inputs и исходные budgets.
+
 ```text
 python tools/harness.py work start --contract TASK.yaml --cwd /absolute/repo --run-dir /absolute/private/run --state-dir /absolute/private/state
 python tools/harness.py work status --run-dir /absolute/private/run --summary
@@ -127,6 +132,11 @@ reason, точный session ID, actual candidate cwd и `evidence_current`.
 счётчиками wall-clock, turns, reported token usage, repairs и integration.
 Отсутствующий usage остаётся `unavailable`/`null`; скрытые инструменты Codex
 не превращаются в наблюдённые tool calls.
+
+Token budget проверяется на границах model turns: CLI не предоставляет hard
+limit для скрытого inference внутри turn. Неизвестный usage после interruption
+не разрешает новую попытку или приёмку при заданном token budget. Spawn latency
+измеряется отдельно от времени ожидания глобального slot.
 
 Полные результаты находятся в private `verification/`, `codex/`, `journal/`;
 человеческая сводка — `reports/summary.md`, handoff — `context/handoff.yaml`.

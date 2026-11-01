@@ -1,5 +1,6 @@
 """Real contained fake processes exercise edit, exact resume and broken streams."""
 from pathlib import Path
+from unittest.mock import patch
 import json
 import os
 import subprocess
@@ -193,6 +194,18 @@ class CodexExecutionTests(unittest.TestCase):
         self.assertEqual(result["status"], "timed_out", result)
         self.assertEqual(created, [])
         self.assertFalse((self.cwd / "result.txt").exists())
+
+    def test_authorized_workspace_write_preserves_explicit_user_read_only(self):
+        home = self.folder / "codex-home"
+        home.mkdir()
+        config = home / "config.toml"
+        original = b'model = "user-model"\nsandbox_mode = "read-only"\n'
+        config.write_bytes(original)
+        with patch.dict(os.environ, {"CODEX_HOME": str(home)}):
+            with self.assertRaisesRegex(HarnessError, "explicit installed sandbox"):
+                self.adapter.argv("edit", write_authorized=True)
+            self.assertNotIn('sandbox_mode="workspace-write"', self.adapter.argv("inspect"))
+        self.assertEqual(config.read_bytes(), original)
 
 
 if __name__ == "__main__":

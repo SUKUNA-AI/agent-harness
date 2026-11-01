@@ -7,6 +7,8 @@ import tempfile
 import threading
 import time
 import unittest
+import os
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from agent_harness.codex_execution import CodexAdapter
@@ -46,6 +48,9 @@ class WorkSupervisorTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
+        environment = patch.dict(os.environ, {"CODEX_HOME": str(self.root / "isolated-codex-home")})
+        environment.start()
+        self.addCleanup(environment.stop)
         self.source = self.root / "source"
         self.source.mkdir()
         (self.source / "calc.py").write_text("VALUE = 0\n")
@@ -80,6 +85,15 @@ class WorkSupervisorTests(unittest.TestCase):
         self.assertTrue((self.run / "reports" / "report.yaml").is_file())
         (self.source / "calc.py").write_text("VALUE = 8\n")
         self.assertFalse(supervisor.status(verify=True)["evidence_current"])
+
+    def test_status_does_not_create_missing_model_registry(self):
+        supervisor = self.create()
+        registry = supervisor.state_dir / "global-model-slots"
+        self.assertFalse(registry.exists())
+        result = supervisor.status()
+        self.assertEqual(result["global_registry_status"], "absent")
+        self.assertIsNone(result["active_model_sessions"])
+        self.assertFalse(registry.exists())
 
     def test_failed_test_gets_exact_resume_then_fresh_pass(self):
         supervisor = self.create("repair")
@@ -230,3 +244,30 @@ class WorkSupervisorTests(unittest.TestCase):
         result = supervisor.start()
         self.assertEqual(result["status"], "FAILED_TERMINAL", result)
         self.assertEqual(result["required_passed"], 0)
+
+    def test_unknown_usage_cannot_satisfy_a_configured_budget_on_recovery(self):
+        supervisor = self.create("partial")
+        contract = supervisor.contract
+        contract["budgets"]["max_tokens"] = 1000
+        task = self.root / "unknown-usage.yaml"
+        dump(task, contract)
+        supervisor = Supervisor.create(task, run_dir=self.root / "unknown-usage-run", cwd=self.source,
+            adapter=self.adapter, state_dir=self.root / "global-state")
+        self.assertEqual(supervisor.start()["status"], "UNKNOWN_OUTCOME")
+        result = Supervisor(supervisor.path, adapter=self.adapter).resume()
+        self.assertEqual(result["status"], "BLOCKED_ENVIRONMENT", result)
+        self.assertEqual(self.calls(), ["exec"])
+
+    def test_declared_external_config_invalidates_frozen_evidence(self):
+        supervisor = self.create()
+        config = self.root / "external-config.txt"
+        config.write_text("initial")
+        contract = supervisor.contract
+        contract["inputs"] = [{"path": str(config)}]
+        task = self.root / "declared-inputs.yaml"
+        dump(task, contract)
+        supervisor = Supervisor.create(task, run_dir=self.root / "declared-inputs-run", cwd=self.source,
+            adapter=self.adapter, state_dir=self.root / "global-state")
+        self.assertEqual(supervisor.start()["status"], "ACCEPTED")
+        config.write_text("changed")
+        self.assertFalse(supervisor.status(verify=True)["evidence_current"])

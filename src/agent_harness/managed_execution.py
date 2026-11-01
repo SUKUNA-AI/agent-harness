@@ -7,6 +7,7 @@ from pathlib import Path
 import hashlib
 import json
 import time
+from datetime import datetime, timedelta
 
 from .agent_lifecycle import GlobalSlots, Worktrees, git
 from .core import HarnessError, digest, now
@@ -134,7 +135,10 @@ def execute_managed(supervisor, *, recovering=False):
         return supervisor._loop()
     scheduler = Scheduler(plan, contract)
     trees = Worktrees(state["source_cwd"], supervisor.path / "worktrees")
+    worktree_started = time.monotonic()
     staging = supervisor.store.read("integration.yaml") if recovering and state["integration_worktree"] else trees.create("integration", state["revision"], role="integrator")
+    state["metrics"]["worktree_seconds"] = state["metrics"].get("worktree_seconds", 0) + time.monotonic() - worktree_started
+    trees.validate(staging, expected_id="integration", expected_role="integrator", integrated=True)
     state["cwd"] = staging["path"]
     state["integration_worktree"] = staging["path"]
     if not recovering or not supervisor.store.path("integration.yaml").exists():
@@ -146,21 +150,31 @@ def execute_managed(supervisor, *, recovering=False):
         recorded = supervisor.store.read("agents/" + agent_id + ".yaml", "agent-state.schema.json")
         if recorded["task_contract_digest"] != digest(scheduler.nodes[agent_id]):
             raise HarnessError("Recovered agent contract no longer matches persisted plan")
+        node = scheduler.nodes[agent_id]
+        if (recorded["id"] != node["id"] or recorded["role"] != node["role"]
+                or recorded["allowed_write_scope"] != node["write_scope"] or recorded["read_only"] != node["read_only"]):
+            raise HarnessError("Recovered agent role/scope no longer matches persisted plan")
+        trees.validate(recorded["worktree"], expected_id=node["id"], expected_role=node["role"])
         records[agent_id] = recorded["worktree"]
         if recorded["status"] == "integrated":
             completed.add(agent_id)
 
     def worker(node, record):
         start = time.monotonic()
+        trees.validate(record, expected_id=node["id"], expected_role=node["role"])
+        deadline = min(datetime.fromisoformat(state["deadline"].replace("Z", "+00:00")),
+                       datetime.fromisoformat(record["created_at"].replace("Z", "+00:00")) + timedelta(seconds=node["max_wall_seconds"]))
         previous = supervisor.store.read("agents/" + node["id"] + ".yaml", "agent-state.schema.json") if supervisor.store.path("agents/" + node["id"] + ".yaml").exists() else None
         if previous and (previous["attempts_used"] >= node["max_attempts"] or not previous["thread_id"]):
             raise HarnessError("Recovered worker needs exact session identity and remaining attempt budget: " + node["id"])
+        if previous and (previous["deadline"] != deadline.isoformat() or previous["max_attempts"] != node["max_attempts"]):
+            raise HarnessError("Recovered worker deadline/attempt budget binding changed")
         agent = previous or {"schema_version": 1, "id": node["id"], "role": node["role"],
                  "task_contract_digest": digest(node), "worktree": record, "thread_id": None,
                  "process_identity": None, "status": "spawned", "started_at": now(),
                  "last_progress_at": now(), "allowed_write_scope": node["write_scope"],
-                 "read_only": node["read_only"], "deadline": state["deadline"],
-                 "max_attempts": state["max_attempts"], "attempts_used": 1, "stdout_offset": 0,
+                 "read_only": node["read_only"], "deadline": deadline.isoformat(),
+                 "max_attempts": node["max_attempts"], "attempts_used": 1, "stdout_offset": 0,
                  "stderr_offset": 0, "checkpoint": 0, "spawn_reason": "independent ready critical-path task"}
         if previous:
             agent["attempts_used"] += 1
@@ -192,11 +206,12 @@ def execute_managed(supervisor, *, recovering=False):
                       "Preserve original limits and complete only your assigned scope.\n" + prompt)
         with GlobalSlots(supervisor.state_dir).acquire(state["run_id"], node["id"], node["role"],
                 cancel_file=supervisor.path / "cancel.yaml", timeout=min(60, supervisor.remaining())) as slot:
-            remaining = min(supervisor.remaining(), node["max_wall_seconds"], contract["budgets"]["turn_timeout_seconds"])
+            trees.validate(record, expected_id=node["id"], expected_role=node["role"])
+            remaining = min(supervisor.remaining(), (deadline - datetime.now(deadline.tzinfo)).total_seconds(), contract["budgets"]["turn_timeout_seconds"])
             if remaining <= 0:
                 slot.complete()
                 raise HarnessError("Managed task deadline expired before model spawn")
-            result = supervisor._adapter().run(prompt, cwd=record["path"], timeout=remaining, deadline=state["deadline"],
+            result = supervisor._adapter().run(prompt, cwd=record["path"], timeout=remaining, deadline=agent["deadline"],
                 session_id=previous["thread_id"] if previous else None,
                 cancel_file=supervisor.path / "cancel.yaml", on_process=process, on_event=event,
                 read_only=node["read_only"], native_children=False,
@@ -221,7 +236,9 @@ def execute_managed(supervisor, *, recovering=False):
         spawned = {}
         for name in wave["selected"]:
             node = scheduler.nodes[name]
+            worktree_started = time.monotonic()
             record = records.get(name) or trees.create(name, base, role=node["role"])
+            state["metrics"]["worktree_seconds"] += time.monotonic() - worktree_started
             records[name] = record
             if name not in state["agents"]:
                 state["agents"].append(name)
@@ -267,6 +284,7 @@ def execute_managed(supervisor, *, recovering=False):
                 supervisor.store.write("agents/" + name + ".yaml", agent, "agent-state.schema.json")
             except HarnessError as error:
                 state["metrics"]["integration_conflicts"] += 1
+                state["metrics"]["integration_seconds"] += time.monotonic() - started
                 supervisor.transition("BLOCKED_AMBIGUOUS", "Integration conflict/scope violation requires a bounded conflict task: " + str(error))
                 return supervisor._loop()
             state["metrics"]["integration_seconds"] += time.monotonic() - started
@@ -274,5 +292,6 @@ def execute_managed(supervisor, *, recovering=False):
             supervisor._save("integrated scoped task " + name + "; final combined acceptance still pending")
     # One integration owner runs in the final staging cwd. Its exact session is
     # resumable for combined-test repairs; worker sessions remain bound to their own cwd.
+    trees.validate(staging, expected_id="integration", expected_role="integrator", integrated=True)
     supervisor._execute()
     return supervisor._loop()
