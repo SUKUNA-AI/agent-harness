@@ -37,9 +37,11 @@ Parser ограничивает размер документа 2 MiB, глуб�
 и `work-contract`, `work-state`, `agent-plan`, `agent-state`, `ledger-event`,
 `memory-*`, `check-cache*` и `format-*` схемы текущего слоя.
 
-Check cache/proof используют `schema_version: 2`; legacy v1 даёт cache miss
+Check cache/proof используют `schema_version: 3`; legacy v1/v2 даёт cache miss
 без удаления или переписывания оригиналов. `input-closure` v1 описывает полный
 ограниченный physical inventory, включая ignored/hidden files и directories.
+`python-runtime-closure` v1 отдельно связывает finite startup/DLL/stdlib inputs
+и отсутствие альтернативной startup configuration.
 
 ## Private layout
 

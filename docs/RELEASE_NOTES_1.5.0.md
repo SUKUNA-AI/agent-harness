@@ -52,3 +52,7 @@ proof блокирует managed concurrency>1. Token cap проверяется
 внутренний hard decoding cap через CLI недоступен. После закрытия foreground
 процесса нужен resume. Local config не настраивает hosted Work и не гарантирует
 hot reload старого чата. Release не требует дополнительных сервисов/БД.
+
+Optional check cache v3 ограничен доказанными literal probes в закрытом
+Windows Python bundle; обычные global/venv/POSIX runtimes выполняются fresh.
+Legacy cache v1/v2 становится miss без удаления исторических записей.

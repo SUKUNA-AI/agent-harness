@@ -67,13 +67,22 @@ edit/commit/publish/delete/send/process control не подавляются по
 Вызывающий код может принудительно запросить fresh read для новой цели.
 Проверки acceptance по умолчанию выполняются заново; отдельный
 [`CheckCache`](../src/agent_harness/check_cache.py) требует явного allowlist,
-полного proof. Cache v2 допускает только изолированные literal Python probes
+полного proof. Cache v3 допускает только изолированные literal Python probes
 через текущий interpreter с `-I -S`: constant print либо чтение относительного
 UTF-8 файла и сравнение с константой. Произвольные tests, imports и opaque
 commands не кэшируются. Перед записью и чтением proof заново проверяются source,
 binary и environment; physical closure включает hidden/ignored inputs.
 Неполная closure, links, special files и превышение bounds дают miss.
 Final runner/gate остаются authority и выполняют обязательные проверки заново.
+
+Дополнительно требуется доказанная startup/runtime closure. Текущая optional
+policy поддерживает только отдельный Windows bundle с matching trusted Python
+binary, конечным набором local runtime DLL, единственным relative ZIP в
+versioned `._pth` и проверенными stdlib modules. Проверяются и bytes, и отсутствие
+alternate `._pth`/`pyvenv.cfg`. Обычные global/venv/POSIX interpreters не дают
+полного доказательства и не кэшируются. Ничего устанавливать для acceptance
+не требуется: unsupported случай выполняется заново. Эта граница покрыта
+реальным positive bundle и изменениями startup config, DLL и ZIP.
 
 Для контролируемого `rg` reuse нужны явные `--no-config --no-ignore-parent
 --no-ignore-global --no-ignore-vcs`, разрешённые search flags и относительные
