@@ -78,6 +78,7 @@ class DistributionTests(unittest.TestCase):
         self.assertEqual(first["sha256"], second["sha256"])
         self.assertEqual(Path(first["archive"]).read_bytes(), Path(second["archive"]).read_bytes())
         with zipfile.ZipFile(first["archive"]) as archive:
+            self.assertTrue(all(item.compress_type == zipfile.ZIP_STORED for item in archive.infolist()))
             self.assertFalse(any(name.endswith(("/.env", "/auth.json")) for name in archive.namelist()))
             self.assertEqual(archive.read("agent-harness-" + VERSION + "/README.md"), b"Portable fixture\nsecond line\n")
         self.assertEqual(release.verify_archive(first["archive"])["version"], VERSION)

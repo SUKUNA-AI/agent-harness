@@ -247,13 +247,15 @@ def build_release(root, output_dir, *, required_platforms=(), source_only=False)
         if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
             raise ReleaseError("Linked release output parent is forbidden")
     with tempfile.TemporaryFile() as stream:
-        with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+        # Stored entries remove compressor-version variability. Sources and
+        # binaries remain modest enough for the bounded portable artifact.
+        with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_STORED) as archive:
             for name, (data, mode) in sorted(files.items()):
                 item = zipfile.ZipInfo(package + "/" + name, date_tuple)
                 item.create_system = 3
                 item.external_attr = mode << 16
-                item.compress_type = zipfile.ZIP_DEFLATED
-                archive.writestr(item, data, compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+                item.compress_type = zipfile.ZIP_STORED
+                archive.writestr(item, data, compress_type=zipfile.ZIP_STORED)
         stream.seek(0)
         payload = stream.read(MAX_ARCHIVE_BYTES + 1)
     if len(payload) > MAX_ARCHIVE_BYTES:
@@ -276,7 +278,7 @@ def build_release(root, output_dir, *, required_platforms=(), source_only=False)
     return {"status": "built", "version": version, "source_revision": revision,
             "archive": str(destination), "sha256": checksum, "bytes": len(payload),
             "native_platforms": platforms, "manifest_files": len(manifest["files"]),
-            "kind": manifest["kind"], "reproducibility": "Git blobs and verified native bytes; fixed ZIP metadata; build duration omitted"}
+            "kind": manifest["kind"], "reproducibility": "Git blobs and verified native bytes; stored entries and fixed ZIP metadata; build duration omitted"}
 
 
 def verify_archive(archive_path, *, extract_to=None):
