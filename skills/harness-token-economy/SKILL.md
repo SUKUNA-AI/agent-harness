@@ -7,7 +7,8 @@ description: Организовать работу harness с ограничен
 
 Для handoff, offload outputs, wiki и source packets загрузи
 `{{PACKAGE_ROOT}}/workflows/context.md`. Храни проектные знания отдельно от
-глобальных skills, только в разрешённой области. JSON/Markdown достаточно;
+глобальных skills, только в разрешённой области. Обычные notes могут быть Markdown,
+legacy core сохраняет JSON; typed supervisor state и memory используют Strict YAML.
 БД, второй runtime и стенограмма не нужны. Sources привязывай к revision/hash.
 
 Начни с адресного `rg` и чтения участка. Если нужны связи незнакомого проекта:
