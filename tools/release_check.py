@@ -61,7 +61,9 @@ def main():
         for name in dirs:
             if (base / name).is_symlink():
                 errors.append(f"{(base / name).relative_to(ROOT)}: symlink directory")
-        files.extend(base / name for name in names)
+        # Linked worktrees use a machine-local .git pointer file instead of a
+        # directory. Git metadata is never part of the portable distribution.
+        files.extend(base / name for name in names if name != ".git")
     native_binaries = set()
     for manifest in (ROOT / "bin").glob("*/build-info.json"):
         try:
