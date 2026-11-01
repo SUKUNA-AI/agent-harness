@@ -1,0 +1,45 @@
+{
+  "properties": {
+    "archive": {
+      "pattern": "^journal/interrupted-[a-f0-9]{32}\\.jsonl$",
+      "type": "string"
+    },
+    "complete_events": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "discarded_bytes": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "original_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "type": "string"
+    },
+    "prefix_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "status": {
+      "const": "RECOVERY_REQUIRED"
+    },
+    "timestamp": {
+      "format": "utc",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "status",
+    "original_sha256",
+    "prefix_sha256",
+    "archive",
+    "discarded_bytes",
+    "complete_events",
+    "timestamp"
+  ],
+  "type": "object"
+}

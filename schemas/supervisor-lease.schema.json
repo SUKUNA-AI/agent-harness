@@ -1,0 +1,45 @@
+{
+  "properties": {
+    "created_at": {
+      "format": "utc",
+      "type": "string"
+    },
+    "identity": {
+      "properties": {
+        "created": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "pid": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "pid",
+        "created"
+      ],
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "purpose": {
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "token": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "identity",
+    "token",
+    "purpose",
+    "created_at"
+  ],
+  "type": "object"
+}

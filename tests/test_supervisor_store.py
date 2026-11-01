@@ -126,6 +126,32 @@ class SupervisorStoreTests(unittest.TestCase):
         with self.assertRaisesRegex(HarnessError, "hash"):
             self.store.recover()
 
+    def test_explicit_tail_repair_preserves_original_and_requires_reconcile(self):
+        self.store.commit({"schema_version": 1, "status": "pending"}, "start")
+        path = self.root / "journal/events.jsonl"
+        complete = path.read_bytes()
+        torn = complete + b'{"schema_version":1,"partial":'
+        path.write_bytes(torn)
+        receipt = self.store.repair_torn_tail()
+        self.assertTrue(receipt["recovery_required"])
+        self.assertEqual((self.root / receipt["archive"]).read_bytes(), torn)
+        self.assertEqual(receipt["original_sha256"], hashlib.sha256(torn).hexdigest())
+        self.assertTrue(path.read_bytes().startswith(complete))
+        resumed = self.store.recover()
+        self.assertTrue(resumed["recovery_required"])
+        self.assertEqual(resumed["state"]["status"], "pending")
+        self.assertEqual(self.store.repair_torn_tail()["status"], "no_repair_needed")
+
+    def test_tail_repair_refuses_complete_corruption_and_missing_newline(self):
+        self.store.commit({"schema_version": 1, "status": "pending"}, "start")
+        path = self.root / "journal/events.jsonl"
+        complete = path.read_bytes()
+        for tail in [b'{"valid":"object"}', b'{"invalid": garbage}', b'garbage', b'{"invalid": garbage}\n']:
+            path.write_bytes(complete + tail)
+            with self.subTest(tail=tail), self.assertRaises(HarnessError):
+                self.store.repair_torn_tail()
+            self.assertEqual(path.read_bytes(), complete + tail)
+
     def test_atomic_replace_failure_keeps_old_file(self):
         self.store.write("plain.yaml", {"schema_version": 1, "status": "pending"}, SCHEMA)
         before = (self.root / "plain.yaml").read_bytes()

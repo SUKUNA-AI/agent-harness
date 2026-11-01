@@ -1,0 +1,57 @@
+{
+  "properties": {
+    "attempt_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "event_id": {
+      "type": "string"
+    },
+    "generation": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "journal_hash": {
+      "pattern": "^[a-f0-9]{64}$",
+      "type": "string"
+    },
+    "owner": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "reason": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "state": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "state_digest": {
+      "pattern": "^[a-f0-9]{64}$",
+      "type": "string"
+    },
+    "timestamp": {
+      "format": "utc",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "generation",
+    "event_id",
+    "journal_hash",
+    "state_digest",
+    "state",
+    "reason",
+    "owner",
+    "attempt_id",
+    "timestamp"
+  ],
+  "type": "object"
+}

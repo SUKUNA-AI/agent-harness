@@ -1,0 +1,41 @@
+{
+  "properties": {
+    "event_id": {
+      "pattern": "^[a-f0-9]{32}$",
+      "type": "string"
+    },
+    "hash": {
+      "pattern": "^[a-f0-9]{64}$",
+      "type": "string"
+    },
+    "payload": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "previous_hash": {
+      "pattern": "^[a-f0-9]{64}$",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "sequence": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "timestamp": {
+      "format": "utc",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "sequence",
+    "event_id",
+    "timestamp",
+    "previous_hash",
+    "payload",
+    "hash"
+  ],
+  "type": "object"
+}

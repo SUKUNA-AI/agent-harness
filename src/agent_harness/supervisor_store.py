@@ -103,6 +103,7 @@ _IDENTITY = {"type": ["object", "null"], "properties": {"pid": {"type": "integer
 LEASE_SCHEMA = {"type": "object", "required": ["schema_version", "identity", "token", "purpose", "created_at"], "properties": {"schema_version": {"const": 1}, "identity": _IDENTITY, "token": {"type": "string"}, "purpose": {"type": "string"}, "created_at": {"type": "string", "format": "utc"}}}
 EVENT_SCHEMA = {"type": "object", "required": ["schema_version", "sequence", "event_id", "timestamp", "previous_hash", "payload", "hash"], "properties": {"schema_version": {"const": 1}, "sequence": {"type": "integer", "minimum": 1}, "event_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"}, "timestamp": {"type": "string", "format": "utc"}, "previous_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "payload": {"type": "object", "additionalProperties": True}, "hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}}
 CHECKPOINT_SCHEMA = {"type": "object", "required": ["schema_version", "generation", "event_id", "journal_hash", "state_digest", "state", "reason", "owner", "attempt_id", "timestamp"], "properties": {"schema_version": {"const": 1}, "generation": {"type": "integer", "minimum": 1}, "event_id": {"type": "string"}, "journal_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "state_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "state": {"type": "object", "additionalProperties": True}, "reason": {"type": "string", "minLength": 1}, "owner": {"type": "string", "minLength": 1}, "attempt_id": {"type": ["string", "null"]}, "timestamp": {"type": "string", "format": "utc"}}}
+RECOVERY_SCHEMA = {"type": "object", "required": ["schema_version", "status", "original_sha256", "prefix_sha256", "archive", "discarded_bytes", "complete_events", "timestamp"], "properties": {"schema_version": {"const": 1}, "status": {"const": "RECOVERY_REQUIRED"}, "original_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "prefix_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "archive": {"type": "string", "pattern": "^journal/interrupted-[a-f0-9]{32}\\.jsonl$"}, "discarded_bytes": {"type": "integer", "minimum": 1}, "complete_events": {"type": "integer", "minimum": 0}, "timestamp": {"type": "string", "format": "utc"}}}
 
 
 class SupervisorStore:
@@ -182,6 +183,10 @@ class SupervisorStore:
             return []
         _parents(path)
         raw = read_regular_file(path, max_bytes=MAX_JOURNAL_BYTES)
+        return self._decode_events(raw)
+
+    @staticmethod
+    def _decode_events(raw):
         if raw and not raw.endswith(b"\n"):
             raise HarnessError("Torn journal tail: recovery required; refusing blind replay")
         result, previous = [], "0" * 64
@@ -199,6 +204,51 @@ class SupervisorStore:
             previous = record["hash"]
             result.append(record)
         return result
+
+    def repair_torn_tail(self):
+        """Archive a demonstrably truncated final record, requiring reconciliation.
+
+        A complete corrupt row, even the final one, is never silently discarded.
+        Missing final LF on otherwise valid JSON is ambiguous and also refused.
+        The archive and recovery marker are durable before journal replacement.
+        """
+        with self._writing():
+            path = self.path("journal/events.jsonl")
+            _parents(path)
+            raw = read_regular_file(path, max_bytes=MAX_JOURNAL_BYTES)
+            if not raw or raw.endswith(b"\n"):
+                self._decode_events(raw)
+                return {"status": "no_repair_needed", "recovery_required": self.path("recovery-required.yaml").exists()}
+            offset = raw.rfind(b"\n") + 1
+            prefix, tail = raw[:offset], raw[offset:]
+            records = self._decode_events(prefix)
+            try:
+                text = tail.decode("utf-8")
+            except UnicodeDecodeError as error:
+                if error.end != len(tail) or error.reason != "unexpected end of data":
+                    raise HarnessError("Corrupt final journal encoding; refusing tail repair") from error
+                text = tail[:error.start].decode("utf-8")
+            if not text.lstrip().startswith("{"):
+                raise HarnessError("Final journal record is not a demonstrably truncated object")
+            try:
+                json.loads(text, object_pairs_hook=lambda pairs: dict(pairs))
+            except json.JSONDecodeError as error:
+                if error.pos < len(text.rstrip()) and not error.msg.startswith("Unterminated string"):
+                    raise HarnessError("Complete or ambiguous journal corruption; refusing tail repair") from error
+            else:
+                raise HarnessError("Valid JSON without final newline is ambiguous; refusing tail repair")
+            archive = "journal/interrupted-" + uuid.uuid4().hex + ".jsonl"
+            atomic_write(self.path(archive), raw, exclusive=True)
+            receipt = {"schema_version": 1, "status": "RECOVERY_REQUIRED", "original_sha256": hashlib.sha256(raw).hexdigest(), "prefix_sha256": hashlib.sha256(prefix).hexdigest(), "archive": archive, "discarded_bytes": len(tail), "complete_events": len(records), "timestamp": now()}
+            # A pre-existing marker is immutable evidence. Additional failed
+            # repairs retain another receipt while keeping recovery blocked.
+            if self.path("recovery-required.yaml").exists():
+                self.write("recovery/" + uuid.uuid4().hex + ".yaml", receipt, RECOVERY_SCHEMA, exclusive=True)
+            else:
+                self.write("recovery-required.yaml", receipt, RECOVERY_SCHEMA, exclusive=True)
+            atomic_write(path, prefix)
+            self.append_event({"kind": "tail_repair", "receipt": receipt})
+            return {**receipt, "recovery_required": True}
 
     def append_event(self, event):
         with self._writing():
@@ -242,11 +292,12 @@ class SupervisorStore:
     def recover(self):
         with self._writing():
             records = self.events()
+            marker = self.read("recovery-required.yaml", RECOVERY_SCHEMA) if self.path("recovery-required.yaml").exists() else None
             checkpoints = [r for r in records if r["payload"].get("kind") == "checkpoint"]
             if not checkpoints:
                 if self.path("state.yaml").exists():
                     raise HarnessError("State lacks committed journal provenance")
-                return {"state": None, "generation": 0, "recovered": False, "events": len(records)}
+                return {"state": None, "generation": 0, "recovered": False, "events": len(records), "recovery_required": marker is not None, "recovery_receipt": marker}
             for index, event in enumerate(checkpoints, 1):
                 payload = event["payload"]
                 if payload.get("generation") != index or _digest(payload.get("state")) != payload.get("state_digest"):
@@ -260,6 +311,8 @@ class SupervisorStore:
                 else:
                     self.write(name, expected, CHECKPOINT_SCHEMA, exclusive=True)
             state = checkpoints[-1]["payload"]["state"]
+            if marker is not None:
+                return {"state": state, "generation": len(checkpoints), "recovered": False, "events": len(records), "recovery_required": True, "recovery_receipt": marker}
             try:
                 current = self.read("state.yaml", self.state_schema)
             except FileNotFoundError:
@@ -269,4 +322,4 @@ class SupervisorStore:
             recovered = current != state
             if recovered:
                 self.write("state.yaml", state, self.state_schema)
-            return {"state": state, "generation": len(checkpoints), "recovered": recovered, "events": len(records)}
+            return {"state": state, "generation": len(checkpoints), "recovered": recovered, "events": len(records), "recovery_required": False, "recovery_receipt": None}
