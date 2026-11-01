@@ -107,6 +107,36 @@ class ManagedSchedulingTests(unittest.TestCase):
         with self.assertRaisesRegex(HarnessError, "suppression proof"):
             validate_suppression(None, {"version": "unproven", "binary_sha256": "x"})
 
+    def test_planner_materializes_validated_schema_in_private_run(self):
+        import json
+        from agent_harness.managed_execution import _plan
+        from agent_harness.strict_yaml import load
+        plan = deepcopy(self.plan)
+        class Planner:
+            def run(adapter, prompt, **options):
+                schema_path = Path(options["output_schema"])
+                self.assertTrue(schema_path.is_relative_to(supervisor.path))
+                self.assertTrue(options["read_only"])
+                schema = json.loads(schema_path.read_text(encoding="utf-8"))
+                self.assertEqual(schema["required"], ["schema_version", "task_id", "tasks"])
+                log = supervisor.path / "planner-stream.jsonl"
+                log.write_text(json.dumps({"type": "item.completed", "item": {
+                    "type": "agent_message", "text": json.dumps(plan)}}) + "\n", encoding="utf-8")
+                return {"status": "completed", "turn_started": True,
+                    "usage": {"input_tokens": 5, "output_tokens": 2}, "logs": {"stdout": str(log)}}
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "source"
+            source.mkdir()
+            task = root / "task.yaml"
+            dump(task, self.contract)
+            supervisor = Supervisor.create(task, run_dir=root / "private" / "run", cwd=source,
+                state_dir=root / "state", adapter=Planner())
+            self.assertEqual(_plan(supervisor, {"output_schema": True}), plan)
+            self.assertEqual(load(supervisor.path / "plans/current.yaml", "agent-plan.schema.json"), plan)
+            self.assertEqual(supervisor.state["metrics"]["input_tokens"], 5)
+            self.assertEqual(supervisor.state["process_status"], "completed")
+
     def test_interrupted_wave_cannot_reset_a_configured_token_budget(self):
         from unittest.mock import patch
         from agent_harness.agent_lifecycle import Worktrees

@@ -71,7 +71,20 @@ def _plan(supervisor, capabilities):
     else:
         if not capabilities.get("output_schema"):
             raise HarnessError("Installed CLI cannot supply a structured plan; provide a validated --plan or use native mode")
-        schema_path = Path(__file__).resolve().parents[2] / "schemas" / "agent-plan.schema.json"
+        # Resolve the authoritative schema through the same checkout/wheel
+        # loader as validation. The CLI needs a physical JSON file, including
+        # when the package is installed without a source checkout.
+        from .strict_yaml import _schema
+        from .supervisor_store import atomic_write
+        from .file_io import read_regular_file
+        schema_bytes = (json.dumps(_schema("agent-plan.schema.json"), sort_keys=True) + "\n").encode("utf-8")
+        schema_path = supervisor.store.path("plans/output-schema-" + hashlib.sha256(schema_bytes).hexdigest() + ".json")
+        schema_path.parent.mkdir(exist_ok=True)
+        if schema_path.exists():
+            if read_regular_file(schema_path) != schema_bytes:
+                raise HarnessError("Persisted structured-output schema changed")
+        else:
+            atomic_write(schema_path, schema_bytes, exclusive=True)
         prompt = ("Return a bounded task DAG matching the supplied schema for the following authorized task. "
                   "Do not edit files, execute commands, spawn agents or call session connectors. "
                   "Use independent write scopes only where useful. No model/provider/security changes. "
