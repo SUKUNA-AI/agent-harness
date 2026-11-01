@@ -312,6 +312,10 @@
           "type": "string",
           "maxLength": 512
         },
+        "input_closure_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
         "supersedes": {
           "type": "string",
           "maxLength": 512

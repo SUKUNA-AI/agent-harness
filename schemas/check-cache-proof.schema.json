@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "check-cache-proof v1",
+  "title": "check-cache-proof v2",
   "type": "object",
   "additionalProperties": false,
   "properties": {
     "schema_version": {
-      "const": 1
+      "const": 2
     },
     "snapshot_id": {
       "type": "string",
@@ -22,6 +22,138 @@
     "binary_digest": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
+    },
+    "binary_path": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "input_closure": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "root": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "policy": {
+          "const": "physical_regular_tree_including_ignored_v1"
+        },
+        "entries": {
+          "type": "object",
+          "maxProperties": 384,
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)(?!.*:).+$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "enum": [
+                  "file",
+                  "directory"
+                ]
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1048576
+              },
+              "mode": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4095
+              }
+            },
+            "required": [
+              "kind",
+              "mode"
+            ],
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "kind": {
+                      "const": "file"
+                    }
+                  },
+                  "additionalProperties": true
+                },
+                "then": {
+                  "required": [
+                    "sha256",
+                    "bytes"
+                  ]
+                },
+                "else": {
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "sha256"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "bytes"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "file_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 256
+        },
+        "directory_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 128
+        },
+        "total_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8388608
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "schema_version",
+        "root",
+        "policy",
+        "entries",
+        "file_count",
+        "directory_count",
+        "total_bytes",
+        "digest"
+      ]
+    },
+    "live_environment_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "check_definition_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "probe_policy": {
+      "const": "isolated_literal_python_probe_v1"
     },
     "argv": {
       "type": "array",
@@ -62,6 +194,11 @@
     "repository_identity",
     "toolchain_digest",
     "binary_digest",
+    "binary_path",
+    "input_closure",
+    "live_environment_digest",
+    "check_definition_digest",
+    "probe_policy",
     "argv",
     "cwd",
     "env_digest",

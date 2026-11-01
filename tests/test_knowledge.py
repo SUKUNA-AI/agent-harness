@@ -62,7 +62,7 @@ class KnowledgeScenarios(unittest.TestCase):
         ledger = self.ledger()
         output = self.base / "empty.txt"
         output.write_text("", encoding="utf-8")
-        operation = {"argv": ["rg", "absent", "."], "cwd": str(self.repo), "purpose": "locate absent symbol",
+        operation = {"argv": ["rg", "--no-config", "--no-ignore-parent", "--no-ignore-global", "--no-ignore-vcs", "absent", "."], "cwd": str(self.repo), "purpose": "locate absent symbol",
             "effect": "read_only", "input_closure_complete": True, "toolchain_digest": digest("rg-v1"),
             "env_digest": digest({}), "config_digest": digest({})}
         decision = ledger.govern(operation, self.current)
@@ -76,6 +76,7 @@ class KnowledgeScenarios(unittest.TestCase):
         self.assertEqual(reused["reused_event_id"], record["event_id"])
         (self.repo / "new.py").write_text("absent = 1\n", encoding="utf-8")
         self.assertEqual(ledger.govern(operation, self.provenance())["decision"], "allow")
+        self.assertNotEqual(ledger.govern(operation, self.current)["decision"], "suggest_reuse")
         self.assertEqual(ledger.govern(operation, self.current, force=True)["decision"], "allow")
 
     def test_state_sensitive_write_unknown_and_unproven_reads_never_reuse(self):
@@ -182,7 +183,7 @@ class KnowledgeScenarios(unittest.TestCase):
             reduce([], max_bytes=1024, required={"contract": "x" * 10000})
 
     def test_cache_requires_pure_closure_and_invalidates_config_toolchain_evidence(self):
-        check = {"id": "pure-one", "argv": [sys.executable, "-c", "print(1)"], "cache_policy": "verified_inputs_only", "deterministic": True, "effect": "pure"}
+        check = {"id": "pure-one", "argv": [sys.executable, "-I", "-S", "-c", "print(1)"], "cache_policy": "verified_inputs_only", "deterministic": True, "effect": "pure"}
         proof = make_proof(self.repo, check, toolchain_digest=digest("python-v1"), environment={}, config={"strict": True},
                            isolated_environment=True, no_external_dependencies=True)
         evidence = self.base / "proof.txt"
@@ -299,6 +300,157 @@ class KnowledgeScenarios(unittest.TestCase):
             offset = page["next_offset"]
         from agent_harness.core import canonical
         self.assertEqual("".join(chunks), canonical(value).decode("utf-8"))
+
+
+class ReuseSafetyRegressions(unittest.TestCase):
+    """Actual reproductions: fresh final gates are independent of these read caches."""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.base = Path(self.temp.name)
+        self.repo = self.base / "repo"
+        self.repo.mkdir()
+        (self.repo / "tracked.txt").write_text("one")
+        (self.repo / ".gitignore").write_text("ignored.txt\n")
+        for args in (["init"], ["add", "."], ["-c", "user.name=Fixture", "-c", "user.email=fixture@localhost", "-c", "commit.gpgsign=false", "commit", "-m", "fixture"]):
+            subprocess.run(["git", *args], cwd=self.repo, capture_output=True, check=True)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def cache_case(self, filename):
+        check = {"id": "closed-read", "argv": [sys.executable, "-I", "-S", "-c", "assert open(" + repr(filename) + ", encoding='utf-8').read() == 'one'"],
+                 "cache_policy": "verified_inputs_only", "deterministic": True, "effect": "pure"}
+        proof = make_proof(self.repo, check, toolchain_digest=digest("python"), environment={}, config={},
+                           isolated_environment=True, no_external_dependencies=True)
+        self.assertEqual(subprocess.run(check["argv"], cwd=self.repo, env={}, capture_output=True).returncode, 0)
+        evidence = self.base / "check.json"
+        evidence.write_text('{"status":"passed"}')
+        cache = CheckCache(self.base / "cache", allowlist=[check["id"]])
+        cache.put(check, proof, {"id": "check-closed-read", "path": str(evidence), "status": "passed"}, run_id="first")
+        return check, proof, cache
+
+    def test_old_proof_never_hits_after_tracked_source_edit(self):
+        check, old, cache = self.cache_case("tracked.txt")
+        (self.repo / "tracked.txt").write_text("two")
+        self.assertEqual(subprocess.run(check["argv"], cwd=self.repo, env={}, capture_output=True).returncode, 1)
+        self.assertFalse(cache.get(check, old)["hit"])
+
+    def test_fresh_proof_covers_git_ignored_actual_check_input(self):
+        (self.repo / "ignored.txt").write_text("one")
+        check, old, cache = self.cache_case("ignored.txt")
+        (self.repo / "ignored.txt").write_text("two")
+        fresh = make_proof(self.repo, check, toolchain_digest=digest("python"), environment={}, config={},
+                           isolated_environment=True, no_external_dependencies=True)
+        self.assertEqual(subprocess.run(check["argv"], cwd=self.repo, env={}, capture_output=True).returncode, 1)
+        self.assertNotEqual(old, fresh)
+        self.assertFalse(cache.get(check, fresh)["hit"])
+
+    def unsafe_rg_reuse(self, *, outside=False):
+        target = self.base / "external.txt" if outside else self.repo / "ignored.txt"
+        target.write_text("nothing\n")
+        argv = [shutil.which("rg"), *([] if outside else ["--no-ignore", "--hidden"]), "CLOSURE_SENTINEL", str(target) if outside else "."]
+        if not argv[0]:
+            self.skipTest("rg unavailable")
+        before = subprocess.run(argv, cwd=self.repo, capture_output=True)
+        self.assertEqual(before.returncode, 1)
+        current = provenance_for(self.repo, snapshot({"cwd": str(self.repo)}), toolchain_digest=digest("rg"))
+        operation = {"argv": argv, "cwd": str(self.repo), "purpose": "search sentinel", "effect": "read_only",
+            "input_closure_complete": True, "toolchain_digest": digest("rg-tool"), "env_digest": digest({}), "config_digest": digest({})}
+        ledger = Ledger(self.base / "run", repository_identity(self.repo))
+        decision = ledger.govern(operation, current)
+        raw = self.base / "empty-rg.txt"
+        raw.write_bytes(before.stdout)
+        ledger.append("command", {"argv": argv, "cwd": str(self.repo), "effect": "read_only", "status": "completed", "exit_code": 1,
+            "operation_fingerprint": decision["operation_fingerprint"], "evidence_path": str(raw), "evidence_digest": hashlib.sha256(raw.read_bytes()).hexdigest()}, current)
+        target.write_text("CLOSURE_SENTINEL\n")
+        fresh = provenance_for(self.repo, snapshot({"cwd": str(self.repo)}), toolchain_digest=digest("rg"))
+        self.assertEqual(subprocess.run(argv, cwd=self.repo, capture_output=True).returncode, 0)
+        self.assertNotEqual(ledger.govern(operation, fresh)["decision"], "suggest_reuse")
+
+    def test_no_ignore_hidden_rg_cannot_reuse_uncovered_ignored_input(self):
+        self.unsafe_rg_reuse()
+
+    def test_rg_external_absolute_scope_never_reuses_repository_proof(self):
+        self.unsafe_rg_reuse(outside=True)
+
+    def test_physical_closure_schema_and_file_directory_budgets_fail_closed(self):
+        from agent_harness.input_closure import bounded_closure, CLOSURE_SCHEMA
+        tree = bounded_closure(self.repo)
+        validate(tree, CLOSURE_SCHEMA)
+        self.assertIn(".git", tree["entries"])
+        self.assertEqual(tree["entries"][".git"]["kind"], "directory")
+        broken = deepcopy(tree)
+        broken["entries"][".git"]["bytes"] = 0
+        with self.assertRaises(StrictYAMLError):
+            validate(broken, CLOSURE_SCHEMA)
+        with patch("agent_harness.input_closure.MAX_FILES", 1):
+            with self.assertRaises(HarnessError):
+                bounded_closure(self.repo)
+        with patch("agent_harness.input_closure.MAX_DIRECTORIES", 1):
+            with self.assertRaises(HarnessError):
+                bounded_closure(self.repo)
+        with patch("agent_harness.input_closure.MAX_TOTAL_BYTES", 1):
+            with self.assertRaises(HarnessError):
+                bounded_closure(self.repo)
+
+    def test_cache_revalidates_live_environment_and_never_migrates_legacy_proof_in_place(self):
+        check, proof, cache = self.cache_case("tracked.txt")
+        self.assertTrue(cache.get(check, proof)["hit"])
+        with patch.dict(os.environ, {"REUSE_AUDIT_OPTION": "changed"}):
+            self.assertFalse(cache.get(check, proof)["hit"])
+        legacy = deepcopy(proof)
+        legacy["schema_version"] = 1
+        self.assertFalse(cache.get(check, legacy)["hit"])
+        # Original immutable record remains exactly available after misses.
+        saved = list(cache.root.glob("*.yaml"))
+        self.assertEqual(len(saved), 1)
+        original = saved[0].read_bytes()
+        self.assertFalse(cache.get(check, legacy)["hit"])
+        self.assertEqual(saved[0].read_bytes(), original)
+
+    def test_follow_config_stdin_and_outside_cwd_require_actual_revalidation(self):
+        ledger = Ledger(self.base / "run", repository_identity(self.repo))
+        current = provenance_for(self.repo, snapshot({"cwd": str(self.repo)}), toolchain_digest=digest("rg"))
+        controls = ["--no-config", "--no-ignore-parent", "--no-ignore-global", "--no-ignore-vcs"]
+        for extra, paths, cwd in ((["--follow"], ["."], self.repo), (["--hidden"], ["."], self.repo),
+                                  ([], ["-"], self.repo), ([], ["../"], self.repo), ([], ["."], self.base)):
+            operation = {"argv": ["rg", *controls, *extra, "pattern", *paths], "cwd": str(cwd), "purpose": "audit",
+                "effect": "read_only", "input_closure_complete": True, "toolchain_digest": digest("rg"),
+                "env_digest": digest({}), "config_digest": digest({})}
+            self.assertEqual(ledger.govern(operation, current)["decision"], "requires_revalidation")
+
+    def test_purity_booleans_never_admit_opaque_external_or_importing_code(self):
+        for code in ("import os; print(os.environ)", "print(eval('1'))", "print(__import__('time').time())",
+                     "assert open('../outside.txt', encoding='utf-8').read() == 'one'", "print(open('tracked.txt', 'w').write('bad'))"):
+            check = {"id": "claimed-pure", "argv": [sys.executable, "-I", "-S", "-c", code],
+                "cache_policy": "verified_inputs_only", "deterministic": True, "effect": "pure"}
+            with self.assertRaises(HarnessError):
+                make_proof(self.repo, check, toolchain_digest=digest("python"), environment={}, config={},
+                           isolated_environment=True, no_external_dependencies=True)
+
+    def test_controlled_rg_reuses_actual_empty_read_but_not_ignored_file_edit(self):
+        rg = shutil.which("rg")
+        if not rg:
+            self.skipTest("rg unavailable")
+        argv = [rg, "--no-config", "--no-ignore-parent", "--no-ignore-global", "--no-ignore-vcs", "CLOSURE_SENTINEL", "."]
+        result = subprocess.run(argv, cwd=self.repo, capture_output=True)
+        self.assertEqual(result.returncode, 1)
+        current = provenance_for(self.repo, snapshot({"cwd": str(self.repo)}), toolchain_digest=digest("rg"))
+        operation = {"argv": argv, "cwd": str(self.repo), "purpose": "closed search", "effect": "read_only",
+            "input_closure_complete": True, "toolchain_digest": digest("rg"), "env_digest": digest({}), "config_digest": digest({})}
+        ledger = Ledger(self.base / "run", repository_identity(self.repo))
+        first = ledger.govern(operation, current)
+        self.assertEqual(first["decision"], "allow")
+        raw = self.base / "rg-result.txt"
+        raw.write_bytes(result.stdout)
+        ledger.append("command", {"argv": argv, "cwd": str(self.repo), "effect": "read_only", "status": "completed", "exit_code": 1,
+            "operation_fingerprint": first["operation_fingerprint"], "evidence_path": str(raw), "evidence_digest": hashlib.sha256(raw.read_bytes()).hexdigest()}, current)
+        self.assertEqual(ledger.govern(operation, current)["decision"], "suggest_reuse")
+        (self.repo / "ignored.txt").write_text("CLOSURE_SENTINEL\n")
+        fresh = provenance_for(self.repo, snapshot({"cwd": str(self.repo)}), toolchain_digest=digest("rg"))
+        self.assertEqual(fresh["snapshot_id"], current["snapshot_id"])
+        self.assertEqual(subprocess.run(argv, cwd=self.repo, capture_output=True).returncode, 0)
+        self.assertNotEqual(ledger.govern(operation, current)["decision"], "suggest_reuse")
 
 
 if __name__ == "__main__":

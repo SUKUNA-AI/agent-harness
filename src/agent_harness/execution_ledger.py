@@ -61,6 +61,7 @@ PAYLOAD_PROPERTIES = {
     "context": TEXT, "alternative": TEXT, "reason": TEXT, "constraints": TEXT,
     "authorization": TEXT, "from_status": SHORT, "to_status": SHORT,
     "operation_fingerprint": HASH, "result_pointer": SHORT, "decision": SHORT,
+    "input_closure_digest": HASH,
     "supersedes": SHORT,
 }
 KINDS = {"file_read": ("path", "digest", "purpose"),
@@ -194,6 +195,57 @@ def paginate(value, *, offset=0, limit=8192):
     return result
 
 
+def _rg_reuse_context(operation, current):
+    """Prove a small controlled rg scope; declarations never replace live proof."""
+    from .core import _git
+    from .input_closure import bounded_closure
+    from .runner import _executable_hash
+    import shutil
+    argv = operation.get("argv")
+    if not isinstance(argv, list) or len(argv) < 3 or any(not isinstance(a, str) for a in argv):
+        raise HarnessError("Reuse needs explicit argv, pattern and relative search paths")
+    required = {"--no-config", "--no-ignore-parent", "--no-ignore-global", "--no-ignore-vcs"}
+    flags = required | {"-F", "--fixed-strings", "-i", "--ignore-case", "-w", "--word-regexp",
+                        "-n", "--line-number", "-c", "--count", "-l", "--files-with-matches", "--files-without-match"}
+    index, observed = 1, set()
+    while index < len(argv) and argv[index].startswith("-") and argv[index] != "--":
+        if argv[index] not in flags:
+            raise HarnessError("rg flags require fresh execution; no hidden/follow/no-ignore/config bypass reuse")
+        observed.add(argv[index])
+        index += 1
+    if not required <= observed:
+        raise HarnessError("rg reuse needs explicit isolated config/parent/global/VCS-ignore policy")
+    if index < len(argv) and argv[index] == "--":
+        index += 1
+    if index >= len(argv) - 1 or not argv[index] or len(argv[index].encode("utf-8")) > 4096:
+        raise HarnessError("rg reuse needs a bounded pattern and explicit paths")
+    root = safe_private(operation.get("cwd", ""))
+    if not root.is_dir() or not Path(operation.get("cwd", "")).is_absolute():
+        raise HarnessError("rg reuse cwd must be an existing absolute directory")
+    root = root.resolve(strict=True)
+    if repository_identity(root) != current.get("repository_identity"):
+        raise HarnessError("rg reuse cwd is outside the provenance repository")
+    top = _git(root, "rev-parse", "--show-toplevel")
+    if top and Path(os.fsdecode(top).strip()).resolve() != root:
+        raise HarnessError("Partial Git working directories require fresh execution")
+    for name in argv[index + 1:]:
+        if name.startswith("-"):
+            raise HarnessError("rg path/flag ambiguity requires fresh execution")
+        selected = root if name == "." else _path(root, name)
+        if not selected.exists() or not selected.resolve().is_relative_to(root):
+            raise HarnessError("rg search scope is outside the proven tree")
+    resolved = shutil.which(argv[0])
+    trusted = shutil.which("rg")
+    if not resolved or not trusted or Path(resolved).resolve() != Path(trusted).resolve():
+        raise HarnessError("rg executable identity is outside the known tool path")
+    binary = _executable_hash(resolved, {})
+    if not binary:
+        raise HarnessError("rg binary identity unavailable")
+    return {"input_closure": bounded_closure(root), "binary_path": str(Path(resolved).absolute()),
+            "binary_digest": binary, "environment_digest": digest(dict(os.environ)),
+            "ignore_policy": sorted(required)}
+
+
 class Ledger:
     def __init__(self, run_dir, repository_identity=None, *, run_id=None, task_id=None):
         self.root = safe_private(Path(run_dir) / "ledger", create=True)
@@ -284,15 +336,21 @@ class Ledger:
         allowed = program == "rg" and operation.get("effect") == "read_only"
         proof = (operation.get("input_closure_complete") is True and operation.get("toolchain_digest")
                  and operation.get("env_digest") and operation.get("config_digest") and current.get("snapshot_id"))
-        fingerprint = digest({"operation": operation, "current": current})
+        context, context_error = None, None
+        if allowed and proof and not force and operation.get("policy_denied") is not True:
+            try:
+                context = _rg_reuse_context(operation, current)
+            except (OSError, ValueError, HarnessError) as error:
+                context_error = str(error)
+        fingerprint = digest({"operation": operation, "current": current, "actual_reuse_context": context})
         decision, reason, reused = "allow", "fresh execution requested or no proven equivalent read", None
         if operation.get("policy_denied") is True:
             decision, reason = "deny_unsafe", "independent contract policy denies this operation"
         elif not argv or operation.get("effect", "unknown") == "unknown":
             decision, reason = "unknown", "operation effects or command identity are not proven"
         elif allowed and not force:
-            if not proof:
-                decision, reason = "requires_revalidation", "complete tree and toolchain proof required"
+            if not proof or context is None:
+                decision, reason = "requires_revalidation", context_error or "complete actual tree and toolchain proof required"
             else:
                 for row in reversed(self._records()):
                     payload = row["payload"]
@@ -302,8 +360,13 @@ class Ledger:
                             decision, reason, reused = "suggest_reuse", "same full input closure and immutable result", row["event_id"]
                             break
         result = {"decision": decision, "reason": reason, "reused_event_id": reused,
-                  "operation_fingerprint": fingerprint, "scope": "advisory_for_native_codex_tools"}
-        self.append("decision", {"decision": decision, "reason": reason, "operation_fingerprint": fingerprint}, current)
+                  "operation_fingerprint": fingerprint, "scope": "advisory_for_native_codex_tools",
+                  "input_closure_digest": context["input_closure"]["digest"] if context else None}
+        payload = {"decision": decision, "reason": reason, "operation_fingerprint": fingerprint}
+        if context:
+            payload.update(input_closure_digest=context["input_closure"]["digest"],
+                           toolchain_digest=context["binary_digest"], env_digest=context["environment_digest"])
+        self.append("decision", payload, current)
         return result
 
 
