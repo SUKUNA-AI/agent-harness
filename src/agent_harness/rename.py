@@ -64,8 +64,8 @@ def _check_metadata(path):
         raise HarnessError("Rename refuses extended attributes/ACLs instead of dropping them; use a native editor")
 
 
-def _windows_dacl(source, target):
-    """Protect staged bytes with the original DACL before writing their content."""
+def _windows_security():
+    """Use the two Windows inheritance models without converting legacy ACLs."""
     import ctypes
     from ctypes import wintypes
     api = ctypes.WinDLL("advapi32", use_last_error=True)
@@ -77,18 +77,59 @@ def _windows_dacl(source, target):
     api.GetSecurityDescriptorControl.restype = wintypes.BOOL
     api.SetFileSecurityW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p]
     api.SetFileSecurityW.restype = wintypes.BOOL
+    api.GetSecurityDescriptorDacl.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.BOOL),
+                                            ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(wintypes.BOOL)]
+    api.GetSecurityDescriptorDacl.restype = wintypes.BOOL
+    api.SetNamedSecurityInfoW.argtypes = [wintypes.LPWSTR, ctypes.c_int, wintypes.DWORD,
+                                        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+    api.SetNamedSecurityInfoW.restype = wintypes.DWORD
+    return ctypes, wintypes, api
+
+
+def _windows_get_dacl(path):
+    ctypes, wintypes, api = _windows_security()
     needed = wintypes.DWORD()
-    api.GetFileSecurityW(str(source), 4, None, 0, ctypes.byref(needed))
+    api.GetFileSecurityW(str(path), 4, None, 0, ctypes.byref(needed))
     if not 0 < needed.value <= 65536:
         raise HarnessError("Cannot capture source DACL for rename staging")
     descriptor = ctypes.create_string_buffer(needed.value)
+    if not api.GetFileSecurityW(str(path), 4, descriptor, needed.value, ctypes.byref(needed)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    return descriptor.raw
+
+
+def _windows_set_dacl(path, value, *, expected):
+    ctypes, wintypes, api = _windows_security()
+    descriptor = ctypes.create_string_buffer(value, len(value))
     control, revision = wintypes.WORD(), wintypes.DWORD()
-    if (not api.GetFileSecurityW(str(source), 4, descriptor, needed.value, ctypes.byref(needed))
-            or not api.GetSecurityDescriptorControl(descriptor, ctypes.byref(control), ctypes.byref(revision))):
+    if not api.GetSecurityDescriptorControl(descriptor, ctypes.byref(control), ctypes.byref(revision)):
         raise ctypes.WinError(ctypes.get_last_error())
-    information = 4 | (0x80000000 if control.value & 0x1000 else 0x20000000)
-    if not api.SetFileSecurityW(str(target), information, descriptor):
-        raise ctypes.WinError(ctypes.get_last_error())
+    if _windows_get_dacl(path) != expected:
+        raise HarnessError("Windows DACL changed before restoration")
+    if control.value & 0x0400:  # SE_DACL_AUTO_INHERITED: keep the modern model.
+        present, defaulted, dacl = wintypes.BOOL(), wintypes.BOOL(), ctypes.c_void_p()
+        if not api.GetSecurityDescriptorDacl(descriptor, ctypes.byref(present), ctypes.byref(dacl), ctypes.byref(defaulted)) or not present.value:
+            raise HarnessError("Cannot extract the original Windows DACL")
+        information = 4 | (0x80000000 if control.value & 0x1000 else 0x20000000)
+        error = api.SetNamedSecurityInfoW(str(path), 1, information, None, None, dacl, None)
+        if error:
+            raise ctypes.WinError(error)
+    else:
+        # SetFileSecurity ignores PROTECTED/UNPROTECTED_SECURITY_INFORMATION.
+        # In the legacy model it uses the descriptor's protection control bit,
+        # and does not add inherited ACEs or retain AUTO_INHERITED.
+        if not api.SetFileSecurityW(str(path), 4, descriptor):
+            raise ctypes.WinError(ctypes.get_last_error())
+    if _windows_get_dacl(path) != value:
+        raise HarnessError("Windows DACL preservation could not be verified")
+
+
+def _windows_dacl(source, target):
+    """Verify the staged file's exact DACL before writing source bytes."""
+    original = _windows_get_dacl(source)
+    current = _windows_get_dacl(target)
+    if current != original:
+        _windows_set_dacl(target, original, expected=current)
 
 
 def _windows_replace(target, staged):
@@ -100,8 +141,17 @@ def _windows_replace(target, staged):
     api.ReplaceFileW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.LPCWSTR,
                                  wintypes.DWORD, ctypes.c_void_p, ctypes.c_void_p]
     api.ReplaceFileW.restype = wintypes.BOOL
+    original = _windows_get_dacl(target)
+    staged_identity = identity(staged.lstat())
     if not api.ReplaceFileW(str(target), str(staged), None, 0, None, None):
         raise ctypes.WinError(ctypes.get_last_error())
+    if not _matches_staged(identity(target.lstat()), staged_identity):
+        raise HarnessError("Rename target changed before DACL verification")
+    current = _windows_get_dacl(target)
+    if current != original:
+        # ReplaceFileW can convert a legacy DACL to the modern inheritance model.
+        # Restore its exact original ACEs/control, then require a full readback.
+        _windows_set_dacl(target, original, expected=current)
 
 
 class Positions:
@@ -280,6 +330,7 @@ class Parent:
         self.path = _path(root, name)
         self.descriptors = []
         self.fd = None
+        self.windows_dacl_uncertain = False
         self.parent_identity = self.path.parent.stat()
         try:
             if os.open in os.supports_dir_fd and os.rename in os.supports_dir_fd and hasattr(os, "O_NOFOLLOW"):
@@ -342,7 +393,9 @@ class Parent:
         if self.fd is not None:
             os.replace(staged, self.path.name, src_dir_fd=self.fd, dst_dir_fd=self.fd)
         elif os.name == "nt":
+            self.windows_dacl_uncertain = True
             _windows_replace(self.path, self.path.parent / staged)
+            self.windows_dacl_uncertain = False
         else:
             os.replace(self.path.parent / staged, self.path)
 
@@ -466,6 +519,8 @@ def apply_plan(root, plan):
                 try:
                     actual = capture(root, row["item"]["path"])
                     _check_metadata(actual["absolute_path"])
+                    if row["parent"].windows_dacl_uncertain:
+                        raise HarnessError("Windows DACL after replacement is unverified; preserve backup for recovery")
                     if (actual["sha256"] == row["source"]["sha256"]
                             and actual["identity"] == row["source"]["identity"]):
                         row["record"]["state"] = "unchanged"

@@ -133,7 +133,10 @@ recovery receipt и повторяет проверку перед каждой 
   ради команды не нужно: используйте редактор, который их сохраняет.
 - На Windows staging получает DACL исходного файла до записи содержимого;
   публикация через `ReplaceFileW` не включает флаги игнорирования ошибок ACL.
-  Native API сохраняет поддерживаемые DACL, attributes и streams. Изменение
+  Legacy/modern inheritance обрабатываются отдельно; exact DACL readback нужен
+  до записи staging и после замены. Неизвестный исход даёт `recovery_required`
+  с backup, даже при неизменных bytes/stat. Native API сохраняет поддерживаемые
+  attributes и streams. Изменение
   владельца, SACL и все особенности сторонних файловых систем не обещаются.
 - Безопасное применение metadata в этой версии ограничено Linux и Windows.
   На других POSIX-платформах navigation доступна; для rename используется явный

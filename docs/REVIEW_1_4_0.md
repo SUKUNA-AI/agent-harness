@@ -22,6 +22,9 @@ before/after hashes. Сервер соответствующего языка з
 | Broken bundled symlink выглядел как отсутствие native backend | Проверяется наличие самого directory entry; повреждённая установка не маскируется auto fallback |
 | Metadata съедала последнюю полезную definition при бюджете 2 KiB | Сначала сокращаются необязательные сведения, сохраняются identity/counts и parser retained symbol |
 | POSIX ожидание отдельного helper добавляло polling latency | Python waiter использует event; короткие Git команды не ждут фиксированные 2 ms |
+| Pyright Windows URI с `%3A` вместо двоеточия диска отклонялся как относительный | URI декодируется ровно один раз, drive определяется после декодирования; confinement/UNC/traversal guards сохранены |
+| Windows rename менял legacy DACL через наследование | Разделены legacy/modern setters; исходные ACE и control flags проверяются до записи staging и после замены |
+| Неизвестный результат ACL мог выглядеть как завершённая компенсация | Неопределённость проверяется до сравнения bytes/stat; сохраняются `recovery_required` и backup |
 
 Ранее исправленные running MCP status без `result.json`, FIFO/regular-file race,
 CRLF output budget и metadata race сохранены. Rust на Windows использует настоящий
@@ -29,7 +32,8 @@ CRLF output budget и metadata race сохранены. Rust на Windows исп
 
 ## Измерение default auto
 
-Linux, CPython 3.12.14, Rust 1.90.0 release. На fixture: один warmup каждого
+Linux, CPython 3.12.14, Rust 1.90.0 release, готовый Linux binary из CI.
+На fixture: один warmup каждого
 backend и пять чередующихся пар. Один источник и контракт внутри каждой пары;
 native process startup/JSON входят в замер, imports исключены, OS cache прогрет.
 Полный цикл: init, freeze, три настоящие command checks, gate. В каждом цикле
@@ -37,9 +41,9 @@ checks passed, gate accepted, snapshot digests совпали.
 
 | Fixture | Python, median | Default auto, median | Парное изменение wall |
 |---|---:|---:|---:|
-| 100 файлов × 1100 B, полный цикл | 0.455 s | 0.446 s | −0.14%; диапазон −5.76…+3.07% — различие неотделимо от шума |
-| 3000 файлов × 16384 B, snapshot | 0.118 s | 0.060 s | −47.86%; все пять пар быстрее |
-| 3000 файлов × 16384 B, полный цикл | 1.665 s | 0.975 s | −40.85%; диапазон −43.71…−39.41% |
+| 100 файлов × 1100 B, полный цикл | 0.464 s | 0.442 s | −2.25%; диапазон −4.81…+3.15% — различие неотделимо от шума |
+| 3000 файлов × 16384 B, snapshot | 0.115 s | 0.058 s | −46.78%; все пять пар быстрее |
+| 3000 файлов × 16384 B, полный цикл | 1.737 s | 1.089 s | −38.01%; диапазон −49.71…−28.91% |
 
 Forced native на маленьком fixture оказался дороже Python: стоимость отдельного
 процесса сохраняется даже после исправления ожиданий. Поэтому auto использует
@@ -72,8 +76,8 @@ Rust `snapshot`, Python `snapshot`, `verify_snapshot` и связанные пр
 
 ## Проверки и поставка
 
-- Общий локальный regression: 339 tests, 335 passed / 4 platform skips; после
-  последующих узких правок дополнительно выполнены связанные integration checks.
+- Финальный общий локальный regression: 346 tests, 341 passed / 5 явно отмеченных
+  skips. Реальный Pyright проверяется дополнительно отдельным обязательным smoke.
 - Финальные compiled Rust tests: 19 passed. `tools/check_native.py` требует
   настоящий binary и проверяет exact manifests, Unicode/Git/submodule, distinct
   Unix names, real command/gate, stale rejection и bounded map с CRLF.
@@ -81,6 +85,9 @@ Rust `snapshot`, Python `snapshot`, `verify_snapshot` и связанные пр
   failure, а не skipped pass. Локальный сквозной сценарий прошёл.
 - Независимый reviewer воспроизвёл metadata race rename до/после исправления и
   проверил timeout/SIGINT cleanup изменённого native waiter: child и waiter завершаются.
+- Повторный независимый review Windows fixes проверил URI confinement и обнаружил
+  неверную compensation при неизвестном ACL; после исправления portable repro
+  требует `recovery_required` и сохранённый backup. Win32 roundtrip подтверждает CI.
 - CI: Windows/Ubuntu × Python 3.11/3.13, отдельные native build/test и real Pyright
   jobs. Итог конкретного commit и job logs фиксируются в release verification.
 - Native bundles содержат SHA-256/build info, лицензии Cargo dependencies и Rust

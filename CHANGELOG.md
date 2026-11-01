@@ -21,6 +21,9 @@
   имён с backslash, потеря concurrent permissions при rollback rename, неверный
   fallback повреждённого bundled symlink и пустая карта при слишком подробной
   metadata в бюджете 2 KiB.
+- Windows: корректно разбираются encoded drive URI Pyright, сохраняются legacy
+  и modern DACL; неизвестный исход восстановления прав не объявляется успешным
+  откатом и оставляет recovery receipt с backup.
 - CLI/workflows/skills используют готовые возможности по задаче. Existing
   handoff, bounded excerpts, compaction 500000 и пользовательские модели сохранены.
 - FIFO/nonblocking, CRLF output cap, running MCP status и snapshot identity guards

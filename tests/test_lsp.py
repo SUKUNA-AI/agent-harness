@@ -524,31 +524,87 @@ class LSPTests(unittest.TestCase):
         api.GetFileSecurityW.restype = wintypes.BOOL
         api.SetFileSecurityW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p]
         api.SetFileSecurityW.restype = wintypes.BOOL
+        api.SetSecurityDescriptorControl.argtypes = [ctypes.c_void_p, wintypes.WORD, wintypes.WORD]
+        api.SetSecurityDescriptorControl.restype = wintypes.BOOL
+        api.GetSecurityDescriptorControl.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.WORD), ctypes.POINTER(wintypes.DWORD)]
+        api.GetSecurityDescriptorControl.restype = wintypes.BOOL
+        api.GetSecurityDescriptorDacl.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.BOOL), ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(wintypes.BOOL)]
+        api.GetSecurityDescriptorDacl.restype = wintypes.BOOL
+        api.SetNamedSecurityInfoW.argtypes = [wintypes.LPWSTR, ctypes.c_int, wintypes.DWORD,
+                                            ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+        api.SetNamedSecurityInfoW.restype = wintypes.DWORD
         target = self.root / "a.py"
-        def descriptor():
+        def descriptor(path=target):
             needed = wintypes.DWORD()
-            api.GetFileSecurityW(str(target), 4, None, 0, ctypes.byref(needed))
+            api.GetFileSecurityW(str(path), 4, None, 0, ctypes.byref(needed))
             self.assertGreater(needed.value, 0)
             value = ctypes.create_string_buffer(needed.value)
-            self.assertTrue(api.GetFileSecurityW(str(target), 4, value, needed.value, ctypes.byref(needed)))
+            self.assertTrue(api.GetFileSecurityW(str(path), 4, value, needed.value, ctypes.byref(needed)))
             return value.raw
-        current = ctypes.create_string_buffer(descriptor())
-        self.assertTrue(api.SetFileSecurityW(str(target), 4 | 0x80000000, current))
+
+        def set_model(legacy, protected):
+            current = ctypes.create_string_buffer(descriptor())
+            if legacy:
+                self.assertTrue(api.SetSecurityDescriptorControl(current, 0x1000, 0x1000 if protected else 0))
+                self.assertTrue(api.SetFileSecurityW(str(target), 4, current))
+            else:
+                present, defaulted, dacl = wintypes.BOOL(), wintypes.BOOL(), ctypes.c_void_p()
+                self.assertTrue(api.GetSecurityDescriptorDacl(current, ctypes.byref(present), ctypes.byref(dacl), ctypes.byref(defaulted)))
+                flags = 4 | (0x80000000 if protected else 0x20000000)
+                self.assertEqual(0, api.SetNamedSecurityInfoW(str(target), 1, flags, None, None, dacl, None))
+            control, revision = wintypes.WORD(), wintypes.DWORD()
+            self.assertTrue(api.GetSecurityDescriptorControl(ctypes.create_string_buffer(descriptor()), ctypes.byref(control), ctypes.byref(revision)))
+            self.assertEqual(protected, bool(control.value & 0x1000))
+            self.assertEqual(not legacy, bool(control.value & 0x0400))
+
         original = rename.Parent.replace
-        for fail in (False, True):
-            target.write_bytes(self.a)
-            (self.root / "b.py").write_bytes(self.b)
-            before = descriptor()
-            def replace(parent, staged, **options):
-                if fail and parent.name == "b.py":
-                    raise OSError("injected Windows second-file failure")
-                return original(parent, staged, **options)
-            with patch.object(rename.Parent, "replace", replace):
-                result = rename.apply_plan(self.root, self.plan())
-            self.cleanup_receipt(result)
-            self.assertEqual("failed_compensated" if fail else "applied", result["status"])
-            self.assertEqual(before, descriptor())
-            self.assertEqual(self.a if fail else self.a.replace(b"target", b"renamed"), target.read_bytes())
+        stage_original = rename.Parent.stage
+        for legacy, protected in ((True, False), (True, True), (False, False), (False, True)):
+            for fail in (False, True):
+                with self.subTest(legacy=legacy, protected=protected, compensation=fail):
+                    target.unlink()
+                    target.write_bytes(self.a)
+                    (self.root / "b.py").write_bytes(self.b)
+                    set_model(legacy, protected)
+                    before = descriptor()
+                    def replace(parent, staged, **options):
+                        if fail and parent.name == "b.py":
+                            raise OSError("injected Windows second-file failure")
+                        return original(parent, staged, **options)
+                    def stage(parent, data, metadata):
+                        name, observed = stage_original(parent, data, metadata)
+                        self.assertEqual(descriptor(parent.path), descriptor(parent.path.parent / name))
+                        return name, observed
+                    with patch.object(rename.Parent, "replace", replace), patch.object(rename.Parent, "stage", stage):
+                        result = rename.apply_plan(self.root, self.plan())
+                    self.cleanup_receipt(result)
+                    self.assertEqual("failed_compensated" if fail else "applied", result["status"])
+                    self.assertEqual(before, descriptor())
+                    self.assertEqual(self.a if fail else self.a.replace(b"target", b"renamed"), target.read_bytes())
+
+        # An intervening DACL edit observed before restoration is preserved.
+        stale = descriptor()
+        set_model(True, False)
+        changed = descriptor()
+        self.assertNotEqual(stale, changed)
+        with self.assertRaisesRegex(HarnessError, "DACL changed"):
+            rename._windows_set_dacl(target, stale, expected=stale)
+        self.assertEqual(changed, descriptor())
+
+        # An unknown post-replacement security outcome must keep recovery data.
+        target.write_bytes(self.a)
+        (self.root / "b.py").write_bytes(self.b)
+        replace_windows = rename._windows_replace
+        def fail_verification(path, staged):
+            replace_windows(path, staged)
+            raise OSError("injected post-replace DACL verification failure")
+        with patch.object(rename, "_windows_replace", fail_verification):
+            result = rename.apply_plan(self.root, self.plan())
+        self.cleanup_receipt(result)
+        self.assertEqual("recovery_required", result["status"])
+        receipt = json.loads(Path(result["recovery_receipt"]).read_text())
+        self.assertEqual("recovery_required", receipt["files"][0]["state"])
+        self.assertTrue(Path(receipt["files"][0]["backup"]).is_file())
 
     def test_cli_budget_validated_before_apply_and_errors_are_bounded(self):
         plan_path = self.base / "plan.json"

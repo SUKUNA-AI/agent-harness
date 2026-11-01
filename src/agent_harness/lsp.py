@@ -4,16 +4,16 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import queue
+import re
 import shutil
 import signal
 import subprocess
 import sys
 import threading
 import time
-from urllib.parse import urlsplit
-from urllib.request import url2pathname
+from urllib.parse import unquote, urlsplit
 
 from .context import _path, _root
 from .core import HarnessError, atomic_json
@@ -445,16 +445,44 @@ class Session:
         self.close()
 
 
-def _uri_name(root, uri):
+def _file_uri_path(uri, *, windows):
     if not isinstance(uri, str):
         raise HarnessError("LSP location URI must be a string")
+    # urlsplit silently removes some raw controls; reject rather than interpret
+    # a different file name. Percent-encoded controls are checked after decode.
+    if any(ord(char) < 32 or ord(char) == 127 for char in uri):
+        raise HarnessError("LSP file URI must not contain control characters")
     parsed = urlsplit(uri)
     if parsed.scheme != "file" or parsed.netloc not in ("", "localhost") or parsed.query or parsed.fragment:
         return None
-    # url2pathname performs percent decoding; decode exactly once.
-    path = Path(url2pathname(parsed.path))
+    if re.search(r"%(?![0-9a-fA-F]{2})", parsed.path):
+        raise HarnessError("Malformed percent escape in LSP file URI")
+    try:
+        decoded = unquote(parsed.path, encoding="utf-8", errors="strict")
+    except UnicodeError:
+        raise HarnessError("LSP file URI requires valid UTF-8 percent encoding") from None
+    if any(ord(char) < 32 or ord(char) == 127 for char in decoded) or "\\" in decoded:
+        raise HarnessError("LSP file URI contains unsupported control characters or backslashes")
+    if decoded.startswith("//"):
+        return None  # UNC/remote paths also have a no-authority URI spelling.
+    if windows:
+        # Python 3.11-3.13 url2pathname inspects literal ':' before unquoting.
+        # Pyright emits /c%3A/...; decode exactly once, then remove the URI slash
+        # before its drive. A second unquote would corrupt literal '%2F' names.
+        if re.match(r"^/[a-zA-Z]:/", decoded):
+            decoded = decoded[1:]
+        path = PureWindowsPath(decoded)
+    else:
+        path = PurePosixPath(decoded)
     if not path.is_absolute():
         raise HarnessError("LSP file URI must be absolute")
+    return path
+
+
+def _uri_name(root, uri):
+    path = _file_uri_path(uri, windows=os.name == "nt")
+    if path is None:
+        return None
     try:
         name = path.relative_to(root).as_posix()
     except ValueError:
