@@ -19,13 +19,17 @@ Rust/Tree-sitter карта возвращает ranked symbols, строки, h
 Граф строится в памяти, БД/daemon нет. Проверяй `scan.partial` и revision scope:
 лимит сканирования не означает полноту репозитория. Focus files читаются раньше
 лимита. Карта содержит синтаксические name links; точные references/rename:
-`agent-harness code references|rename --help`. Локальный LSP запускается на один
+`agent-harness code references --help` или `agent-harness code rename --help`. Локальный LSP запускается на один
 запрос. `code rename --output <private-state>/rename.json` сохраняет полный план;
-`code apply --root <project> --plan <file>` сверяет hashes до записи. При отсутствии
+`code apply --root <project> --plan <file>` сверяет plan/root, bytes и metadata до записи. Навигация связывает ranges с захваченным текстом и повторяет запрос до стабильного набора targets; при смене файла получи свежий ответ, не склеивай старую строку с новым hash. При отсутствии
 language server `code doctor` показывает доступные инструменты. Не заменяй
 semantic rename массовой строковой подстановкой на основании одной карты.
 После apply выполни затронутую проверку проекта: компиляцию/тест или реальный
-сценарий. LSP response не является готовым acceptance gate.
+сценарий. LSP response не является готовым acceptance gate. Если apply вернул
+`failed_compensated` или `recovery_required`, прочитай status, plan_digest и
+`recovery_receipt`, даже при усечённых details. При recovery_required сохрани backups
+и receipt; повреждённый/изменённый backup не является восстановлением. Подробности —
+[LSP reference](../docs/LSP_RU.md).
 
 Для исходника или уже сохранённого журнала:
 
@@ -68,6 +72,8 @@ agent-harness status --run-dir <run> --summary --verify-evidence
 checkpoint и показывает текущие metadata. По умолчанию source/evidence freshness
 не проверены. Он не вызывает `resume`, не запускает работу и не освобождает slots.
 `checkpoint.status=current` означает текущую привязку, а не свежесть исходников.
+`handoff --verify-evidence` доступен для той же read-only проверки сохранённой приёмки;
+при отсутствии accepted новый verdict не создаётся.
 Summary/handoff поддерживают 2048..65536 bytes. `--verify-evidence` проверяет уже
 записанную приёмку и не создаёт accepted verdict при его отсутствии.
 `status --summary` сокращает только вывод: проверка исходников остаётся такой же,
@@ -96,7 +102,7 @@ agent-harness context verify --root <project> --packet <private-state>/review-co
 Defaults: до 64 файлов, 64 KiB на файл и 256 KiB исходного содержимого.
 Большие/binary файлы помечаются omitted; `complete=false` нельзя называть полным
 ревью. Для большого файла выбери нужные разделы вручную со ссылкой на исходник.
-Symlinks/junctions и известные credential/generated paths отклоняются. Проверка
+Symlinks/junctions, FIFO/специальные файлы и известные credential/generated paths отклоняются; чтение bounded и проверяет identity открытого файла. Проверка
 secret patterns ограничена: просмотри состав до передачи другому runtime.
 Пакет не является acceptance evidence. Verify проверяет целостность пакета и bytes
 включённых файлов в том же проекте. Изменённый/отсутствующий файл означает stale;

@@ -1,223 +1,474 @@
-# Native Agent Harness 1.4.1
+# Native Agent Harness 1.4.2
 
-[Rust, RepoMap и локальный LSP](docs/CONTEXT_AND_NATIVE_RU.md): scanner/snapshot
-перенесён в Rust, `context map` находит определения и связи файлов по задаче,
-`code` выполняет symbols/definition/references/rename через локальный language
-server, который завершается после команды. БД и постоянные службы не нужны.
-Порог auto-compaction 500000 сохранён.
-[Исправления аудита 1.4.1](docs/REVIEW_1_4_1.md) охватывают все R01–R14:
-приёмку evidence, гонки attempt/gate, метаданные установки, LSP recovery,
-безопасное чтение и воспроизводимость native bundle.
-[Проверка и измерения 1.4.0](docs/REVIEW_1_4_0.md) описывает реальные изменения,
-найденные дефекты, A/B и границы результата.
-[Дополнительное ревью 1.3.0](docs/REVIEW_1_3_0.md) содержит findings и границы проверки.
+Локальный комплект для Codex: общие инструкции, координация исполнителей,
+инструменты для больших репозиториев и проверяемое продолжение долгих задач.
+После установки правила подключаются к новым чатам выбранного профиля.
+Пользователь описывает желаемый результат обычным сообщением; основной агент
+выбирает нужную процедуру и готовит служебные файлы.
 
-[Исправления и проверка 1.2.0](docs/REVIEW_1_2_0.md): корректность приёмки,
-rollback, независимое ревью, файловый контекст и измеренные локальные оптимизации.
+**Rust выполняет scanner/snapshot и RepoMap. Python stdlib управляет
+контрактами, проверками, установкой и файловым состоянием.** Модели запускает
+сам Codex через свои штатные инструменты. Постоянная служба, БД, векторное
+хранилище и отдельный LLM API для базового комплекта не требуются.
 
-[Предыдущий релиз v1.1.0](https://github.com/SUKUNA-AI/agent-harness/releases/tag/v1.1.0)
-· [История изменений](CHANGELOG.md) · [Автоподключение](docs/AUTOLOAD_RU.md)
+Версия **1.4.2** обновляет документацию, рабочие инструкции и релизный пакет.
+Исправления всех R01–R14 из аудита включены в [1.4.1](docs/REVIEW_1_4_1.md).
+Алгоритмы исполнения в этом обновлении сохранены; параметры моделей,
+provider, reasoning, permissions и порог compaction `500000` не меняются.
 
-Переносимый комплект общих настроек для локального Codex. Скачайте этот
-репозиторий на другое устройство и выполните [короткую установку](SETUP_RU.md).
-База данных, Claude-Mem, импорт чатов и фоновые службы не нужны и не устанавливаются.
-Модели и учётные записи на новом устройстве остаются его собственными.
-После однократной установки общие правила подключаются к новым локальным чатам
-в этом профиле Codex независимо от проекта. Вызывать skill или повторять правила
-при каждом открытии проекта не требуется. Подробности и границы —
-в [проверке автоподключения](docs/AUTOLOAD_RU.md).
+[Установка и обновление](SETUP_RU.md) · [Вся документация](docs/INDEX.md) ·
+[Архитектура с диаграммами](docs/ARCHITECTURE_RU.md) ·
+[Справочник CLI](docs/CLI_REFERENCE_RU.md) ·
+[Релиз 1.4.2](docs/RELEASE_1_4_2.md) · [История изменений](CHANGELOG.md)
 
-Общий порядок работы: постановка задачи, краткий план,
-полезная делегация, изолированные исполнители, проверка результата и восстановление
-контекста. Пользователь формулирует результат обычным сообщением; служебные
-контракты, брифы и команды готовит основной агент.
+## Навигация
 
-Ограниченная самостоятельная задача выполняется напрямую. Полезные независимые
-части делегируются автоматически: обычно два native владельца, третий — при
-дополнительной независимой части и доступной ёмкости. Неделимость, ограничения пользователя или нехватка native slots дают
-последовательный путь. Все потомки и idle/open refs учитываются вместе.
-Provider и безопасность наследуются; модель учитывает defaults дочерних
-агентов и overrides клиента. Усилие координатора сохраняется;
-узкая механика — medium, содержательная реализация и ревью — high. Фиксированный
-effort в файле роли имеет приоритет над effort запроса spawn.
+- [Что делает комплект](#что-делает-комплект)
+- [Требования и варианты поставки](#требования-и-варианты-поставки)
+- [Быстрый старт](#быстрый-старт)
+- [Как задача проходит через harness](#как-задача-проходит-через-harness)
+- [Настройки Codex и моделей](#настройки-codex-и-моделей)
+- [Большой репозиторий: поиск, RepoMap и LSP](#большой-репозиторий-поиск-repomap-и-lsp)
+- [Экономия контекста и долгие задачи](#экономия-контекста-и-долгие-задачи)
+- [Проверки и приёмка результата](#проверки-и-приёмка-результата)
+- [Обновление и восстановление](#обновление-и-восстановление)
+- [Интеграции и заимствованные механизмы](#интеграции-и-заимствованные-механизмы)
+- [Структура репозитория](#структура-репозитория)
+- [Диагностика частых проблем](#диагностика-частых-проблем)
+- [Проверка сборки и границы результата](#проверка-сборки-и-границы-результата)
+
+## Что делает комплект
+
+| Возможность | Что происходит на практике | Где читать |
+| --- | --- | --- |
+| Общие инструкции | Небольшой managed bootstrap направляет Codex к установленной политике, skills и процедурам | [Автоподключение](docs/AUTOLOAD_RU.md) |
+| Делегация | Основной агент выделяет независимые части, назначает владельцев и собирает результат через native tools Codex | [Координация](docs/ORCHESTRATION_RU.md) |
+| Быстрый локальный снимок | Rust обходит выбранные файлы, проверяет metadata, хеширует содержимое и строит canonical manifest | [Native и контекст](docs/CONTEXT_AND_NATIVE_RU.md) |
+| Карта незнакомого проекта | RepoMap извлекает определения и упоминания, ранжирует связи файлов по задаче и выдаёт ограниченный ответ | [RepoMap](docs/CONTEXT_AND_NATIVE_RU.md) |
+| Точная навигация | Локальный language server отвечает на symbols, definition и references; rename сначала создаёт проверяемый план | [LSP](docs/LSP_RU.md) |
+| Ограниченная выдача | Выдержки, source packets, summary и handoff дают нужные данные с явными лимитами и признаками неполноты | [CLI](docs/CLI_REFERENCE_RU.md) |
+| Проверяемое завершение | Контракт задаёт критерии; runner сохраняет receipts; gate сверяет evidence с текущими входами и attempt | [Приёмка](docs/ACCEPTANCE.md) |
+| Продолжение после сжатия | Private run, checkpoint, handoff и ссылки на файлы сохраняют цель, решения, состояние и следующий шаг | [Эксплуатация](docs/OPERATIONS.md) |
+| Обратимая установка | Dry-run показывает diff; применение сохраняет backups, manifest и поддерживаемые security metadata | [Установка](SETUP_RU.md) |
+
+Каждая возможность включается по необходимости. Короткую самостоятельную
+задачу агент выполняет напрямую. Формальный run полезен там, где нужны
+повторяемая проверка, длительное выполнение или восстановление.
+
+## Требования и варианты поставки
+
+| Компонент | Требование |
+| --- | --- |
+| Базовый CLI и установщик | Python **3.11+**, полный каталог пакета с `tools/`, `src/`, policy и workflow assets |
+| Готовый native bundle | Linux x86_64 или Windows x86_64; Rust/Cargo/C compiler при использовании готового бинарника не нужны |
+| Сборка native из Git | Rust **1.90.0**, Cargo и C toolchain для Tree-sitter grammars |
+| Работа через Codex | Локальный клиент с нужными настройками/skills/native agent tools; возможности проверяются в установленном клиенте |
+| Семантическая навигация | Установленный language server нужного языка и корректная конфигурация проекта |
+| Browser acceptance | Уже доступный браузерный инструмент или установленный проектный Playwright |
+| Read-only MCP | Только при отдельном выборе: официальный Python SDK `mcp==2.3.0` |
+
+**Релизный ZIP** содержит полный пакет и готовые `bin/linux-x86_64` и
+`bin/windows-x86_64`. Manifests связывают version, native source digest,
+бинарник и notices зависимостей. **Git clone и GitHub «Download ZIP»** содержат
+исходники; скомпилированные файлы в Git не хранятся. Native helper нужно
+собрать явно либо взять полный релизный пакет той же версии.
+
+```sh
+git clone https://github.com/SUKUNA-AI/agent-harness.git
+cd agent-harness
+python tools/harness.py native status
+# Только для source checkout при необходимости native helper:
+python tools/build_native.py
+```
+
+Обычные команды ничего не скачивают и не компилируют. При отсутствии native
+helper снимки могут работать на Python; `context map` требует Rust helper.
+Найденный, но повреждённый или несовместимый bundle возвращает ошибку.
+Для установки нужен весь каталог пакета: wheel с одним Python-кодом не содержит
+все переносимые инструкции и не является самостоятельной поставкой.
+
+CI проверяет Linux/Windows. Другие платформы не объявляются проверенными:
+в частности, установщик отклоняет неподдерживаемый перенос security metadata.
+Подробности сборки — [bin/README.md](bin/README.md).
+
+## Быстрый старт
+
+Распакуйте релиз в постоянный каталог или используйте source checkout.
+Установленные инструкции ссылаются на этот каталог; сохраняйте его после
+установки. Команды ниже выполняются **из корня пакета** на Linux/POSIX shell.
+Эквивалент PowerShell, нестандартный `CODEX_HOME` и перенос на другой компьютер —
+в [SETUP_RU.md](SETUP_RU.md).
+
+```sh
+HARNESS_PACKAGE="$PWD"
+HARNESS_CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+HARNESS_SKILLS_HOME="$HOME/.agents/skills"
+HARNESS_STATE="${XDG_STATE_HOME:-$HOME/.local/state}/agent-harness"
+
+python "$HARNESS_PACKAGE/tools/harness.py" doctor \
+  --codex-home "$HARNESS_CODEX_HOME" --skills-home "$HARNESS_SKILLS_HOME" \
+  --state-dir "$HARNESS_STATE"
+
+python "$HARNESS_PACKAGE/tools/harness.py" install \
+  --codex-home "$HARNESS_CODEX_HOME" --skills-home "$HARNESS_SKILLS_HOME" \
+  --state-dir "$HARNESS_STATE"
+```
+
+Первый `install` — **предпросмотр**. Он показывает точечные изменения. После
+проверки вывода примените их и проверьте установленные файлы:
+
+```sh
+python "$HARNESS_PACKAGE/tools/harness.py" install \
+  --codex-home "$HARNESS_CODEX_HOME" --skills-home "$HARNESS_SKILLS_HOME" \
+  --state-dir "$HARNESS_STATE" --apply
+
+python "$HARNESS_PACKAGE/tools/harness.py" verify \
+  --codex-home "$HARNESS_CODEX_HOME" --skills-home "$HARNESS_SKILLS_HOME" \
+  --state-dir "$HARNESS_STATE"
+```
+
+Затем откройте **новую сессию Codex**. Пример первой задачи:
+
+> Изучи этот проект, найди место изменения, реализуй его и проверь конечный
+> сценарий. Сохрани текущие настройки моделей и разрешений. Для независимых
+> частей используй исполнителей, а перед завершением проверь итоговый diff.
+
+`verify` без `--native` проверяет установку на диске. Чтобы дополнительно
+проверить фактическое подключение в локальном Codex, используйте `verify --native`
+с `--cwd` отдельного пустого проекта по [инструкции проверки](docs/AUTOLOAD_RU.md).
+Эта проверка требует установленного и работоспособного клиента. Структурный
+успех не доказывает, что уже открытая сессия перечитала правила.
+
+### Что появится после установки
+
+| Место | Содержимое и роль |
+| --- | --- |
+| Глобальный `AGENTS.md` либо активный `AGENTS.override.md` | Управляемый блок bootstrap внутри сохранённого пользовательского файла |
+| `config.toml` выбранного Codex home | Адресные настройки агентов и отсутствующий порог compaction |
+| `harness-machine.json` выбранного Codex home | Machine pointer на package root и private machine overlay |
+| Каталог ролей Codex | Три роли `delivery_owner`, `delivery_reviewer`, `delivery_helper` |
+| Выбранный skills home | Навыки из пакета и адаптер с подставленными ссылками на package root |
+| Private state вне репозитория | Machine overlay, manifests, backups и данные восстановления установки |
+
+Непустой `AGENTS.override.md` имеет приоритет над `AGENTS.md`. Более локальные
+инструкции проекта также участвуют в цепочке Codex. Схема загрузки и диагностика
+конфликтов — в [AUTOLOAD_RU.md](docs/AUTOLOAD_RU.md).
+Локальная установка не настраивает hosted ChatGPT Work.
+
+## Как задача проходит через harness
 
 ```mermaid
-flowchart LR
-    U[Задача пользователя] --> R[Постановка и краткий план]
-    R -->|короткая задача| D[Прямое выполнение и проверка]
-    R -->|независимые части| P[Брифы и зависимости]
-    P --> A[Владелец 1]
-    P --> B[Владелец 2]
-    A --> I[Интеграция]
-    B --> I
-    I --> V[Независимая проверка]
-    V -->|исправление прежнему владельцу| P
-    V -->|актуальные доказательства| G[Итоговая приёмка]
+flowchart TD
+    Request["Цель и ограничения пользователя"] --> Scope["Основной агент: scope и критерии"]
+    Scope --> Split{"Есть независимые части и slots?"}
+    Split -->|"Нет"| Direct["Прямое выполнение"]
+    Split -->|"Да"| Briefs["План, общий контекст и отдельные scopes"]
+    Briefs --> OwnerA["Владелец A: отдельный worktree"]
+    Briefs --> OwnerB["Владелец B: отдельный worktree"]
+    OwnerA --> Integrate["Интеграция общего candidate"]
+    OwnerB --> Integrate
+    Direct --> Integrate
+    Integrate --> Review["Проверка; независимое ревью по необходимости"]
+    Review --> Findings{"Остались подтверждённые дефекты?"}
+    Findings -->|"Да"| Repair["Одна сводка исправлений владельцам"]
+    Repair --> Integrate
+    Findings -->|"Нет"| Accept["Актуальные evidence и итоговая приёмка"]
 ```
 
-## Состав
+Основной агент управляет native spawn/follow-up средствами Codex. Python CLI
+проверяет план, формирует briefs и состояние; собственного LLM execution loop
+у него нет. Один writer работает в одном checkout. Обычно полезны два владельца;
+третий назначается при независимой работе и свободной ёмкости.
 
-Выбранные механизмы long-running agents, Playwright, файловой wiki и bounded
-experiments описаны в [практиках развития](docs/SELECTED_PATTERNS_RU.md).
-Локальные source packets: `agent-harness context --help`. Они не требуют БД,
-сети, нового agent runtime или установки eval frameworks.
+Логические направления, активные исполнители и доступные native slots — разные
+величины. В общем бюджете учитываются также дочерние и открытые idle refs.
+Worktree разделяет записи в Git, но не создаёт OS sandbox. Полномочия происходят
+из задачи и среды; успешные tests сами по себе не разрешают внешнюю публикацию.
+Режим review/research/plan не даёт права менять product code.
 
-| Компонент | Назначение |
-|---|---|
-| `policies/global.md`, `adapters/codex/bootstrap.md` | Общая политика и короткий автоматически подключаемый prompt |
-| `workflows/`, `roles/` | Процедуры исследования, реализации, review, документов, эксплуатации и recovery |
-| `src/agent_harness/`, `schemas/` | Contracts, snapshots, checks/evidence/gates, ledger, checkpoints и read-only DAG helpers |
-| `native/`, `bin/` | Rust scanner/snapshot, Tree-sitter RepoMap; готовые бинарники в release-архиве |
-| `skills/` | Создание skills, экономия контекста, integrations и автоматическая orchestration |
-| `plugins/harness-assistant/` | Отдельный переносимый plugin с двумя самостоятельными skills |
-| `integrations/` | Маршрутизация tools, public docs MCP и пример локального read-only connector |
-| `profiles/` | Справочные пользовательские правила и настройки без credentials |
-| `provenance/` | Происхождение исходника и pinned реестр изученных upstream |
+Подробно: [координация и планы](docs/ORCHESTRATION_RU.md),
+[архитектура и границы](docs/ARCHITECTURE_RU.md).
 
-Python не вызывает LLM и не создаёт native agents. Он детерминированно проверяет
-план/состояние и готовит briefs; spawn/follow-up выполняют штатные tools Codex.
-Файлы и worktrees обеспечивают координацию, а не отдельный OS sandbox.
+## Настройки Codex и моделей
 
-## Установка
+Установщик не подбирает модель за пользователя. Он сохраняет текущие
+model/provider, усилие основного агента и security settings, неизвестные TOML
+keys, comments и чужие роли.
 
-Нужен Python 3.11+; управляющий слой использует stdlib. Native-архив содержит
-готовые бинарники для Linux x86_64 и Windows x86_64; компилятор на машине
-пользователя им не нужен. Сборка из Git: `python tools/build_native.py`, Rust
-1.90.0 и C toolchain для Tree-sitter. Обычные команды ничего не скачивают и не
-собирают. `native status` показывает выбранный backend. В `auto` маленькие деревья
-остаются на Python, большие/неопределённые используют Rust; принудительный режим
-`AGENT_HARNESS_BACKEND=native` доступен. При отсутствии бинарника
-снимки работают на совместимом Python backend; `context map` требует Rust helper.
-Работайте из полного source checkout:
-wheel без policy/workflow assets не является самостоятельной поставкой.
-Подойдёт также ZIP с полным содержимым репозитория. Git нужен для клонирования
-и обновления, но не для установки из ZIP. [Инструкция переноса](SETUP_RU.md)
-объясняет `config.toml`, выбор локальных путей и даёт готовый запрос новому Codex.
-Ниже `<package>`, `<codex-home>`, `<skills-home>` и `<private-state>` заменяет
-агент по текущей среде. Private state хранится вне репозитория.
+| Параметр | Поведение установки |
+| --- | --- |
+| `model_auto_compact_token_limit` | Добавляет `500000`, только если корневое значение отсутствует; явное значение сохраняет |
+| `agents.enabled` | Добавляет `true` при отсутствии; существующий `false` возвращает как конфликт |
+| `agents.max_concurrent_threads_per_session` | Portable default — 4 children; существующий более строгий cap сохраняет |
+| `--max-child-threads N` | Явно выбирает иной положительный cap для этой установки |
+| Legacy `agents.max_threads` | Обратимо переносится в canonical key; при конфликте старых значений выбирается более строгий предел без явного override |
+| `agents.interrupt_message` | Добавляет default при отсутствии |
+| Effort ролей | Owner/reviewer — `high`, helper — `medium`; effort координатора сохраняется |
+| `tool_output_token_limit` | Не меняет; пример `4096` доступен отдельно для оценки на своих задачах |
 
-```text
-python <package>/tools/harness.py doctor --codex-home <codex-home> --state-dir <private-state>
-python <package>/tools/harness.py install --codex-home <codex-home> --skills-home <skills-home> --state-dir <private-state>
-python <package>/tools/harness.py install --codex-home <codex-home> --skills-home <skills-home> --state-dir <private-state> --apply
-python <package>/tools/harness.py verify --codex-home <codex-home> --skills-home <skills-home> --state-dir <private-state> --native --cwd <empty-project>
+**`500000` — порог автоматического сжатия истории.** Он не расширяет context
+window модели и не задаёт пожизненный бюджет чата. Клиент и модель могут
+потребовать сжатие раньше. Размер контекста, лимит вывода инструмента и этот
+порог — разные настройки.
+
+Фиксированный model/effort в custom role TOML влияет на фактический выбор агента;
+параметр spawn не всегда его переопределяет. `doctor` показывает наблюдаемые
+настройки файлов и их источники. Активную модель с учётом CLI/project/managed
+overrides и доступную ёмкость проверяйте в клиенте.
+
+Полная схема, таблица наследования и примеры:
+[CONFIGURATION_RU.md](docs/CONFIGURATION_RU.md).
+Официальные определения: [config reference](https://learn.chatgpt.com/docs/config-file/config-reference),
+[subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents).
+
+## Большой репозиторий: поиск, RepoMap и LSP
+
+Начинайте с точного имени и обычного `rg`. Если место неизвестно, используйте
+RepoMap; если нужна семантика символа — LSP. Дополнительный обзор проекта не
+нужен, когда первый поиск уже нашёл нужный участок.
+
+### 1. Найти кандидатов
+
+Из корня пакета можно безопасно попробовать инструменты на самом harness:
+
+```sh
+rg -n 'AUTO_NATIVE_FILE_THRESHOLD' src
+python tools/harness.py native status
+python tools/harness.py context map --root . \
+  --query "snapshot input freshness" --max-bytes 8192
 ```
 
-Первый install — dry-run с адресным diff; apply создаёт backups/manifest.
-Сохраняются неизвестные TOML keys, comments, пользовательский текст и чужие роли.
-На Linux сохраняются mode, owner/group и точный набор доступных xattrs/ACL;
-на Windows проверяются DACL и owner/group. Неподдерживаемые метаданные и
-невозможность их переноса отклоняются при preflight всей транзакции. Особенности
-старых backups и восстановления описаны в [отчёте 1.4.1](docs/REVIEW_1_4_1.md).
-Установщик управляет `agents.enabled`, cap и отсутствующим `interrupt_message`;
-model/provider/reasoning/security не меняет. Если корневой параметр
-`model_auto_compact_token_limit` отсутствует, добавляет `500000`: порог автоматического
-сжатия истории Codex. Явный пользовательский порог сохраняется; повторная установка
-и откат поддерживаются. Это не увеличение окна модели и не сумма токенов за всё
-время работы. Ограничения модели/клиента могут вызвать сжатие раньше.
-[Описание параметра OpenAI](https://learn.chatgpt.com/docs/config-file/config-reference).
-Portable default cap — 4 children;
-существующий более строгий cap сохраняется. Явный `--max-child-threads N` адресно
-разрешает иной cap. Legacy `agents.max_threads` обратимо переносится в единственный
-`agents.max_concurrent_threads_per_session`; при двух старых значениях выбирается
-более строгий предел, если не задан явный override. Число логических направлений, target active owners и backend
-slots — разные значения; фактическую ёмкость наблюдают в текущем клиенте.
+Карта использует Tree-sitter definitions/references и граф файлов с task-aware
+ranking. Она возвращает кандидатов в пределах бюджета, вместе с content/revision
+binding и признаками неполноты. Это синтаксическая подсказка для навигации;
+полноту semantic references подтверждает сервер языка.
 
-`doctor` показывает разрешённые поля модели/effort/контекста/tool output limit
-с источниками: основной config, `*.config.toml` профили и TOML файлов ролей.
-Это наблюдение файлов, а не утверждение о текущей модели сессии: CLI/project/managed
-overrides и runtime limits проверяются в самом клиенте.
+### 2. Прочитать нужный участок
 
-Непустой `AGENTS.override.md` имеет приоритет над `AGENTS.md`. Ставятся managed
-bootstrap, machine pointer, три native роли и skills. Пути обновляются через
-installer/machine overlay. Одноимённые чужие skills или ручные изменения managed
-файлов вызывают конфликт без перезаписи. Если новый пакет удалил прежний owned
-skill/resource, обновление останавливается до явной миграции: старый активный
-skill не оставляется незаметно. Новая установка не гарантирует hot reload старого
-чата; локальные файлы не настраивают hosted ChatGPT Work.
-
-```text
-python <package>/tools/harness.py rollback --state-dir <private-state>
-python <package>/tools/harness.py rollback --state-dir <private-state> --apply
-python <package>/tools/harness.py uninstall --state-dir <private-state>
-python <package>/tools/harness.py uninstall --state-dir <private-state> --apply
+```sh
+python tools/harness.py context read --root . \
+  --file src/agent_harness/native.py --start-line 1 --lines 60 --max-bytes 8192
 ```
 
-Rollback/uninstall сначала проверяют всю транзакцию и backups. Чужие edits,
-репозитории, runs, процессы и файлы, созданные самим Codex, не удаляются.
+Ответ содержит выдержку, SHA-256 полного файла и данные для продолжения.
+`--max-bytes` здесь измеряет UTF-8 bytes JSON-выдачи, включая переводы строк,
+а не токены модели. Для следующей страницы используйте возвращённый offset;
+`--expect-sha256` помогает заметить изменение файла между чтениями.
 
-## Повседневное использование
+### 3. Запросить семантику и переименование
 
-Для незнакомого большого проекта:
-
-```text
-python tools/harness.py context map --root <project> --query "cache invalidation" --max-bytes 8192
-python tools/harness.py context read --root <project> --file <returned-path> --start-line <returned-line> --lines 60
-python tools/harness.py code references --root <project> --file <path> --line <line> --column <column>
+```sh
+python tools/harness.py code doctor --root . --file src/agent_harness/native.py
+python tools/harness.py code symbols --root . --file src/agent_harness/native.py
 ```
 
-`context map` работает полностью локально: синтаксические definitions/references,
-ранжирование связей и ограниченный ответ с hashes/revision. Для точных references
-и rename нужен установленный сервер соответствующего языка: `code doctor`.
-Rename сначала готовит план; `code apply` применяет его только к прежним bytes.
-Команды и ограничения: [LSP](docs/LSP_RU.md), [контекст](workflows/context.md).
+Для `definition`, `references` и `rename` задаются файл, строка и колонка.
+CLI использует позиции с единицы; правила Unicode/UTF-16 подробно разобраны
+в [LSP_RU.md](docs/LSP_RU.md). `rename` сохраняет план, а `code apply` отдельно
+проверяет все входы перед изменениями. План нельзя применять к уже другим bytes.
+При незавершённой компенсации сохраняются backup и recovery receipt.
 
-Примеры обычных запросов:
+Language server запускается локально на время команды и затем завершается.
+Он должен быть установлен заранее; harness не ставит его автоматически.
+Поддержка конкретного языка и полнота ответов зависят от сервера и проекта.
 
-- «Реализуй изменение и проверь конечный сценарий».
-- «Проверь этот PR, исходники не меняй».
-- «Исследуй варианты по актуальным первичным источникам».
-- «Подготовь документ полностью и проверь оформление».
-- «Покажи статус задачи» или «Продолжи по сохранённому checkpoint».
+### Как выбирается Rust
 
-Root сам определяет intent/scope, план, общие inputs, owners и достаточную
-приёмку. Review/plan/research не разрешают product edits. Внешние действия
-выполняются при действующем основании задачи; зелёные tests его не создают.
-Подробности: [orchestration](docs/ORCHESTRATION_RU.md),
-[операции](docs/OPERATIONS.md), [критерии приёмки](docs/ACCEPTANCE.md).
+`AGENT_HARNESS_BACKEND` принимает `auto`, `python`, `native`. В `auto` scanner
+использует Python для наблюдаемого дерева меньше **512 файлов**, Rust — для
+большого или неопределённого дерева при доступном helper. Подсказка маршрутизации
+живёт только внутри процесса. Входные файлы при snapshot всё равно хешируются:
+mtime-кэш не заменяет проверку содержимого. RepoMap выполняется в Rust.
 
-## Plugin и бесплатный локальный MCP
+Rust ускоряет локальную работу с файлами. Время генерации модели, внешнего
+инструмента, language server и ревью нужно измерять отдельно. Исторические A/B
+и ограничения измерений сохранены в [отчёте 1.4.0](docs/REVIEW_1_4_0.md).
 
-[Plugin](docs/PLUGIN_RU.md) можно установить отдельно через включённый marketplace.
-Он содержит самостоятельные coordination/status skills и не подменяет global
-bootstrap. Lifecycle hooks и автоматическое подключение аккаунтов отсутствуют.
+## Экономия контекста и долгие задачи
 
-[Read-only MCP](docs/MCP_RU.md) предоставляет ограниченные metadata статусов из
-явно выбранного private store. Нет raw prompts, goals, файлов, логов, network
-или выполнения команд. Optional dependency — официальный `mcp==2.3.0`.
-Он не включается в live profile автоматически. [Другие integrations](integrations/README.md)
-подключаются по конкретной задаче после проверки уже доступных tools.
+| Приём | Практический эффект | Что обязательно сохраняется |
+| --- | --- | --- |
+| `rg` → карта → точная выдержка | В чат попадает нужный участок вместо всего репозитория | Путь, line/offset, digest и ограничения поиска |
+| `context pack` | Исполнители получают общий ограниченный source packet | Include scope, omissions, hashes, `complete` |
+| `status --summary` | Короткий обзор без повторной печати всех records | Стадия, issues и честная свежесть evidence |
+| Raw outputs в private files | Длинные логи не заполняют переписку | Проверяемые paths/digests и выдержки ошибок |
+| Handoff и checkpoint | После сжатия можно восстановить цель и следующий шаг | Текущий attempt, решения, blockers и незавершённые операции |
+| Одна сводка ревью | Владелец исправляет связанные findings вместе | Контрпример, ожидаемый результат и достаточная повторная проверка |
 
-## Готовые open source решения
-
-[Обзор](docs/ECOSYSTEM_RU.md) содержит source screening нескольких десятков
-репозиториев, pins, лицензии и решения по применимости. ECC/Superpowers полезны
-выборочными skills; Spec Kit/OpenSpec/GSD — проектными процессами; Worktrunk,
-Serena и browser tools — специализированными возможностями. Их source support
-не считается нашей runtime-проверкой. LangGraph/Langfuse не обязательны для
-нынешнего native control plane; rationale и ограничения приведены в обзоре.
-В [справочном обзоре Claude-Mem и TokenEconomizer](docs/MEMORY_TOKENS_RU.md)
-сохранены результаты изучения присланных репозиториев. Они не входят в установку.
-Подключение памяти и импорт истории отменены; продолжать их как следующий этап
-этого комплекта не требуется.
-
-## Проверки и доказательства
+Файлы состояния выбираются **вне source checkout**. Пример команд для уже
+созданного run; замените `<private-run>` его действительным путём:
 
 ```text
+python tools/harness.py status --run-dir <private-run> --summary --max-output-bytes 8192
+python tools/harness.py checkpoint --run-dir <private-run> --note "Что завершено и проверено" --next "Следующий конкретный шаг"
+python tools/harness.py handoff --run-dir <private-run> --max-output-bytes 8192
+python tools/harness.py resume --run-dir <private-run>
+```
+
+`status` и `handoff` без `--verify-evidence` не делают полный пересчёт всех
+доказательств: свежесть может оставаться неизвестной. Для содержательной
+перепроверки добавьте `--verify-evidence` либо используйте `resume` по его
+контракту. `resume` проверяет возможность продолжения; сами модельные действия
+продолжает Codex. При изменённых входах создаётся новая attempt и выполняются
+нужные проверки, а старое `passed` не переносится автоматически.
+
+Для устойчивых проектных решений можно вести небольшую Markdown wiki:
+[шаблон](templates/project-wiki.md) хранит источники, решения и условия
+актуальности. Wiki не доказывает текущий acceptance и не объединяет память
+разных проектов. Native compaction остаётся механизмом Codex; второй скрытой
+модели-суммаризатора в комплекте нет. Продолжение после закрытия клиента или
+исчерпания его лимитов не гарантируется.
+
+Сценарии и бюджеты — [CONTEXT_AND_NATIVE_RU.md](docs/CONTEXT_AND_NATIVE_RU.md).
+
+## Проверки и приёмка результата
+
+Для managed run критерии заранее описываются в contract. Runner выполняет
+разрешённую команду, сохраняет stdout/stderr, reports и receipt, связанные с
+входами, attempt и executable. Evidence record и result record собирают эти
+данные. Итоговый gate повторно проверяет состояние под lock перед acceptance.
+
+**Код возврата 0 одной команды недостаточен.** Учитываются обязательные cases,
+валидность отчёта, реальное выполнение tests, актуальность снимка и полнота
+evidence. `unknown`, `not_run`, `skipped`, повреждённый JSON и отсутствующий
+результат выполняющейся проверки не считаются успешным подтверждением.
+
+| Вид задачи | Достаточное наблюдение выбирается по результату |
+| --- | --- |
+| Исправление кода | Воспроизведение дефекта, проверка изменённого поведения и независимый review итогового candidate |
+| Web UI | Реальный пользовательский путь, состояние после действий, console errors и визуальный результат |
+| Документ | Корректное содержание, ссылки, открытие и проверка требуемого отображения |
+| Производительность | Сопоставимые входы, несколько измерений и отдельно указанные составляющие времени |
+| Внешняя операция | Действующее разрешение и подтверждение результата во внешней системе |
+
+Полный копируемый пример, который создаёт isolated fixture и проходит путь
+`init → freeze → check → evidence → result → gate → checkpoint → handoff`,
+находится в [эксплуатации](docs/OPERATIONS.md#полный-локальный-пример).
+Структуры records и коды возврата — [CLI](docs/CLI_REFERENCE_RU.md),
+правила доказательств — [ACCEPTANCE.md](docs/ACCEPTANCE.md).
+
+## Обновление и восстановление
+
+Для обновления распакуйте **полную новую версию** или обновите чистый checkout,
+затем повторите `install` сначала без `--apply`, затем с ним, используя те же
+Codex home, skills home и private state. После этого выполните `verify` и
+откройте новую сессию. Если package root изменился, установщик обновит pointer
+и ссылки; не переносите machine state с чужого компьютера.
+
+Обновление исходников Git само по себе не пересобирает старый ignored `bin/`.
+Для нового source checkout явно выполните `python tools/build_native.py`,
+либо используйте согласованный native bundle нового релизного ZIP.
+
+```text
+python tools/harness.py rollback --state-dir <private-state>
+python tools/harness.py rollback --state-dir <private-state> --apply
+python tools/harness.py uninstall --state-dir <private-state>
+python tools/harness.py uninstall --state-dir <private-state> --apply
+```
+
+Rollback и uninstall сначала проверяют всю операцию и backups. Чужие edits и
+metadata-конфликты не перезаписываются. На Linux сохраняются поддерживаемые
+mode/owner/group/xattrs/ACL, на Windows — DACL и owner/group; невозможность
+переноса определяется до публикации. Старые byte-only backups не могут
+восстановить ACL, потерянную прежней версией.
+
+Если возвращён recovery receipt, сначала сохраните его и backups, разберите
+точный исход операции и используйте [инструкцию восстановления](SETUP_RU.md).
+Установка не удаляет проектные репозитории, runs и файлы, созданные самим Codex.
+
+## Интеграции и заимствованные механизмы
+
+Основной комплект автономен. Дополнительные инструменты выбираются под задачу:
+
+| Интеграция | Когда нужна | Как подключается |
+| --- | --- | --- |
+| Playwright / browser tools | Приёмка web-сценария | Сначала уже доступный инструмент, затем при необходимости проектная установка; [workflow](workflows/browser.md) |
+| Read-only status MCP | Получать ограниченные metadata private runs из клиента MCP | Явный выбор store и отдельный запуск stdio adapter; [MCP](docs/MCP_RU.md) |
+| Harness Assistant plugin | Нужны переносимые coordination/status skills без полной global установки | Отдельный marketplace/plugin; [plugin](docs/PLUGIN_RU.md) |
+| GitHub / документация / другие connectors | Нужны возможности конкретного сервиса | Доступные tools и действующие права пользователя; [integrations](integrations/README.md) |
+
+Plugin имеет собственную версию и не равен версии всего harness. MCP не
+запускается установщиком автоматически и не выдаёт raw prompts, logs или
+произвольные файлы. Его роль — metadata статусов, а не выполнение команд.
+
+В комплекте применены конкретные идеи: ранжированная карта Aider, LSP-навигация,
+неуспех до доказательств и handoff CWC, сводное ревью Superpowers, компактный
+контекст Pi/Deep Agents, наблюдаемый цикл mini-SWE-agent, файловая wiki и
+ограниченные offline experiments. Что реализовано кодом, что процедурой и что
+зависит от внешнего инструмента, перечислено в
+[SELECTED_PATTERNS_RU.md](docs/SELECTED_PATTERNS_RU.md).
+
+Исследованные upstream и их pins сохранены в [обзоре](docs/ECOSYSTEM_RU.md) и
+`provenance/`. Это архив исследования, а не список установленных зависимостей.
+Claude-Mem, TokenEconomizer, Promptfoo, NVIDIA SkillEvaluator и Harbor не
+включены в базовую поставку. Массовый импорт histories/hooks и отдельная БД
+для продолжения задач не требуются.
+
+## Структура репозитория
+
+| Каталог или файл | Назначение |
+| --- | --- |
+| `README.md`, `SETUP_RU.md`, `docs/` | Точка входа, установка, справочники, диаграммы и датированные отчёты |
+| `policies/global.md`, `adapters/codex/` | Общая политика, компактный bootstrap и адаптер установки |
+| `workflows/`, `roles/`, `skills/` | Процедуры по типу задачи, обязанности ролей и выбираемые skills |
+| `templates/` | Handoff, review packet, wiki и JSON-шаблоны |
+| `src/agent_harness/` | Детерминированный Python control plane, CLI, LSP и installer |
+| `native/` | Rust scanner, snapshot, RepoMap, locked зависимости и notices |
+| `bin/` | В Git — инструкция; в релизном ZIP — проверенные native bundles |
+| `schemas/` | JSON contracts и records |
+| `tools/`, `tests/`, `.github/workflows/` | Сборка, проверки и CI |
+| `integrations/`, `plugins/` | Опциональные adapters и standalone plugin |
+| `profiles/` | Примеры настроек, которые не заменяют пользовательский config |
+| `provenance/` | Исходный snapshot и закреплённые источники исследования |
+
+Private state, auth, chat histories, machine paths и runtime logs в переносимую
+поставку не входят. Отдельная карта актуальной и исторической документации —
+[docs/INDEX.md](docs/INDEX.md).
+
+## Диагностика частых проблем
+
+| Симптом | Что проверить и сделать |
+| --- | --- |
+| В новом чате не видно правил | Выполнить `verify`, проверить активный override и выбранный Codex home, затем native verification в новом сеансе |
+| После `git pull` native bundle несовместим | Собрать helper текущей версии или взять полный release ZIP; сверить `native status` |
+| `context map` сообщает unavailable | Установить/собрать helper для своей платформы; Python fallback относится к snapshot |
+| `code doctor` не находит сервер | Установить language server; при нестандартном пути передать trusted JSON argv через `--server` |
+| Ответ обрезан или `complete=false` | Сузить scope/query, прочитать нужную страницу или осознанно изменить бюджет; не трактовать omissions как отсутствие кода |
+| Записано `running`, но результата нет | Проверить действительную identity/lifecycle процесса: запись может остаться после crash. По задаче выполнить reconcile через recovery/resume; не создавать фиктивный receipt |
+| Freshness неизвестна или evidence устарело | Запросить `--verify-evidence`/`resume`, проверить входы и attempt, повторить необходимые проверки |
+| Установка сообщает managed-file conflict | Сохранить ручные edits; сравнить diff/manifest и выполнить явную миграцию по SETUP |
+| Rename оставил recovery state | Сохранить receipt и backup, проверить фактические файлы; повторный apply без разбора не подтверждает восстановление |
+| Codex всё ещё долго отвечает | Измерить model/tool/review/local time отдельно; уменьшить повторные чтения и лишние запуски исполнителей |
+
+## Проверка сборки и границы результата
+
+Обязательные проверки source checkout:
+
+```sh
 python tools/release_check.py
 python tools/run_tests.py
-python tools/build_native.py
-python tools/check_native.py
-python -m pip install "mcp==2.3.0"
-python -I -B tools/check_mcp.py
 ```
 
-CI запускает эти проверки на Windows/Ubuntu и Python 3.11/3.13. Наличие YAML не
-равно успешному запуску — сверяйте Actions конкретного commit. Реально выполненные
-проверки и ограничения: [проверка 1.1.1](docs/REVIEW_2026-11-01.md),
-[историческая проверка 1.1.0](docs/RELEASE_REVIEW.md).
-Tests не заменяют native/visual/runtime acceptance. Unknown/not_run/skipped
-не passed; ускорение и экономия токенов не объявляются без измерения.
+Для native helper и LSP существуют отдельные интеграционные проверки:
 
-Исходный snapshot 1.0.1 сохранён в provenance; проектные адаптеры, auth,
-machine state, приватные runs и история исходного Git в поставку не входят.
+```sh
+cargo +1.90.0 test --release --manifest-path native/Cargo.toml --locked
+python tools/build_native.py
+python tools/check_native.py
+python tools/check_native_build.py
+# Для реального LSP smoke: установить только закреплённый test fixture.
+npm install --prefix .test-tmp/language-tools --no-audit --no-fund --ignore-scripts pyright@1.1.414
+python tools/check_lsp.py
+```
+
+Optional MCP smoke выполняется после отдельной установки `mcp==2.3.0`:
+`python -I -B tools/check_mcp.py`.
+Точная матрица Windows/Ubuntu и Python 3.11/3.13 находится в
+[CI workflow](.github/workflows/check.yml). Проверяйте Actions конкретного commit:
+наличие workflow не подтверждает его успешное выполнение.
+
+Документация 1.4.2 включает проверяемые CLI-примеры и Mermaid-диаграммы.
+Состав ZIP, порядок применения и материалы проверки описаны в
+[релизной заметке](docs/RELEASE_1_4_2.md). Старые отчёты оставлены с исходными
+версиями и измерениями. Новые проценты ускорения, экономии токенов, полнота
+всех LSP-языков и бесконечная работа одного чата не заявляются без измерений.

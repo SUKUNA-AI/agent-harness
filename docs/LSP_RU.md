@@ -1,9 +1,14 @@
-# Локальная навигация по коду и переименование
+# Локальная навигация по коду и переименование — 1.4.2
 
 `agent-harness code` запускает установленный language server на время одного
 вызова. Доступны symbols, definition, references и переименование через
 проверяемый план. Сервис, база данных и постоянный индекс harness не создаются.
 Серверы не входят в Python-пакет и не устанавливаются автоматически.
+
+Полный каталог flags/exit codes — [CLI reference](CLI_REFERENCE_RU.md#lsp-code).
+Для выбора между `rg`, heuristic RepoMap и semantic LSP см.
+[контекст](CONTEXT_AND_NATIVE_RU.md#что-выбрать). Результат language server не
+обещает полноту проекта без корректных dependencies/configuration.
 
 ## Команды
 
@@ -16,6 +21,21 @@ agent-harness code rename --root . --file lib.py --line 1 --column 5 \
   --new-name welcome --output ../rename-plan.json
 agent-harness code apply --root . --plan ../rename-plan.json
 ```
+
+| Команда | Специальные параметры | Default / результат |
+| --- | --- | --- |
+| `doctor` | root, file, server, language, max-bytes | root=`.`; inventory, servers_started=0 |
+| `symbols` | root, file | Document symbols; позиции запроса не нужны |
+| `definition` | root, file, line, column | Location/LocationLink и SHA target |
+| `references` | То же, optional exclude-declaration | includeDeclaration=true |
+| `rename` | То же, new-name, optional output | Только preview; полный plan отдельно от wrapper |
+| `apply` | root, plan, optional max-bytes | Без LSP-сервера; reviewed text edits |
+
+У query defaults: timeout=20 секунд, max-bytes=8192. Optional server — JSON argv,
+settings — JSON object, language — строка. Doctor/apply не принимают query-only
+flags. Для source checkout замените prefix `agent-harness` на
+`python tools/harness.py`; в PowerShell JSON quoting удобнее задавать через
+переменную или вызывать Python subprocess с argv.
 
 `--file` — относительный POSIX-путь внутри выбранного root. `--line` и
 `--column` начинаются с 1. Column считает Unicode code points, не байты и не
@@ -98,6 +118,40 @@ digest. Он не содержит полных копий исходников.
 Если полный план помещается в stdout, он также присутствует в поле `plan`;
 внешняя оболочка ответа не является форматом plan-файла.
 
+```mermaid
+sequenceDiagram
+    participant U as "Вызывающий"
+    participant H as "Harness"
+    participant L as "Локальный LSP"
+    participant F as "Workspace и recovery files"
+    U->>H: "rename: позиция и новое имя"
+    H->>F: "Capture source bytes и identity"
+    H->>L: "didOpen и rename request"
+    L-->>H: "Edits и target documents"
+    loop "До трёх дополнительных проходов"
+        H->>F: "Capture ранее закрытых targets"
+        H->>L: "didOpen snapshots и повтор rename"
+        L-->>H: "Edits по открытым snapshots"
+    end
+    H->>F: "Проверка неизменности всех inputs"
+    H-->>U: "Preview и digest-bound plan"
+    U->>H: "apply: конкретный reviewed plan"
+    H->>F: "Проверка inputs, output budget, staging и receipt"
+    H->>F: "Повторные guards и замены файлов"
+    alt "Ошибка или конкурентная правка"
+        H->>F: "Проверка backup и допустимой компенсации"
+        H->>F: "Readback восстановленного результата"
+        H-->>U: "failed_compensated либо recovery_required + receipt"
+    else "Все замены подтверждены"
+        H-->>U: "applied и counts"
+    end
+```
+
+Loop выполняется только для обнаруженных неоткрытых targets; при нестабильном
+наборе клиент отклоняет preview. После выдачи плана сессия LSP закрывается;
+последующий apply работает с plan-файлом и текущими bytes, не повторяет semantic
+анализ. Поэтому перед применением нужно проверить сам proposed rename и scope.
+
 Apply проверяет весь план и все входы до замены первого файла, берёт общий
 workspace lock для других harness apply, готовит временные файлы, сохраняет
 recovery receipt и повторяет проверку перед каждой заменой. POSIX замены
@@ -115,7 +169,7 @@ recovery receipt и повторяет проверку перед каждой 
 
 | Статус | Значение |
 | --- | --- |
-| `applied` | Все файлы заменены; временные staging и backups удалены |
+| `applied` | Все замены подтверждены; обычно staging/backups очищены, возможные cleanup_warnings отражаются отдельно |
 | `no_changes` | План не меняет содержимое файлов |
 | `failed_compensated` | Операция не завершена; выполненные замены компенсированы |
 | `recovery_required` | Не все файлы можно безопасно восстановить; сохранены backups и receipt |
@@ -124,7 +178,10 @@ recovery receipt и повторяет проверку перед каждой 
 прочитайте `recovery_receipt`, текущие файлы и указанные backup paths. Не
 перезаписывайте обнаруженные изменения пользователя. При неожиданном завершении
 процесса до компенсации receipt и staging могут остаться для ручного разбора.
-Автоматического фонового восстановления нет. Старый план после компенсации
+Автоматического фонового восстановления и отдельной команды `code recover` нет.
+Receipt — данные для разбора; перед ручным восстановлением сопоставьте path,
+before/after SHA, state, фактические bytes и метаданные. Не запускайте apply того
+же stale plan вслепую. Старый план после компенсации
 может стать stale из-за изменившейся идентичности файлов; создайте новый preview.
 
 Даже при `--max-bytes 1024` ответ apply сохраняет фактический `status`, digest,
@@ -175,6 +232,11 @@ CRLF. При усечении остаются `total_items`, `returned_items`, 
 усечения. Это ограничения входа и буферов, не общий лимит RSS или OS sandbox.
 
 ## Проверки и происхождение
+
+`tests/test_lsp_safety.py` дополнительно проверяет закрытые targets, нестабильный
+набор, late edit, повреждённый/подменённый backup, readback восстановления и
+минимальный recovery output budget; `tests/test_packet_safety.py` — bounded
+packet input, FIFO/raced FIFO и изменение во время чтения.
 
 `tests/test_lsp.py` проверяет настоящий stdio протокол через локальный fixture
 server: configuration requests, прогресс, Unicode, таймауты, blocked stdin,

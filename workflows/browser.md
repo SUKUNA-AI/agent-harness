@@ -18,7 +18,7 @@
    критичной приёмки `--retries=0`. Настрой JUnit output в разрешённый evidence
    каталог вне source tree. В harness command check укажи `reports`: `format=junit`,
    `min_tests`, `max_skipped` и `required_cases`. Каждый required regex должен найти
-   выполненный успешный case; optional skips его не заменяют. Один regex означает
+   выполненный успешный case; `<skipped>`, явные `notrun`/`suppressed` и optional skips его не заменяют. Неизвестный execution status не считается pass. Один regex означает
    хотя бы один passing match: обязательные cases перечисляй отдельно. Не используй
    `--pass-with-no-tests` для required check.
 5. В managed run свяжи runtime/visual evidence с exact candidate и criteria через

@@ -1,146 +1,303 @@
-# Перенести настройки Codex на другое устройство
+# Установка и перенос Agent Harness
 
-Это общий комплект для разных проектов: правила поведения, распределение задач
-между агентами, проверка результата и создание новых скиллов (skills).
-Для установки нужны локальный Codex и Python 3.11+. Python использует стандартную
-библиотеку; устанавливать сервер, БД или дополнительные Python-пакеты не нужно.
-Отдельные плагины и коннекторы необязательны и автоматически не подключаются.
+Документация релиза **1.4.2**, сверена с реализацией **2026-11-01**.
+Установка подключает общие инструкции, три native-роли и пять skills к локальному
+профилю Codex. Операции выполняются явно; синхронизация GitHub сама профиль не
+обновляет. Настройки модели, provider, reasoning основного чата и безопасности
+сохраняются. Точные изменения TOML — в [справочнике конфигурации](docs/CONFIGURATION_RU.md).
 
-Native-архив 1.4 включает готовые `harness-native` для Linux x86_64 и Windows
-x86_64. Они ускоряют scanner/snapshot и выполняют RepoMap; compiler при работе
-не нужен. ZIP исходников, который GitHub создаёт кнопкой Download ZIP, не содержит
-бинарников: их можно собрать `python tools/build_native.py` с Rust 1.90.0 и C
-toolchain. `python tools/harness.py native status` показывает, что действительно
-выбрано. Без native helper обычные snapshots остаются доступны на Python.
+## Требования и постоянные каталоги
 
-Для semantic symbols/references/rename используется локальный language server
-нужного языка. `python tools/harness.py code doctor` проверяет доступность без
-запуска серверов. LSP child работает только на время одной команды, затем
-закрывается. БД, daemon и отдельный MCP для этих возможностей не нужны.
+Нужен Python **3.11+**. Управляющий Python-код использует стандартную библиотеку.
+Для работы в клиенте нужен установленный и авторизованный локальный Codex;
+для структурной проверки установленных файлов его исполняемый файл не требуется.
+Аккаунты, службы, БД и дополнительные Python-пакеты основной установке не нужны.
+MCP и plugin подключаются отдельно по конкретной задаче.
 
-## Самый простой способ
+Возьмите checkout либо полный релизный ZIP из
+[репозитория](https://github.com/SUKUNA-AI/agent-harness). Архив исходников GitHub
+и релизный архив с native-бинарниками различаются. Сохраните распакованный пакет
+в постоянной папке: bootstrap, роли и skills ссылаются на его policy/workflows.
+Не устанавливайте из временной загрузки, которую затем удалите.
 
-Скачайте полный ZIP из приватного GitHub либо клонируйте репозиторий в постоянный
-каталог. Понадобится доступ к [приватному репозиторию](https://github.com/SUKUNA-AI/agent-harness).
-Распакованную папку после установки сохраняйте: подключённые правила ссылаются
-на неё. Авторизацию GitHub и Codex на новом устройстве выполните штатно.
+| Каталог | Назначение | Как выбирать |
+|---|---|---|
+| Package root | Версионируемые исходники, политика, workflows, tools | Постоянный checkout или распакованный релиз |
+| Codex home | `config.toml`, глобальные инструкции, native-роли, machine pointer | Реальный профиль клиента; по умолчанию `CODEX_HOME` либо `~/.codex` |
+| Skills home | Установленные пользовательские skills | По умолчанию `~/.agents/skills`; это отдельный каталог от Codex home |
+| Private state | Machine overlay, backup copies, install/rollback manifests, run store | Вне репозитория и чужих проектов, с подходящими правами доступа |
 
-Откройте Codex в этой папке и отправьте:
+На Windows `~` здесь означает домашний каталог текущего пользователя, доступный
+как `$HOME` в PowerShell. WSL, remote-среда, другой аккаунт ОС и другой
+`CODEX_HOME` имеют собственную установку. Skills home по умолчанию общий для
+данного пользователя ОС: для независимых тестовых профилей задавайте отдельный
+`--skills-home`, чтобы они не делили установленные файлы.
 
-```text
-Установи этот переносимый harness для моего локального Codex по SETUP_RU.md.
-Проверь текущий профиль и Python, выбери подходящие пути этой машины.
-Сначала выполни doctor и dry-run, проверь адресный diff, затем install --apply
-и verify. Сохрани мои настройки модели, provider, reasoning, безопасности,
-чужие роли, скиллы и пользовательские инструкции. При конфликте не перезаписывай
-чужой файл. Не подключай БД, Claude-Mem, импорт истории, службы или аккаунты.
-После установки проверь доступные native tools в новом чате и сообщи ограничения.
+Если `--state-dir` не указан, установщик ищет сохранённый state через
+`harness-machine.json`; при первой установке выбирает `agent-harness-local`
+рядом с package root. Явные пути ниже делают выбор проверяемым. Не переносите
+machine pointer/overlay другой машины: они содержат её локальные пути.
+
+## Первая установка: Linux и POSIX shell
+
+Команды выполняются из постоянного package root. Измените пути под свою машину;
+переменные ниже не заменяют системный `HOME`. Если Python называется `python`,
+используйте его вместо `python3` после проверки версии.
+
+```bash
+HARNESS_PACKAGE="$HOME/tools/agent-harness"
+HARNESS_HOME="${CODEX_HOME:-$HOME/.codex}"
+HARNESS_SKILLS="$HOME/.agents/skills"
+HARNESS_STATE="$HOME/.local/state/agent-harness"
+cd "$HARNESS_PACKAGE"
+python3 --version
+python3 tools/harness.py doctor --codex-home "$HARNESS_HOME" --skills-home "$HARNESS_SKILLS" --state-dir "$HARNESS_STATE"
+python3 tools/harness.py install --codex-home "$HARNESS_HOME" --skills-home "$HARNESS_SKILLS" --state-dir "$HARNESS_STATE"
 ```
 
-## Что переносится
+`doctor` показывает объявленные параметры и их источники, выбранные каталоги
+и доступность executable. Это инвентаризация файлов, а не определение активной
+модели/профиля текущего чата. При `agents.enabled=false`, чужих файлах на месте
+управляемых ресурсов или повреждённом TOML сначала разберите конфликт.
 
-| Файл или каталог | Что задаёт |
+Вторая команда — **dry-run**, поскольку отсутствует `--apply`. Проверьте адресный
+`changes[].diff`, пути и hashes. Установка не должна заменять ваши model/provider,
+security или пользовательские инструкции. Dry-run не записывает targets, но
+может создать private state и временный writer lock; это не режим «вообще без I/O».
+
+После просмотра diff примените план и проверьте результат:
+
+```bash
+python3 tools/harness.py install --codex-home "$HARNESS_HOME" --skills-home "$HARNESS_SKILLS" --state-dir "$HARNESS_STATE" --apply
+python3 tools/harness.py verify --codex-home "$HARNESS_HOME" --skills-home "$HARNESS_SKILLS" --state-dir "$HARNESS_STATE"
+python3 tools/harness.py install --codex-home "$HARNESS_HOME" --skills-home "$HARNESS_SKILLS" --state-dir "$HARNESS_STATE" --apply
+```
+
+Первый apply возвращает `written_pending_native_verification` и путь manifest.
+Последний повторный apply при неизменных inputs должен вернуть `unchanged`.
+Сохраните private state: без manifest chain установщик не может безопасно принять
+ранее установленные owned-файлы как свои или восстановить историю изменений.
+
+## Первая установка: Windows PowerShell
+
+Откройте обычный PowerShell от своего пользователя. Повышение прав для штатной
+установки в собственные каталоги не требуется. `py -3` должен выбирать Python
+3.11+; при другом launcher используйте подходящий Python executable.
+
+```powershell
+$HarnessPackage = Join-Path $HOME "Tools\agent-harness"
+$HarnessHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME ".codex" }
+$HarnessSkills = Join-Path $HOME ".agents\skills"
+$HarnessState = Join-Path $HOME ".agent-harness-state"
+Set-Location $HarnessPackage
+py -3 --version
+py -3 tools/harness.py doctor --codex-home "$HarnessHome" --skills-home "$HarnessSkills" --state-dir "$HarnessState"
+py -3 tools/harness.py install --codex-home "$HarnessHome" --skills-home "$HarnessSkills" --state-dir "$HarnessState"
+```
+
+Проверьте diff, затем выполните:
+
+```powershell
+py -3 tools/harness.py install --codex-home "$HarnessHome" --skills-home "$HarnessSkills" --state-dir "$HarnessState" --apply
+py -3 tools/harness.py verify --codex-home "$HarnessHome" --skills-home "$HarnessSkills" --state-dir "$HarnessState"
+py -3 tools/harness.py install --codex-home "$HarnessHome" --skills-home "$HarnessSkills" --state-dir "$HarnessState" --apply
+```
+
+В PowerShell код завершения внешней команды находится в `$LASTEXITCODE`.
+После ненулевого кода остановитесь и прочитайте JSON-отчёт; последовательные
+строки примера не являются автоматической обработкой ошибок.
+
+## Что будет установлено
+
+| Объект | Действие установщика |
 |---|---|
-| `policies/global.md`, `adapters/codex/bootstrap.md` | Общий промпт: доведение задачи до результата, границы действий, проверки |
-| `roles/`, `workflows/` | Роли исполнителя, помощника и ревьюера; порядок работы по типу задачи |
-| `skills/`, `adapters/codex/SKILL.md` | Пять устанавливаемых скиллов: harness, создание скиллов, экономия контекста, интеграции и координация |
-| `profiles/` | Примеры настроек и пользовательских предпочтений для адресного сравнения |
-| `tools/harness.py` | Установка, проверка и откат с резервными копиями |
+| Активный глобальный `AGENTS.override.md` или `AGENTS.md` | Добавить/обновить только managed block между harness markers |
+| `config.toml` | Адресно управлять agent keys и отсутствующим compaction threshold |
+| `agents/delivery_owner.toml`, `delivery_helper.toml`, `delivery_reviewer.toml` | Установить bundled native-роли: high / medium / high, без закрепления модели |
+| Skills home | Установить `agent-harness` и четыре `harness-*` skills с их ресурсами |
+| `harness-machine.json` в Codex home | Записать package root, version, overlay и state location |
+| Private state | Сохранить `machine.json`, install history, byte backups и security metadata |
 
-История чатов, пароли, токены, локальные пути прежней машины и её подключённые
-аккаунты в репозиторий не входят. GitHub переносит версионируемые настройки.
-Подключения к сервисам проверяются отдельно только при реальной потребности.
+Имеющийся непустой `AGENTS.override.md` получает managed block; пустой или
+отсутствующий override оставляет активным `AGENTS.md`. Чужие инструкции вокруг
+managed block сохраняются. Существующий чужой owned-файл либо ручное изменение
+установленного role/skill не перезаписываются автоматически.
 
-## Новые чаты и проекты
+## Структурная и native-проверка
 
-Установку выполняют один раз для каждого устройства и используемого профиля
-Codex. После этого общий managed block находится в глобальном `AGENTS.md`
-(либо в активном глобальном `AGENTS.override.md`). Codex читает его при новом
-запуске независимо от папки проекта. Роли и скиллы также установлены глобально:
-в каждом проекте копировать harness или вызывать его вручную не требуется.
+| Наблюдение | Что подтверждает | Что ещё нужно проверить |
+|---|---|---|
+| `doctor` | Содержимое разрешённых полей, происхождение параметров, executable discovery | Реальный runtime/выбранный профиль |
+| `verify` → `structural_verified` | Manifest chain, backups/hashes, canonical installed targets и базовую согласованность | Загрузку клиентом и поведение агентов |
+| `verify --native` → `native_input_verified` | Успех новых CLI-процессов и policy marker/version во входе модели | Desktop hot reload, hosted Work, реальный spawn и выполнение задачи |
 
-Проектные инструкции добавляют свои требования и имеют приоритет при конфликте.
-Другой `CODEX_HOME`, отдельный WSL/remote-профиль или другой компьютер требует
-своей однократной установки. Уже открытые чаты могут сохранять прежние инструкции;
-после установки/обновления откройте новый чат, а при устаревшем контексте
-перезапустите Codex. GitHub сам не выполняет установку и не обновляет профиль.
-Подтверждения загрузки и ограничения — в [AUTOLOAD_RU](docs/AUTOLOAD_RU.md).
+Для native probe нужен доступный `codex` в PATH. Создайте пустую папку вне
+рабочего проекта и вызовите новый процесс:
 
-## Зачем config.toml
-
-Это файл параметров самого Codex: выбранная модель, усилие рассуждения,
-включение и предел агентов, описания ролей и настройки подключений. Общие
-инструкции находятся в `AGENTS.md`, а повторяемые процедуры — в скиллах.
-Один `config.toml` не заменяет эти файлы.
-
-`doctor` перечисляет выбранные поля модели, reasoning, контекста и лимита вывода
-tools из `config.toml`, соседних `<profile-name>.config.toml` и файлов ролей.
-Для каждого набора указан источник. Это read-only инвентаризация: фактический
-профиль/модель текущего запуска и CLI/project/managed overrides она не определяет.
-
-Установщик адресно включает агентов, добавляет роли и при необходимости задаёт
-лимит. Переносимый предел по умолчанию — четыре дочерних агента; существующий
-более строгий предел сохраняется. Для независимых частей политика обычно использует двух полезных
-исполнителей и третьего при отдельной части; фактическую доступность проверяет
-текущий клиент. Короткие задачи выполняются напрямую.
-
-При отсутствии собственного порога установщик добавляет в корень `config.toml`:
-
-```toml
-model_auto_compact_token_limit = 500000
+```bash
+HARNESS_PROBE="$(mktemp -d)"
+python3 tools/harness.py verify --codex-home "$HARNESS_HOME" --skills-home "$HARNESS_SKILLS" --state-dir "$HARNESS_STATE" --native --cwd "$HARNESS_PROBE"
 ```
 
-Это порог автоматического сжатия текущей истории. Существующее явное значение
-сохраняется. Реальный предел модели/клиента может потребовать более раннего сжатия;
-размер окна установщик не меняет. Проверяйте настройку в новом запуске Codex:
-обновление файла не гарантирует её применение в уже открытом чате.
+```powershell
+$HarnessProbe = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+New-Item -ItemType Directory -Path $HarnessProbe | Out-Null
+py -3 tools/harness.py verify --codex-home "$HarnessHome" --skills-home "$HarnessSkills" --state-dir "$HarnessState" --native --cwd "$HarnessProbe"
+```
 
-Модель, provider, усилие основного чата и безопасность установщик не меняет.
-[Пример TOML](profiles/runtime-settings.example.toml) служит для сравнения,
-а не для замены действующего файла целиком. Нельзя переносить чужие абсолютные
-пути и секреты вместе с примером.
+Реализация запускает `codex app-server --strict-config --print-startup-config`
+и `codex -C ... debug prompt-input ...`, с отдельным `CODEX_HOME`. Она проверяет
+startup и сборку model input; это не модельный ход и не доказательство native
+spawning. Неподдерживаемый флаг, отсутствие executable или timeout дают failed,
+а не успешно пропущенную проверку. После обновления откройте новый чат;
+при сохранении старого контекста перезапустите клиент. Подробнее —
+[автоподключение](docs/AUTOLOAD_RU.md).
 
-## Команды для установщика или агента
+## Обновление и перемещение пакета
 
-Из корня распакованного комплекта выполните команды ниже. Вместо `<…>` выберите
-локальные пути нового устройства, пути с пробелами заключайте в кавычки.
-`<codex-home>` — фактический профиль Codex, `<skills-home>` — его каталог
-пользовательских скиллов. `<local-state>` — отдельная папка вне репозитория
-для резервных копий, манифестов и файлов состояния. Это обычные файлы, без БД
-и работающего в фоне процесса. Не выбирайте для неё папку другого проекта.
+Для чистого Git checkout сначала проверьте `git status --short`, затем обновите
+его штатным `git pull --ff-only`. При локальных изменениях сохраните их и разберите
+расхождения; установка не требует reset/stash. Для ZIP распакуйте новый полный
+релиз в постоянную папку. Сохраняйте прежний пакет, пока проверка новой установки
+и решение об откате не завершены.
+
+Для Git-варианта команды обновления одинаковы в POSIX shell и PowerShell;
+сначала разберите вывод первой команды, затем выполняйте вторую:
 
 ```text
-python tools/harness.py doctor --codex-home <codex-home> --state-dir <local-state>
-python tools/harness.py install --codex-home <codex-home> --skills-home <skills-home> --state-dir <local-state>
-python tools/harness.py install --codex-home <codex-home> --skills-home <skills-home> --state-dir <local-state> --apply
-python tools/harness.py verify --codex-home <codex-home> --skills-home <skills-home> --state-dir <local-state>
+git status --short
+git pull --ff-only
 ```
 
-Если Python вызывается как `python3` или `py -3`, используйте эту команду.
-Dry-run показывает diff без записи целевых настроек. При конфликте остановите
-изменение соответствующего файла и разберите различия. Для проверки загрузки
-инструкций самим Codex добавьте к `verify` параметры `--native --cwd <empty-project>`;
-нужен доступный исполняемый файл Codex и отдельная пустая папка.
+Из **нового актуального package root** повторите doctor → dry-run → apply →
+verify с прежними Codex home, skills home и private state. `--package-root` можно
+задать явно, если вызываете entrypoint из другого каталога. Установщик обновит
+свои ссылки на новый package root, если installed ownership и managed block
+проходят проверки. Обновление package само по себе меняет доступные по этим
+путям исходники; не считайте старую открытую сессию автоматически обновлённой.
 
-После установки откройте новый чат. Проверка чтения инструкции не гарантирует
-перезагрузку уже открытых чатов или наличие одинаковых tools во всех клиентах.
-Windows проверен установкой и native verify; в Arch Linux/WSL выполнены core
-tests. Полная установка на macOS и native-проверка Linux в этой поставке не
-проводились. На каждом новом устройстве нужны его install/verify.
+Примеры apply для обеих оболочек приведены выше; шаги обновления используют те
+же команды и явно выбранные каталоги. Для намеренного изменения child cap есть
+только install-флаг `--max-child-threads N`, где N — положительное целое.
+Без него сохраняется более строгий имеющийся cap, а предпочтение хранится в
+machine overlay. Сам cap не доказывает доступные runtime slots.
 
-## Обновить или отменить установку
+## Rollback, uninstall и recovery
 
-Обновите чистую копию через `git pull --ff-only` либо скачайте новую версию ZIP
-в постоянный каталог. Повторите dry-run, `install --apply` и `verify`.
-При перемещении пакета установщик обновит известные пути; копировать прежний
-`harness-machine.json` между устройствами не нужно.
+`rollback` отменяет **последнюю install-транзакцию** и переводит active pointer
+на предыдущий manifest. `uninstall` проходит всю цепочку установки и удаляет
+её управляемые добавления. Оба сначала показывают план, пока нет `--apply`.
+Они не удаляют сам checkout/ZIP, private evidence и весь каталог Codex.
 
-Для отмены сначала просмотрите план:
-
-```text
-python tools/harness.py uninstall --state-dir <local-state>
-python tools/harness.py uninstall --state-dir <local-state> --apply
+```bash
+python3 tools/harness.py rollback --codex-home "$HARNESS_HOME" --skills-home "$HARNESS_SKILLS" --state-dir "$HARNESS_STATE"
+python3 tools/harness.py rollback --codex-home "$HARNESS_HOME" --skills-home "$HARNESS_SKILLS" --state-dir "$HARNESS_STATE" --apply
 ```
 
-Установщик защищает ручные правки и использует свои резервные копии.
-Подробности отката и конфликтов — в [операциях](docs/OPERATIONS.md).
+```powershell
+py -3 tools/harness.py rollback --codex-home "$HarnessHome" --skills-home "$HarnessSkills" --state-dir "$HarnessState"
+py -3 tools/harness.py rollback --codex-home "$HarnessHome" --skills-home "$HarnessSkills" --state-dir "$HarnessState" --apply
+```
+
+Для полного удаления управляемых добавлений выберите `uninstall` вместо
+последнего rollback; сначала проверьте его собственный dry-run:
+
+```bash
+python3 tools/harness.py uninstall --codex-home "$HARNESS_HOME" --skills-home "$HARNESS_SKILLS" --state-dir "$HARNESS_STATE"
+python3 tools/harness.py uninstall --codex-home "$HARNESS_HOME" --skills-home "$HARNESS_SKILLS" --state-dir "$HARNESS_STATE" --apply
+```
+
+```powershell
+py -3 tools/harness.py uninstall --codex-home "$HarnessHome" --skills-home "$HarnessSkills" --state-dir "$HarnessState"
+py -3 tools/harness.py uninstall --codex-home "$HarnessHome" --skills-home "$HarnessSkills" --state-dir "$HarnessState" --apply
+```
+
+Выбирайте rollback или uninstall по цели; последовательное выполнение обоих
+apply после отмены единственной установки даст «No active installation manifest».
+Rollback файлов профиля не переключает версию Git checkout. Для последующей
+структурной/native проверки нужен соответствующий package root предыдущей
+версии. После uninstall отсутствие active installation — ожидаемый результат;
+`verify` уже не должен сообщать verified installation.
+
+При failed operation прочитайте `status`, `manifest`/`journal` и
+`recovery_errors`, если они присутствуют. Install может вернуть `blocked`,
+указав путь failed manifest в тексте `error`; подробный статус хранится в manifest. `rollback_failed_compensated` означает возвращённые изменения
+попытки, но сама операция всё равно завершилась ошибкой. `recovery_required`
+требует разбора оставленных файлов и сохранённых copies/metadata. Не повторяйте
+apply вслепую и не удаляйте manifest, active pointer или writer lock ради обхода
+защиты. Существующий `install.lock` требует проверки владельца; автоматического
+удаления чужого lock нет.
+
+Для адресной recovery можно выбрать сохранённый manifest. Подставьте путь из
+реального отчёта и сначала получите dry-run:
+
+```bash
+HARNESS_MANIFEST="<путь к manifest из реального отчёта>"
+python3 tools/harness.py rollback --codex-home "$HARNESS_HOME" --skills-home "$HARNESS_SKILLS" --state-dir "$HARNESS_STATE" --manifest "$HARNESS_MANIFEST"
+```
+
+```powershell
+$HarnessManifest = "<путь к manifest из реального отчёта>"
+py -3 tools/harness.py rollback --codex-home "$HarnessHome" --skills-home "$HarnessSkills" --state-dir "$HarnessState" --manifest "$HarnessManifest"
+```
+
+`--manifest` не отключает integrity/конфликты и не гарантирует обход повреждённого
+machine pointer. Если discovery блокируется, сначала сопоставьте pointer,
+overlay и state с сохранёнными данными. Не придумывайте manifest или hashes.
+Подробный операционный порядок — [OPERATIONS](docs/OPERATIONS.md).
+
+```mermaid
+flowchart TD
+    A["Doctor: профиль и источники"] --> B["Dry-run: пути и адресный diff"]
+    B --> C{"Конфликт или неподдержанные metadata?"}
+    C -->|"Да"| D["Сохранить файлы и разобрать причину"]
+    C -->|"Нет"| E["Apply: backups и install manifest"]
+    E --> F["Verify: структура, затем native input"]
+    F --> G{"Результат подходит?"}
+    G -->|"Да"| H["Новая сессия и проверка поведения"]
+    G -->|"Нет"| I["Rollback plan или recovery journal"]
+    I --> D
+```
+
+## Границы безопасности установки с 1.4.1
+
+Целевые файлы должны быть обычными regular files. Symlink/reparse targets,
+FIFO, hardlinks и неподдержанные metadata отклоняются. Installer inputs
+ограничены **16 MiB на файл**; чтение bounded/nonblocking, с проверкой identity
+и final entry. На Windows дополнительно сравниваются два bounded чтения одного
+fd, поскольку timestamps могут обновляться с задержкой.
+
+На Linux сохраняются mode, uid/gid и точный набор доступных xattrs, включая
+POSIX ACL. На Windows проверяются DACL, owner/group и поддерживаемые обычные
+attributes; uncertain ownership и специальные attributes требуют отказа.
+Hardlinks, неподдержанные inode/platform flags и невозможность staging
+обнаруживаются до изменения targets. Путь metadata-preserving installation
+поддерживает Linux и Windows; macOS не заявляется поддержанным installer target.
+
+Новые manifests и rollback journals сохраняют security metadata. Публикация
+связывает ownership с проверенным staging inode и ожидаемыми metadata. Поздняя
+чужая ACL/xattr не принимается как собственная запись установщика: неизвестный
+результат сохраняется для recovery. Rollback замены сохраняет актуальные
+пользовательские metadata; удаление созданного установщиком файла с изменёнными
+metadata блокируется. Для старых byte-only manifests удаление ограничено обычным
+Linux-файлом `0600`, текущими uid/gid и отсутствием xattrs. Уже утраченные ACL
+старый byte backup восстановить не сможет.
+
+Это защита согласованной локальной операции, а не filesystem CAS или OS sandbox
+против другого процесса с теми же правами. Сохранение backup не заменяет резервное
+копирование важных пользовательских данных.
+
+## Необязательные возможности
+
+Релизный native-архив включает `harness-native` для Linux/Windows x86_64;
+compiler при его использовании не нужен. Source-only checkout может собрать
+helper через `python tools/build_native.py` с закреплённым Rust/C toolchain.
+`python tools/harness.py native status` показывает выбранный backend; Python
+snapshot fallback остаётся доступен при отсутствии helper. RepoMap требует
+native backend. Для semantic code operations нужен language server языка;
+`python tools/harness.py code doctor` проверяет discovery без запуска серверов.
+LSP child живёт одну команду и завершается после неё.
+
+[Конфигурация](docs/CONFIGURATION_RU.md) · [MCP](docs/MCP_RU.md) ·
+[Plugin](docs/PLUGIN_RU.md) · [Интеграции](integrations/README.md) ·
+[Граница ChatGPT Work](adapters/chatgpt-work/README.md).

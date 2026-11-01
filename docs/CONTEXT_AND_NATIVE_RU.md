@@ -1,203 +1,214 @@
-# Длинная сессия, расходы контекста и граница нативного ядра
+# Контекст, snapshots и native backend — 1.4.2
 
-## Что действительно реализовано
+Эта страница помогает выбрать минимальный инструмент для чтения проекта и
+понять его стоимость. Полные flags/defaults/exit codes —
+[CLI reference](CLI_REFERENCE_RU.md), состояние длительной задачи —
+[эксплуатация](OPERATIONS.md), semantic navigation — [LSP](LSP_RU.md).
 
-| Механизм | Статус и граница |
-|---|---|
-| Контракт, candidate, checks, gate, ledger и checkpoint | Исполняемый код; доказательства привязаны к содержимому и попытке |
-| Выбранные source packets | `context pack` / `context verify`, явные файлы и hashes, без индекса |
-| Адресное чтение | `context read`, лимит сериализованного ответа, hash всего файла, продолжение по byte offset |
-| Компактный статус | `status --summary`; проверяет те же исходники, сокращает только ответ |
-| Передача продолжения | `handoff`; read-only checkpoint decisions/next + текущие metadata, проверка binding |
-| CWC / long-running, Superpowers, Pi | Применимые процедуры и templates: независимая приёмка, компактный review packet, передача состояния |
-| Playwright | Workflow браузерной проверки и требования к evidence; браузер и CLI не устанавливаются автоматически |
-| mini-SWE-agent | Принцип наблюдаемого ограниченного цикла, без второго agent runtime |
-| GEPA/gskill / autoresearch | Процедура offline-эксперимента и template; optimizer и model-eval campaign не запускались |
-| Deep Agents | Использованы идеи управления контекстом; отдельный behavioral evaluation suite не подключён |
-| RepoMap по механизму Aider | Исполняемый Rust/Tree-sitter map: definitions, синтаксические связи файлов, task ranking и output budget |
-| LSP по механизму Serena/SolidLSP | `code symbols/definition/references/rename/apply`; локальный сервер на одну команду, без daemon |
-| Rust scanner/snapshot | Нативный обход и хеширование; exact совместимость manifest/digest с Python |
+## Что выбрать
 
-Источник идей и pins — [реестр](../provenance/selected-patterns.json). Процедура
-задаёт поведение агенту, но не доказывает его соблюдение нативной моделью. Tests
-ядра проверяют детерминированную механику; для оценки модели нужны реальные задачи.
+| Задача | Инструмент | Что означает результат |
+| --- | --- | --- |
+| Найти файл, строку, ошибку | `rg` / `rg --files` | Точное текстовое совпадение; самый короткий путь для известного фрагмента |
+| Прочитать участок большого файла | `context read` | Ограниченный UTF-8 excerpt с SHA всего прочитанного файла |
+| Передать несколько явно выбранных файлов | `context pack`, затем `context verify` | Content-bound packet; complete относится только к выбранным файлам |
+| Выбрать важные файлы/определения по задаче | `context map` | Task-ranked **синтаксическая эвристика**, partial/limits отражены явно |
+| Разрешить definition/references или rename | `code ...` | Ответ локального language server, зависящий от его semantic analysis |
+| Проверить candidate для приёмки | `freeze` / `status --verify-evidence` / `gate` | Полный snapshot контракта и отдельная проверка evidence |
+| Восстановить решения и следующий шаг | `handoff` | Metadata/checkpoint view; по умолчанию без workspace scan |
 
-## Как уменьшать объём, который попадает в историю
+RepoMap помогает выбрать, что читать. LSP разрешает символ с учётом языка,
+типов и workspace. Совпадение имени в RepoMap не доказывает semantic reference;
+ни map, ни source packet, ни excerpt не подменяют acceptance snapshot.
 
-1. **Найти, затем прочитать.** Используй путь/символ/ошибку через `rg`, затем
-   конкретный участок. Для большого файла `context read` возвращает ограниченный
-   ответ. `--expect-sha256` предотвращает продолжение по старому файлу.
-2. **Сохранить полный факт, показать нужную часть.** Raw logs/reports остаются в
-   разрешённом evidence; в историю идут статус, exit code, краткая диагностика,
-   путь и hash. Excerpt не является входом acceptance gate вместо полного отчёта.
-3. **Передавать задачу с точными входами.** Бриф дочернего агента содержит scope,
-   relevant files/revision, критерии и output contract. Полная история не нужна
-   каждой независимой проверке. Spawn только при оправданной отдельной работе.
-4. **Читать короткое состояние.** Для восстановления используй `handoff`. Для
-   проверки текущего результата — `status --summary --verify-evidence`. Полный
-   state остаётся доступен; dropped/omitted counts не скрываются.
-5. **Сохранять устойчивые решения отдельно.** Project wiki содержит решения,
-   причины, sources и условия пересмотра. Handoff — текущий шаг. Logs — исходные
-   наблюдения. Не дублируй три вида данных в одном огромном документе.
-
-Эти изменения снижают байты ответа выбранных tools. Фактические input/output/
-cached tokens, модельная задержка и расход лимита измеряются отдельно в клиенте.
-Нельзя переводить процент уменьшения JSON непосредственно в процент экономии
-тарифа. Одна дополнительная дорогая итерация может перекрыть экономию текста.
-
-### Ограничения инструментов
-
-`context read` возвращает до 8192 bytes по умолчанию, включая JSON escaping и
-LF/CRLF; доступный диапазон 1024..65536 bytes. Входной UTF-8 файл ограничен 16 MiB.
-Файл локально читается и хешируется целиком, даже если модели нужен небольшой
-участок. Длинная строка может продолжаться по `next_offset` без потери UTF-8.
-Credential/path guards ограничены и не являются полноценным secret scanner.
-
-`status --summary` не является дешёвым metadata polling: source snapshot остаётся.
-`handoff` по умолчанию читает сохранённые metadata и не проверяет workspace.
-`evidence_current=null` / `not_checked` нужно сохранить как неизвестность.
-Неполный список или сокращённая заметка содержат признак пропуска и ссылку на
-полные данные. `resume` остаётся отдельным действием reconciliation.
-`checkpoint.status=current` означает целостность и привязку к текущим run/task/
-attempt/contract/candidate. Свежесть файлов этим словом не подтверждается.
-`--verify-evidence` проверяет уже записанную приёмку; без accepted verdict значение
-`evidence_current` не становится true, а новые checks/gate не запускаются.
-Metadata reader ограничивает state/contract 1 MiB, checkpoint 4 MiB, receipt
-256 KiB и дополнительно проверяет структуру JSON. Просматриваются до 100 receipts;
-непросмотренные явно считаются `not_inspected`. При превышении лимита нужно
-прочитать нужную запись отдельно; данные не объявляются подтверждёнными.
-
-Для нативного клиента есть отдельный параметр
-[`tool_output_token_limit`](https://learn.chatgpt.com/docs/config-file/config-reference)
-— бюджет отдельного tool/function output, сохраняемого в истории. В
-[optional profile](../profiles/context-economy.example.toml) предложено начальное
-значение 4096 для проверки на реальных задачах. Установщик его автоматически не
-применяет, действующие overrides сохраняются. Полные evidence должны оставаться
-доступны вне обрезанной истории.
-
-## Долгая задача в одном чате
-
-На границе существенного этапа checkpoint фиксирует цель, последние уточнения,
-решения, constraints, attempt/candidate, доказательства, открытые операции и
-следующий безопасный шаг. Не требуется checkpoint после каждого tool call.
-После compaction агент читает компактный handoff, проверяет binding и догружает
-только нужные файлы. Изменившиеся inputs требуют новой проверки соответствующих
-выводов; старый accepted не превращается в актуальный сам по себе.
-
-Порог auto-compaction **500000 сохраняется**. Это порог активной истории, не
-суммарный бюджет сессии и не расширение context window. Выше порог не означает
-монотонно меньший расход: есть стоимость повторно передаваемой истории, сжатия,
-ошибок восстановления и дополнительных поисковых ходов. Для сравнения нужны
-одинаковые длинные задачи и реальная telemetry клиента.
-
-Нативная compaction и файловый checkpoint дополняют друг друга. Этот пакет не
-запускает вторую LLM-суммаризацию, не редактирует opaque compaction state и не
-перехватывает каждый tool call клиента.
-[Официальная документация compaction](https://developers.openai.com/api/docs/guides/compaction) описывает API-механику;
-она не является подтверждением доступности любого API hook в установленном UI.
-Продолжение после закрытия приложения/сессии не обещается без нового сообщения.
-
-## RepoMap: встроенный локальный инструмент
+## Адресное чтение и продолжение
 
 ```text
-agent-harness context map --root <project> --query "session refresh token" --max-bytes 8192
-agent-harness context map --root <project> --focus-file src/session.ts --query refresh --max-files 4096
+agent-harness context read --root . --file src/service.py --start-line 40 --lines 80 --max-bytes 8192
+agent-harness context read --root . --file src/service.py --offset 4096 --expect-sha256 <actual-sha256> --max-bytes 8192
 ```
 
-Rust helper извлекает определения и ссылки на идентификаторы через Tree-sitter,
-строит взвешенный граф файлов и ранжирует его с учётом запроса и выбранных файлов.
-В ответ входят symbols/signatures, диапазоны строк, SHA-256, соседние файлы,
-Git HEAD и content digest наблюдённого scope. Dirty changes меняют binding даже
-при прежнем HEAD. Это синтаксические связи по именам; точное разрешение типов и
-одноимённых символов выполняет LSP. Parser errors и неполный scope обозначаются.
+Во второй команде подставьте **возвращённый** `next_offset` и `sha256`; число
+4096 — иллюстрация, не произвольное безопасное смещение. Offset начинается с 0
+и должен находиться на UTF-8 boundary. Строки начинаются с 1. Очень длинная строка
+может продолжаться в следующем ответе без разрезания Unicode символа.
+`truncated` обозначает усечение запрошенного участка; `next_offset` может быть
+ненулевым и после полного участка, если в файле остаётся следующий текст.
 
-Defaults: 4096 файлов, 256 KiB на файл, 64 MiB суммарно, 10 секунд и 8192 bytes
-ответа с учётом JSON и Windows CRLF. Пределы можно изменить явно; hard caps:
-50000 файлов, 1 MiB на файл, 128 MiB суммарно, 30 секунд и 65536 bytes вывода.
-`--focus-file` и совпадения query с путями повышают приоритет перед ограничением
-сканирования. Если нужный символ остался за лимитом, сузь scope/укажи focus:
-`partial=true` не является полной картой проекта. Content digest относится
-только к наблюдённым файлам и не заменяет acceptance snapshot всего контракта.
+Default output — 8192 bytes; диапазон 1024–65536. Считаются сериализованный JSON,
+escaping, metadata и финальный LF/CRLF. Это **не tokens** и не лимит raw text.
+Вход до 16 MiB локально читается и хешируется целиком. При недостаточном месте
+даже для content/metadata запрос завершается ошибкой вместо пустого «успешного»
+excerpt. `--expect-sha256` отклоняет continuation по изменившемуся файлу.
 
-Поддерживаются Python, JavaScript, TypeScript/TSX, Rust, Go, C и C++.
-Git-ignore и явные excludes учитываются; generated/credential paths и symlinks
-не используются для выдачи исходника. Ограниченный secret scan не гарантирует
-распознавание всех секретов. БД, embeddings и постоянного индекса нет: graph и
-parser state живут в памяти одного процесса. Небольшая адресная задача по-прежнему
-начинается с `rg`, без ненужного полного сканирования.
-
-Механизм взят из [Aider RepoMap](https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/repomap.py):
-definitions/references, weighted file graph, task personalization и бюджет карты.
-Здесь используется собственная Rust-реализация этих механизмов; `diskcache`,
-SQLite и Python graph runtime не нужны. Точные parser versions закреплены в
-`native/Cargo.lock`, происхождение — в [реестре](../provenance/selected-patterns.json).
-
-## Семантические операции через LSP
+## Явные source packets
 
 ```text
-agent-harness code doctor --root <project>
-agent-harness code symbols --root <project> --file src/service.py
-agent-harness code references --root <project> --file src/service.py --line 12 --column 5
-agent-harness code rename --root <project> --file src/service.py --line 12 --column 5 --new-name new_name --output <private-state>/rename.json
-agent-harness code apply --root <project> --plan <private-state>/rename.json
+agent-harness context pack --root . --include src/service.py --include tests/test_service.py --output ../private/service-packet.json
+agent-harness context verify --root . --packet ../private/service-packet.json
 ```
 
-Встроенный клиент запускает установленный локальный language server по stdio,
-выполняет запрос, закрывает сессию и убирает дочерние процессы. Постоянная служба,
-MCP server и БД этому пути не нужны. Python: Pyright/pylsp; Rust: rust-analyzer;
-JS/TS: typescript-language-server; C/C++: clangd; Go: gopls. Сервера — обычные
-локальные инструменты соответствующего языка, их установка не происходит
-незаметно. `--server` принимает явный JSON argv без shell. Настройки конкретного
-проекта, например compilation database clangd, остаются ответственностью его
-локального toolchain. Подробности — [LSP](LSP_RU.md).
+Родительский private каталог должен существовать или быть разрешённым местом
+для создания output; он находится вне source root. Pack сохраняется эксклюзивно:
+существующий packet не перезаписывается. В packet находятся реальные content,
+размеры, SHA, root binding, общий digest, omitted и limits. Создание файла не
+отправляет его во внешний сервис; последующую передачу определяют полномочия задачи.
 
-Preview rename привязан к bytes и identity всех затронутых файлов. Apply сверяет
-весь план до записи, отвергает stale inputs, выход за root, неоднозначные edits
-и неподдержанные resource operations. Межфайловая запись не является одним
-атомарным filesystem commit: при ошибке применяется компенсация, а конфликт с
-чужой правкой сохраняется для восстановления. Обрезанный stdout не заменяет
-полный план; для крупного rename используйте `--output`.
+Default: 64 файла, 64 KiB на файл и 256 KiB **суммарных исходных bytes**. Hard
+bounds: 256 файлов, 256 KiB на файл и 1 MiB source bytes. JSON input packet
+ограничен 4 MiB. Превышение per-file/remaining source budget отражается в omitted;
+слишком длинный явный список файлов отклоняется. `complete=false` нельзя терять
+при передаче. Verify подтверждает целостность/root binding и актуальные hashes
+включённых файлов; оно не доказывает полноту всего проекта и не создаёт gate.
 
-У Serena приложение GPL-3.0-or-later, SolidLSP MIT: это подтверждает
-[pinned overview](https://github.com/oraios/serena/blob/ede329aaf0c824bea75455a2926f01420d7aa620/LICENSE).
-В этом пакете реализована нужная функциональность symbol/navigation/refactoring
-по LSP; установка полного Serena runtime не требуется. Лицензия не используется
-как причина откладывать работоспособные инструменты.
+Packet input читается как bounded regular file. FIFO, symlink/reparse entry и
+наблюдённая подмена отклоняются; nonblocking open не ждёт writer FIFO. На Windows
+дополнительный bounded проход по тому же fd сравнивает реальные bytes, потому
+что timestamps могут обновиться с задержкой при открытом handle. Финальные
+identity/type проверки выполняются после verification. Это кооперативная проверка
+снимка, а не блокировка любого внешнего writer.
 
-## Rust в критическом пути
+Общие context guards отклоняют symlink/reparse components, выход за root,
+credential/generated paths, binary/non-UTF-8 content и обнаруженные secret patterns.
+Ограниченный scanner не распознаёт все секреты: root отвечает за допустимость
+выбранных данных. `.git`, `.ssh`, `.aws`, node_modules, `.venv`, auth/credential
+файлы и типовые private keys исключены из source выдачи.
 
-`core.snapshot` автоматически выбирает backend по короткому осмотру дерева.
-До 512 наблюдённых файлов используется Python: здесь стоимость отдельного
-процесса превышает выигрыш. Большое дерево или неопределённый размер выбирает
-найденный bundled Rust helper. Hint хранится только в памяти текущего CLI
-процесса, не является inventory и не кэширует hashes/приёмку. В Rust
-выполняются обход, Git inventory/settings, metadata, параллельное чтение и
-SHA-256, формирование manifest/digest; RepoMap также работает в этом бинарнике.
-Управляющий слой Python сохраняет contracts, checks/gate, OS process containment,
-installer и handoff. Замена scanner не меняет схемы сохранённых evidence.
+## RepoMap
+
+```text
+agent-harness context map --root . --query "session refresh token" --max-bytes 8192
+agent-harness context map --root . --focus-file src/session.ts --query refresh --max-files 4096
+```
+
+Rust helper извлекает definitions и identifier references через Tree-sitter,
+строит weighted file graph и ранжирует его по запросу и focus files. Выдача
+содержит symbols/signatures, диапазоны строк, SHA, соседние файлы и binding
+наблюдённого scope. Dirty bytes меняют content digest при прежнем Git HEAD.
+Parser errors, неподдерживаемый/ограниченный scope и `partial=true` нужно учитывать.
+Content digest карты относится к наблюдённым файлам, не ко всем inputs контракта.
+
+Поддерживаются Python, JS, TS/TSX, Rust, Go, C и C++. Учитываются Git-ignore,
+повторяемые excludes, generated/credential paths и guards от symlinks. Focus и
+совпадения query с путями повышают приоритет до ограничения scan. Если важный
+символ не попал в бюджет, сузьте root/query или задайте focus; отсутствие в partial
+map не доказывает отсутствие определения.
+
+Defaults: 4096 файлов, 256 KiB/file, 64 MiB source total, 10 секунд, 8192 bytes
+serialized output. Hard limits: 50000 файлов, 1 MiB/file, 128 MiB total, 30 секунд,
+65536 bytes output; minimum output 2048. Полная таблица —
+[CLI limits](CLI_REFERENCE_RU.md#source-context).
+
+RepoMap требует native binary даже при `AGENT_HARNESS_BACKEND=python`: эта переменная
+выбирает backend **snapshot**, а Python-реализации repomap нет. Если binary
+недоступен, используйте явный `rg`/адресное чтение; результат не называется RepoMap.
+Граф/parser state живут в памяти одного процесса. Нет daemon, SQLite, embeddings,
+второго graph runtime или постоянного индекса.
+
+## Native backend и маршрутизация
 
 ```text
 agent-harness native status
-agent-harness native build
+agent-harness native build --offline
 ```
 
-Native-архив включает готовые бинарники и notices зависимостей. Для обычного
-исполнения compiler не нужен. Source build требует Rust 1.90.0 и C toolchain
-(Tree-sitter grammars); Cargo.lock фиксирует зависимости. Команда build явная:
-обычный check/context map не устанавливает и не компилирует ничего в фоне.
+`status` показывает requested/selected/available/platform/path и проверенные поля
+build-info для bundled binary. `build --offline` — явная локальная сборка, а не
+автоматическая установка dependencies: нужны полный source checkout, Cargo,
+C toolchain и уже заполненный Cargo cache. Без `--offline` Cargo может обращаться
+к разрешённой сети. Сам snapshot не выполняет build/download.
 
-`AGENT_HARNESS_BACKEND=auto` — default с указанным выбором размера; отсутствие
-бинарника оставляет совместимый Python snapshot. `native status` показывает
-`selected=adaptive` и фактическую политику выбора. `python` явно выбирает прежнюю реализацию; `native` требует Rust.
-Найденный повреждённый/несовместимый helper и ошибки scanner не маскируются
-успешным Python fallback. `AGENT_HARNESS_NATIVE` — явный абсолютный путь к
-локальному бинарнику для разработки/проверки. Bundle имеет SHA-256 и build info;
-временные Rust/source caches не входят в историю Codex или git.
+| Режим | Snapshot policy |
+| --- | --- |
+| `AGENT_HARNESS_BACKEND=auto` (default) | Если binary отсутствует — Python. Если присутствует — adaptive routing |
+| `...=python` | Python snapshot; существование optional bundled binary не требуется |
+| `...=native` | Native обязателен; отсутствие/ошибка — явный отказ |
+| `AGENT_HARNESS_NATIVE=<absolute executable>` | Явный developer-owned override; не означает проверенный packaged build-info |
 
-`tools/check_native.py` проверяет compiled backend, exact manifests/digests,
-Git/non-Git и реальные command/gate outcomes. `tools/profile_native.py` сравнивает
-обе реализации попарно на одном input tree с warmup, фиксированным объёмом и
-полным cycle init/freeze/3 checks/gate. Native subprocess startup и сериализация
-входят в измерение. Это локальная производительность, не скорость генерации
-модели и не измерение её токенов. Фактические результаты конкретного релиза
-публикуются отдельно; наличие Rust не заменяет A/B.
+Adaptive hint считает наблюдённые файлы до порога **512**: `<512` выбирает Python,
+большой или неизвестный tree — native. Обход прекращается по лимиту 20 ms/64
+каталога, использует excludes; Git ignored files могут завысить оценку и лишь
+переключить backend. Process-local hint ограничен 128 entries, живёт до завершения
+CLI process и **не содержит file hashes**. Малое дерево не получает scan «из cache».
+
+Каждый snapshot заново обходит/хеширует фактические inputs. Оба backend возвращают
+совместимый manifest/digest для raw bytes, dirty/untracked files, tracked deletion,
+executable metadata, Git head/branch/settings и declared external inputs. На Git
+root сохраняется значимый конечный пробел/CR/LF pathname: снимается только
+разделитель вывода Git. Rust scope globs следуют Python fnmatchcase, включая bracket
+classes и directory/**; произвольная собственная трактовка patterns недопустима.
+
+Bundled binary проверяется по version/protocol/build-info и SHA. Memo неизменной
+идентичности executable/metadata экономит повторное чтение **самого binary**, а
+не проверку исходников. Present-but-invalid bundle, execution/protocol failure,
+невалидный JSON и timeout не маскируются auto fallback. Python fallback разрешён
+при отсутствии binary или явной Python routing policy; ошибка native не passed.
+Native protocol v1 использует один JSON request на процесс, request до 16 MiB,
+response до 100 MiB; process tree убирается после вызова.
+
+### Сборка и восстановление bundle
+
+Source builder использует `CARGO_TARGET_DIR` либо `native/target`, явно передаёт
+`--target <rustc host>` и берёт binary из `<target-dir>/<host>/release`. Поэтому
+`CARGO_BUILD_TARGET`/Cargo build.target не заставляют упаковать посторонний старый
+файл из плоского `target/release`. Cargo может переиспользовать свои корректные
+intermediate artifacts; это не обещание сборки с пустым cache. Source fingerprint
+проверяется до/после; binary hash/build-info/license notices относятся к полученному
+артефакту. Версии toolchain и source digest не подтверждают подпись автора.
+
+Публикация подготовленного bundle сохраняет прежний destination для компенсации.
+Если публикация и восстановление одновременно не удались, build возвращает
+`recovery_required` с recovery_path и **не удаляет** уцелевший прежний bundle.
+Сначала сверяйте содержимое указанного каталога; автоматического cleanup такого
+recovery path нет. Исходники/настройки не нужно менять ради обхода этой проверки.
+
+## Длинная сессия и стоимость
+
+Полные raw logs, отчёты и observed receipts храните в разрешённом private evidence;
+в историю передавайте результат, exit/status, нужную диагностику и reference/hash.
+Brief дочернего owner содержит актуальные inputs/revision, точный cwd/scope,
+criteria/output и конкретные reading sections. Долгая история root не является
+обязательным входом каждой независимой проверки.
+
+`status --summary` сокращает **ответ**, но сохраняет полный source snapshot.
+`handoff` без verify читает metadata, не workspace: evidence_current=null и
+source_freshness=not_checked сохраняются. Reader summary проверяет структуры JSON,
+metadata/state/contract до 1 MiB, checkpoint до 4 MiB, result receipt до 256 KiB;
+инспектируются не более 100 checks, остальные явно not_inspected. Группы показывают
+omitted counts и references. Значение checkpoint current подтверждает binding
+run/task/attempt/contract/candidate, а не текущие source bytes.
+
+Checkpoint записывайте на существенной границе этапа: цель/уточнения, решения,
+constraints, inputs/candidate, evidence, owners/operations и следующий безопасный
+шаг. Он дополняет native compaction, не редактирует её opaque state и не запускает
+вторую LLM summarization. Порог auto-compaction 500000 сохраняется как default
+политики, явный пользовательский порог не подменяется. Это не размер context window
+и не общий бюджет всех потраченных токенов.
+
+Лимиты tools здесь измеряются в bytes, а client-side
+[`tool_output_token_limit`](https://learn.chatgpt.com/docs/config-file/config-reference)
+— отдельный параметр клиента. [Optional profile](../profiles/context-economy.example.toml)
+не применяется установщиком автоматически. Процент уменьшения JSON нельзя переводить
+в процент экономии тарифа: нужны реальные input/output/cached token measurements,
+задержки и одинаковые задачи. [API compaction guide](https://developers.openai.com/api/docs/guides/compaction)
+не доказывает доступность соответствующих hooks в конкретном UI.
+
+Продолжение после закрытия приложения требует нового разрешённого запуска/сообщения
+и фактической reconciliation. Файловый checkpoint не обещает native resume той же
+сессии и не создаёт фоновую автоматизацию.
+
+## Происхождение и проверяемые границы
+
+Task-ranked map вдохновлён [Aider RepoMap](https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/repomap.py),
+semantic tools — [Serena/SolidLSP](LSP_RU.md#проверки-и-происхождение).
+Точные pins/заимствованные процедуры — [provenance](../provenance/selected-patterns.json),
+parser versions — [Cargo.lock](../native/Cargo.lock). Здесь собственный Rust scanner
+и stdlib Python control plane, без чужого LLM runtime. Offline experiment templates
+и процедурные идеи не равны проведённому behavioral evaluation модели.
+
+Исходники: [context.py](../src/agent_harness/context.py),
+[presentation.py](../src/agent_harness/presentation.py),
+[native.py](../src/agent_harness/native.py), [repo_map.py](../src/agent_harness/repo_map.py),
+[build_native.py](../tools/build_native.py). Проверки протокола, hashing и bounds —
+core/native/context tests; реальная производительность, клиентская экономия токенов
+и semantic completeness требуют отдельных наблюдений, а не только fixtures.

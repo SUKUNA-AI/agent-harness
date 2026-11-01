@@ -5,16 +5,39 @@ description: Делегировать независимые части зада
 
 # Протокол делегации
 
-Для существенной приёмки используй `{{PACKAGE_ROOT}}/workflows/review.md` и
-review packet: независимый reviewer читает критерии, diff и raw evidence без
-авторского вердикта. При передаче/compaction — `{{PACKAGE_ROOT}}/workflows/context.md`.
-Не копируй всю историю каждому исполнителю.
+Ограниченную самостоятельную задачу выполняй прямо. При полезном разделении
+назначай owners автоматически, обычно 2–3; неделимую работу веди последовательно.
+Root сам готовит plan по `{{PACKAGE_ROOT}}/schemas/orchestration.schema.json`:
+цель/разрешения, cwd/scope, inputs, criteria, read_sections, outputs и общий context
+по ссылкам/hashes. Не копируй всю историю и не перечитывай неизменные инструкции.
+Helpers `plan validate`, `plan brief`, `plan next`, `plan repair-brief` описаны в
+`{{PACKAGE_ROOT}}/docs/ORCHESTRATION_RU.md`; точные флаги —
+`{{PACKAGE_ROOT}}/docs/CLI_REFERENCE_RU.md`.
 
-1. Выведи из запроса goal, разрешения, cwd/scope, inputs и достаточную приёмку. Ограниченную самостоятельную работу веди прямо. При полезном разделении назначай независимых owners автоматически, обычно 2–3; последовательный план может иметь одного. Root готовит служебные данные сам.
-2. Используй plan по `schemas/orchestration.schema.json`: общий context по ссылкам/hashes, конкретные read_sections и outputs. Формат и команды — `docs/ORCHESTRATION_RU.md`: `plan validate`, `plan brief`, `plan next`. Не копируй всю историю. При неизменном контракте повторное чтение инструкций не нужно.
-3. Перед каждым spawn/follow-up сверяй реальный полный inventory; lifecycle вызовы сериализуй. Учитывай всех открытых потомков, включая idle/done и helpers. Root считается только при `budget.root_counts=true`; у child-only лимита Codex он не занимает дочерний слот. Не подставляй универсальный cap. Переиспользуй подходящий idle ref; done/interrupt не означают close. Helper создаёт root, отдельной квоты у owner нет.
-4. Назначай точный cwd/scope, Git writers — отдельный worktree от известной базы. Один writer на checkout; root единственный интегратор. Общие generated outputs сериализуй. Перед downstream/repair обнови изолированную базу безопасно, сохрани dirty work. Текст контекста не обновляет файлы.
-5. Возвращай исправление прежнему доступному owner через `plan repair-brief` с actual check/log/current candidate и новой attempt. `send_message` не запускает завершённый ход; используй штатный follow-up. После двух одинаковых провалов без новой гипотезы диагностируй. Replacement/attempt не сбрасывает бюджет.
-6. Owner возвращает ready_for_review и evidence. Root проверяет итоговый candidate и затронутые взаимодействия; required unknown/skipped/timeout не passed. Приёмка и достаточное независимое ревью завершают работу без лишних волн проверки. Recovery сверяет files, dependency evidence, процессы, refs и неизвестные операции.
+1. До spawn/follow-up сверь полный native inventory; lifecycle вызовы сериализуй.
+   Учитывай открытых/idle/done потомков и helpers; done/interrupt не означает close.
+   Root считается при `budget.root_counts=true`; child-only лимит не включает его.
+   Не выдумывай cap. Переиспользуй подходящий idle ref; helper создаёт root,
+   отдельной квоты у owner нет.
+2. Git writer получает отдельный worktree от известной базы и точный scope.
+   Один writer на checkout, один root-интегратор; generated outputs сериализуй.
+   Перед downstream/repair безопасно обнови базу, сохрани dirty work: сообщение
+   с новым контекстом не обновляет файлы.
+3. Repair верни прежнему доступному owner через `plan repair-brief`: actual
+   check/log/candidate и новая attempt с причиной. `attempt --reason` не обходит
+   active check lease, max_attempts или deadline. После двух одинаковых провалов
+   без новой гипотезы диагностируй; замена агента бюджет не сбрасывает.
+   `send_message` передаёт сообщение, новый ход запускает штатный follow-up.
+4. Owner возвращает ready_for_review и raw evidence. Root принимает итоговый
+   candidate и взаимодействия; required unknown/skipped/not_run/timeout и
+   невыполненный testcase не passed. Проверяй сохранённую приёмку через
+   `status --verify-evidence`: все принятые receipts, включая optional, и dependencies
+   должны оставаться актуальными. Неизменный контракт не заменяет утраченную evidence.
 
-Действуют разрешения текущей задачи и общая политика. Не меняй model/provider/permissions, не запускай публикации/сообщения без основания. Worktree и роль не создают sandbox. Python только проверяет данные; native tools исполняет root. Не обещай фоновую работу или native resume при восстановлении из checkpoint.
+Для существенной независимой проверки загрузи `{{PACKAGE_ROOT}}/workflows/review.md`:
+reviewer получает критерии/diff/raw evidence без авторского вердикта. Для handoff —
+`{{PACKAGE_ROOT}}/workflows/context.md`; для refs/processes/unknown operations —
+`{{PACKAGE_ROOT}}/workflows/recovery.md`. После достаточной приёмки заверши работу.
+Сохраняй model/provider/permissions и полномочия внешних действий. Роль/worktree
+не создают sandbox; Python проверяет данные, native tools вызывает root.
+Не обещай фоновую работу или native resume по checkpoint.

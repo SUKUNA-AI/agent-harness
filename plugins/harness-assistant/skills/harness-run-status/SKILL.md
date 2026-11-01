@@ -18,13 +18,12 @@ description: Проверить статус сохранённого запус
    Не превращай reported passed в свежую проверку и не заполняй отсутствующее
    догадками. Не проси MCP прочитать prompts, contracts, логи или credentials.
 3. Если MCP нет, но установлен agent-harness и известен разрешённый run-dir,
-   проверь agent-harness status --help и используй status --run-dir с этим
-   каталогом. Это отдельный локальный CLI: он может читать workspace для сверки
+   используй `agent-harness status --run-dir <run> --summary`; неизвестные флаги уточни через `status --help`. Это отдельный локальный CLI: он может читать workspace для сверки
    входов; сначала соблюди текущие права и scope. Не сканируй все проекты машины.
    `source_current` относится к исходникам; `evidence_current=null` и
    `evidence_validation=not_checked` не подтверждают artifacts. Для запроса
    актуальной приёмки используй `status --verify-evidence` в том же scope;
-   это read-only проверка, без запуска команд/агентов и нового acceptance gate.
+   это read-only проверка, без запуска checks/агентов и нового acceptance gate. Она сверяет весь набор ранее принятых receipts, включая optional, и dependencies; исчезновение receipt означает stale evidence. `resume` меняет state и не заменяет статус.
 4. Если ни инструмент, ни run не доступны, прямо сообщи это и назови недостающий
    доступ или идентификатор. Не выдавай отсутствие данных за отсутствие запусков.
 

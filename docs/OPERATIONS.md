@@ -1,88 +1,295 @@
-# Эксплуатация
+# Эксплуатация managed runs — 1.4.2
 
-## Обновление на 1.2
+Короткую самостоятельную задачу выполняйте напрямую. Managed run нужен для
+длительной, делегированной или возобновляемой работы с разрешённым сохранением.
+CLI сохраняет контракт, inputs и evidence; native agents и внешние операции
+остаются под управлением основного чата. Полный каталог флагов —
+[CLI_REFERENCE_RU](CLI_REFERENCE_RU.md), условия принятия — [ACCEPTANCE](ACCEPTANCE.md).
 
-Сначала завершите активные команды прежней версии harness: старый процесс не
-участвует в новом OS-lock протоколе. Новые `.guard` anchors постоянны; удаление
-lease и удаление anchor — разные операции. Не удаляйте anchor у активного процесса.
-Git subdirectories одного checkout разделяют workspace lock, реальные worktrees
-остаются независимыми. Для non-Git работы разные cooperating callers должны
-использовать одинаковый workspace root и общий resource lock namespace.
+## Последовательность работы
 
-Rollback/uninstall записывает journal с before/after copies и progress. При
-`rollback_failed_compensated` изменения этой попытки компенсированы; при
-`rollback_failed_recovery_required` сначала сверяйте перечисленные пути и journal.
-Чужие новые bytes не заменяются при компенсации. Per-target guards обнаруживают
-изменения между этапами, но не являются filesystem CAS против внешнего редактора.
-Symlink/reparse targets установщик отклоняет до замены: используйте обычные файлы
-или отдельно выбранный способ установки, сохраняя исходные ссылки.
+1. Выберите разрешённый workspace и приватный run store **вне source workspace**.
+   Контракт задаёт цель, permissions, scope, applicable checks, бюджет и входы.
+2. `init` сохраняет начальный baseline. Выполните разрешённые изменения в scope.
+3. `freeze` фиксирует итоговый candidate и toolchain manifest. После него не
+   меняйте candidate во время required checks/gate.
+4. `check` выполняет frozen argv; `evidence` сохраняет другие виды доказательств.
+   Owner может передать `result` со статусом ready_for_review.
+5. Root вызывает `gate`. Только accepted verdict вместе с текущими inputs и
+   evidence является основанием для инженерной приёмки.
+6. `status --verify-evidence` сверяет сохранённую приёмку. Для продолжения
+   сохраните checkpoint; после прерывания выполните reconciliation через resume.
 
-Обычный `status` сообщает `source_current`, `recorded_status` и
-`evidence_current=null`, если artifacts ещё не сверены. Только явный
-`status --verify-evidence` проверяет accepted verdict, logs/reports и dependencies:
-exit 0 при текущем evidence, exit 1 при stale/непринятом run, exit 2 при ошибке
-чтения/параметров. Сохранённый accepted сам по себе не означает свежую приёмку.
+```mermaid
+flowchart TD
+    A["init: baseline и контракт"] --> B["Разрешённые изменения в scope"]
+    B --> C["freeze: candidate и toolchains"]
+    C --> D["check / evidence"]
+    D --> E["result: ready_for_review"]
+    E --> F{"gate"}
+    F -->|"accepted"| G["Проверенная приёмка candidate"]
+    F -->|"rejected"| H["Диагностика и новая гипотеза"]
+    D -->|"failed / timeout"| H
+    H --> I["attempt: новый contract/ID"]
+    I --> B
+    G --> J["status --verify-evidence"]
+    J -->|"stale"| H
+```
 
-Bootstrap подключает короткую политику к новым локальным Codex sessions. Подробный процесс выбирается по задаче; полный doctor перед простым ответом не нужен. Root — основной чат. Native agents управляются его штатными инструментами, Python лишь проверяет/сохраняет инженерное состояние. Внутренний spawn API не имитируется.
+Это схема основного пути, не формальный конечный автомат всех полей state.
+Например, evidence отдельно не повышает state до ready_for_review, а gate может
+проверить complete checks без owner result. `result` не является обязательным
+искусственным шагом для прямой работы root.
 
-## Команды служебного ядра
+## Полный локальный пример
 
-У каждой команды доступен `--help`. Из любого cwd используйте абсолютный путь `python <package>/tools/harness.py ...`; при установленном Python package — `python -m agent_harness ...`.
+Пример ниже можно сохранить как `demo_run.py` **вне репозитория** и выполнить:
 
-| Команда | Назначение |
-|---|---|
-| `doctor` | Без чтения credentials показывает нужные paths, syntax, executables, file settings и границы неизвестных runtime capabilities |
-| `install` | Inspect/dry-run; `--apply` — адресная транзакция с backups/manifest |
-| `verify [--native]` | Структура; с native — новый процесс parser и marker в model input, отдельно от поведения UI/агентов |
-| `init --run-dir P --contract F` | Новый приватный сохраняемый запуск с зафиксированным контрактом |
-| `freeze --run-dir P` | Фиксация candidate inputs перед итоговыми checks |
-| `check --run-dir P --check ID [--cancel-file F]` | Реальная команда из контракта, timeout/logs/evidence |
-| `evidence --run-dir P --check ID --record F` | Типизированное evidence для source/content/visual/runtime с proof |
-| `gate --run-dir P` | Проверка exact contract/attempt/candidate, required checks, scope и integrity evidence |
-| `status --run-dir P` | Быстрый source status; сохранённый accepted ещё не подтверждает текущее evidence |
-| `status --run-dir P --verify-evidence` | Read-only проверка accepted verdict, артефактов и dependencies; exit 1 если не подтверждены |
-| `context pack --root P --include FILE --output F` | Ограниченный private source packet вне source root |
-| `context verify --root P --packet F` | Проверка целостности и актуальности включённых файлов; не acceptance gate |
-| `checkpoint --run-dir P --note TEXT --next TEXT` | Версионированная точка восстановления |
-| `resume --run-dir P` | Сверка сохранённого состояния и входов; не подмена native resume |
-| `attempt --run-dir P --contract F` | Новая ревизия контракта/попытка; старое evidence не наследуется как passed |
-| `ledger --run-dir P --record F` | Учёт native owners, их references, scopes и общей ёмкости; запись не создаёт агента |
-| `operation --run-dir P --id ID --action A --status S --proof TEXT` | Outcome ledger операций: planned/unknown/confirmed/failed |
-| `rollback [--apply]` | Отмена последней установочной транзакции с защитой ручных правок |
-| `uninstall [--apply]` | Отмена всех сохранённых установок; runs и пользовательские данные сохраняются |
+```text
+python demo_run.py /absolute/path/to/agent-harness /absolute/new/private-demo
+```
 
-Установочные команды принимают `--package-root`, `--codex-home`, `--skills-home`, `--state-dir`, `--machine-overlay`; verify также `--cwd`. После установки реальный private state находится через `harness-machine.json`/overlay поле `installation_state`, если флаг не передан. Native verify требует доступного Codex executable. Не включайте full access, не меняйте провайдера и не копируйте auth ради прохождения проверки.
+Скрипт переносим между Linux и Windows: использует только Python stdlib, прямой
+argv и `sys.executable`. Первый аргумент — существующий полный source package;
+второй — новый каталог, который скрипт создаст эксклюзивно. Реальный профиль Codex,
+его config, модель, permissions и native threads не затрагиваются. Требуется
+Python 3.11+; Git, Cargo и language server для этого примера не нужны.
 
-`install --max-child-threads N` — отдельная явная авторизация положительного native child cap (например 5). Сначала просмотрите dry-run, затем добавьте `--apply`. Значение сохраняется в machine overlay `preferred_native_child_cap`; обычный reinstall его не сбрасывает к portable default4 и не повышает более строгий пользовательский текущий cap. Четыре logical lanes и cap учитываемых native children — разные параметры. Уже открытая сессия может сохранять прежнюю runtime ёмкость; effective limit подтверждается новым запуском. Никакое изменение локального файла не доказывает backend support пяти детей.
+Цель fixture — проверить механику проверки функции и сохранения доказательств.
+Content assessment здесь честно описывает выполненное сравнение точных исходных
+байтов; его нельзя переносить как содержательное review произвольного проекта.
+Скрипт не печатает заранее придуманные digests или accepted: он проверяет реальные
+ответы CLI и завершится ошибкой, если ожидаемый переход не состоялся.
 
-## Длительная работа
+```python
+from pathlib import Path
+import json
+import subprocess
+import sys
 
-Root выбирает private run store из machine overlay, разделённый по проекту/объекту и конфиденциальности. Сохраняются только нужные решения, ограничения, входы/версии, контракты/digests, владельцы/refs, attempts, evidence, patches/commits и следующий шаг. Для короткого вопроса run не нужен. Если пользователь запретил сохранение, не пишите эти данные; ограничение восстановления обозначается явно. Native/app history не контролируется этим кодом.
+package = Path(sys.argv[1]).resolve(strict=True)
+base = Path(sys.argv[2]).resolve()
+base.mkdir(parents=True, exist_ok=False)
+source = base / "source"
+source.mkdir()
+private = base / "private"
+private.mkdir()
+run_dir = private / "run"
+cli = package / "tools" / "harness.py"
 
-Общий state пишет только root/одна команда с lock; owners возвращают отдельные результаты. Контракты/gates исполнителю не передаются как свободно изменяемые условия успеха. Локальные locks — координация и обнаружение ошибок, не OS security boundary против процесса с теми же правами.
+original = "def add(a, b):\n    return a + b\n"
+(source / "calc.py").write_bytes(original.encode("utf-8"))
+report = private / "unit-a1.json"
+contract_path = private / "contract.json"
 
-Status: найти точный run, вызвать `status`, проверить актуальность evidence и показать работающие/ожидающие lanes, blockers и следующий шаг. Несколько совпадений требуют выбора. Stop: согласованно остановить native owners, сохранить их результаты и checkpoint, записать собственные процессы/ресурсы и unknown operations; не удалять файлы. Только подтверждённое закрытие thread освобождает слот по backend semantics; idle и запись cancelled в локальный JSON этого не доказывают.
+def save(name, value):
+    path = private / name
+    path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
 
-Resume: открыть новую сессию и попросить продолжение. Сверить `resume`, реальное дерево/объект/версию, native owners и идентичность собственных процессов. Не верить старому PID и не дублировать owner, пока прежний outcome неизвестен. Native follow-up той же сессии — отдельная capability; восстановленный по checkpoint новый агент помечается новой native reference. Автоматический restart после закрытия приложения не обещается.
+def invoke(*args, expected=0):
+    completed = subprocess.run(
+        [sys.executable, str(cli), *map(str, args)],
+        capture_output=True, text=True, encoding="utf-8", check=False,
+    )
+    if completed.returncode != expected:
+        raise RuntimeError((args, completed.returncode, completed.stdout, completed.stderr))
+    value = json.loads(completed.stdout)
+    label = "-".join(str(arg) for arg in args[:1])
+    save(label + "-last-output.json", value)
+    return value
 
-Перед повтором неизвестного commit/merge/push/deploy/сообщения/remote edit выяснить фактический итог и сохранить proof. В незавершённом check нет полноценного evidence — значит он не passed. Поздний result старой attempt сохраняется историей и не заменяет current_attempt/accepted.
+check_code = (
+    "import importlib.util,json,sys; from pathlib import Path; "
+    "spec=importlib.util.spec_from_file_location('fixture_calc','calc.py'); "
+    "module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module); "
+    "assert module.add(2,3)==5; "
+    "Path(sys.argv[1]).write_text(json.dumps({'passed':True}),encoding='utf-8'); "
+    "print('PASS add')"
+)
+contract = {
+    "schema_version": 1,
+    "run_id": "local-demo",
+    "task_id": "verify-add",
+    "attempt_id": "a1",
+    "workflow": "change",
+    "process_level": "standard",
+    "goal": "Verify the isolated add fixture and retain exact evidence",
+    "cwd": str(source),
+    "permissions": ["read", "write", "test"],
+    "scope": {"write_paths": ["calc.py"], "exclude": ["__pycache__/**"]},
+    "budget": {"max_attempts": 3},
+    "checks": [
+        {
+            "id": "unit", "kind": "command", "required": True,
+            "argv": [sys.executable, "-I", "-B", "-c", check_code, str(report)],
+            "timeout": 10,
+            "assertions": [{"stream": "stdout", "regex": "PASS add"}],
+            "reports": [{"path": str(report), "format": "json", "equals": {"passed": True}}],
+        },
+        {
+            "id": "source-observation", "kind": "content", "required": True,
+            "criteria": ["exact_fixture"],
+        },
+    ],
+}
+save("contract.json", contract)
+invoke("init", "--run-dir", run_dir, "--contract", contract_path)
+frozen = invoke("freeze", "--run-dir", run_dir)
+checked = invoke("check", "--run-dir", run_dir, "--check", "unit")
+assert checked["status"] == "passed"
 
-## Изменения и приёмка
+observed = (source / "calc.py").read_bytes().decode("utf-8")
+assert observed == original
+artifact = private / "observed-source.txt"
+artifact.write_text("Compared calc.py with the exact documented fixture:\n" + observed, encoding="utf-8")
+evidence_path = save("content-evidence.json", {
+    "kind": "content", "status": "satisfied",
+    "method": "agent_assessment", "assessor": "documentation-fixture",
+    "assessment": "The script read calc.py and compared it with the explicit expected fixture.",
+    "criteria": {"exact_fixture": "Exact source string equality was observed before recording evidence."},
+    "artifact_paths": [str(artifact)],
+})
+invoke("evidence", "--run-dir", run_dir, "--check", "source-observation", "--record", evidence_path)
+state = invoke("status", "--run-dir", run_dir)
+owner_result = save("owner-result.json", {
+    "run_id": contract["run_id"], "task_id": contract["task_id"], "attempt_id": "a1",
+    "contract_digest": state["contract_digest"], "candidate_digest": frozen["candidate_digest"],
+    "status": "ready_for_review", "summary": "Fixture check and source observation completed.",
+    "limitations": "Local fixture only; no native agent, external service or visual assessment.",
+    "next_safe_step": "Root can inspect artifacts and run gate.",
+    "evidence_ids": ["unit", "source-observation"],
+})
+invoke("result", "--run-dir", run_dir, "--record", owner_result)
+verdict = invoke("gate", "--run-dir", run_dir)
+assert verdict["verdict"] == "accepted"
+current = invoke("status", "--run-dir", run_dir, "--verify-evidence", "--summary")
+assert current["evidence_current"] is True
+invoke("checkpoint", "--run-dir", run_dir,
+       "--note", "Exact fixture passed; evidence and actual verdict are retained.",
+       "--next", "Read handoff, inspect actual files, then choose the next authorized task.")
+invoke("handoff", "--run-dir", run_dir)
 
-Каждому файловому owner назначить точный cwd/scope и отдельный worktree/ветку, если изменения конкурентны. Shared YAML ограничить records, не только путём. Один интегратор пишет integration worktree, последовательно применяет commits/patches и пересобирает generated outputs. Tests/builds/ports/GPU имеют собственные ресурсные группы.
+# A later source edit makes the old acceptance stale; it is not silently reused.
+(source / "calc.py").write_bytes((original + "# changed after acceptance\n").encode("utf-8"))
+stale = invoke("status", "--run-dir", run_dir, "--verify-evidence", expected=1)
+assert stale["evidence_current"] is False
+assert stale["recorded_status"] == "accepted"
+contract["attempt_id"] = "a2"
+contract["checks"][0]["argv"][-1] = str(private / "unit-a2.json")
+contract["checks"][0]["reports"][0]["path"] = str(private / "unit-a2.json")
+save("contract.json", contract)
+invoke("attempt", "--run-dir", run_dir, "--contract", contract_path,
+       "--reason", "Source comment changed after acceptance; freeze and checks must be repeated.")
+print(json.dumps({"run_dir": str(run_dir), "verified_a1_verdict": verdict["digest"],
+                  "a1_became_stale": True, "current_attempt": "a2",
+                  "next_step": "Freeze and rerun applicable checks; a2 is not accepted."}, indent=2))
+```
 
-При интеграционном дефекте вернуть тому же owner check ID, candidate revision/snapshot, полный log path и короткую диагностику, ожидаемое поведение и scope. Его checkout безопасно привести к candidate, сохранив прежнюю работу, создать attempt. После исправления повторить затронутые и обязательные интеграционные проверки. Два одинаковых провала без новой гипотезы требуют диагностики, а не бесконечных повторов/нового агента.
+Все contract/evidence/result JSON остаются в выбранном private каталоге. Внутри
+run находятся `contracts/`, `origin-baseline.json`, `attempts/a1/candidate.json`,
+`toolchains.json`, `checks/*/result.json`, copied artifacts/logs, `gates/`,
+`results/` и `checkpoints/`. Последний вывод явно различает реально принятую `a1`
+и новую ещё не принятую `a2`. Повторный запуск требует нового каталога.
 
-На final gate candidate не изменяется конкурентно. HEAD без dirty/untracked snapshot недостаточен. Required check нельзя ослабить в worker result. Source/content/visual/runtime подтверждения не являются command exits и требуют своего proof; непросмотренный артефакт не закрывает visual. Финальное accepted относится к exact candidate/контракту, не переносится на новые входы.
+### Почему пример устроен так
 
-## Диагностика и откат установки
+`scope.write_paths` разрешает только calc.py; test reports и run store находятся
+снаружи source. Иначе они загрязняли бы snapshot во время check. Исключение
+`__pycache__/**` задано явно, а `-I -B` изолирует inherited Python injection и
+не создаёт bytecode. Даже локальный subprocess исполняет код с правами пользователя;
+contract permissions — процессный контроль работы, а не OS sandbox.
 
-`doctor` не показывает полный environment и не открывает auth. Ошибка TOML оставляет исходный файл целым. Если `install.lock` уже существует, проверь содержимое/живого владельца и итог операции; не удаляй lock автоматически. Если diff включает чужие пути/права или конфликтует с явной политикой, останови затронутую установку.
+Report path уникален для попытки. JSON `passed:true` проверяется как boolean;
+`passed:1` дал бы failed. Копирование настоящего артефакта обязательно и для
+content; один текст «всё хорошо» без proof не является complete evidence.
+Owner result связывается с реально возвращёнными digests, не с placeholders.
 
-`verify` может подтвердить structure, parser и model-input marker, но discovery ролей, spawn/follow-up/cwd/result/behavior требуют отдельных native probes. Успех CLI не объявляй проверкой desktop без совпадающего клиентского профиля и наблюдения. `docs/RELEASE_REVIEW.md` хранит фактическую матрицу.
+## Status, handoff и возобновление
 
-Rollback проверяет backup/installed hashes и новые пользовательские изменения. В инструкции удаляется только неизменённый managed block, сохраняется остальной текст. В TOML восстанавливаются только неизменённые управляемые строки, неизвестные поля сохраняются. Изменённая собственная роль/skill/pointer или правка управляемого блока — конфликт, весь предварительный план не применяется. Разреши конфликт адресным diff; не затирай целый файл старой копией. `rollback` отменяет последний update, `uninstall` всё сохранённое install history. Backups/private runs автоматически не удаляются.
+| Запрос | Что проверяет | Чего результат не подтверждает |
+| --- | --- | --- |
+| `status` | Полный текущий source/input snapshot против candidate | Integrity уже сохранённых logs/reports: evidence_current остаётся null, пока не проверена accepted evidence |
+| `status --summary` | Ту же проверку inputs, сокращённое представление | Экономию локального хеширования или стоимость токенов модели |
+| `status --verify-evidence` | Accepted verdict, exact receipt set, artifacts, toolchains, dependencies, current source | Новый check/gate или доступность runtime клиента |
+| `handoff` | Ограниченные сохранённые metadata/checkpoint bindings | Свежесть workspace; checkpoint current означает binding, не актуальные source bytes |
+| `handoff --verify-evidence` | Metadata плюс текущий source/evidence путь | Native resume той же сессии |
+| `resume` | Inputs, process identities, artifacts/checkpoint integrity, owners/unknown operations | Автоматическое продолжение или фактическое закрытие native threads |
 
-## Перенос и ОС
+`status`/`handoff` read-only. `resume` **изменяет state**: потерянный running
+process помечается interrupted, незакрытые native owners требуют reconciliation;
+при проблемах status становится blocked, accepted снимается. Живой процесс не
+дублируют. Для native owners нужен новый реальный backend inventory; один локальный
+PID/ref или запись idle не являются доказательством завершения.
 
-В переносимый package входят versioned policy/code/tests/schemas/adapters, без private state, абсолютных путей пользователя и credentials. На новом компьютере отдельно выбери CODEX_HOME, skills/state/overlay и проведи install/verify/native сценарии. На Windows не предполагай Bash; на Arch не предполагай apt. Пробелы/Unicode, line endings, executable discovery и cancellation проверяются на каждой реально используемой ОС. Arch остаётся unverified до фактического исполнения.
+## Попытки, locks и ошибки
+
+`attempt` требует тот же run_id/task_id, новый уникальный attempt_id, reason и
+валидный контракт. Старые contracts/checks/results/gates сохраняются по своим
+каталогам. Для нового attempt требуются собственные freeze/checks/evidence.
+Исходный scope baseline run сохраняется, поэтому новая попытка не узаконивает
+ранее посторонние изменения. max_attempts/deadline не сбрасываются новым агентом.
+Две одинаковые failed signatures и прежняя reason требуют новой диагностики.
+
+Переход attempt берёт leases старого и нового workspace/namespace в стабильном
+порядке, затем state lock. Поэтому старая команда не может стартовать после
+перехода на read-only contract; непосредственно перед spawn contract/attempt
+повторно сверяются, и регистрация process выполняется в той же state-транзакции.
+Долгая команда держит workspace lease, но не держит state lock всё время.
+
+Git subdirectories одного checkout разделяют workspace lock; реальные worktrees
+независимы. Для non-Git callers согласуйте одинаковый корень и resource namespace.
+Общие tests/build ports/GPU задавайте `check.resources`; при необходимости укажите
+общий абсолютный resource_lock_root вне source. Lock защищает cooperating harness
+writers, не блокирует редакторы и не является OS security boundary.
+
+Постоянный `.guard` anchor и временный JSON lease — разные объекты. Не удаляйте
+anchor у активного процесса. При Resource busy выясните владельца/process identity,
+а не снимайте lock вслепую. Обычное освобождение снимает lease; stale receipts
+сохраняются при штатном восстановлении lock. Перед обновлением пакета завершите
+активные команды прежней версии.
+
+`check --cancel-file F` наблюдает существование файла; автоматического удаления
+флага нет. Timeout/cancel завершает owned process tree (private group на POSIX,
+Job Object на Windows), сохраняет частичные logs и отрицательный result. Failed,
+timeout, budget_exhausted, cancelled, validation_timeout и inputs_changed не passed.
+Незавершённая команда без complete result тоже не прошла проверку. Не повторяйте
+тот же immutable check ID в attempt: исправление требует новой попытки.
+
+Gate проверяет blocking operations по наблюдённому state и перед публикацией
+повторно сравнивает **весь актуальный state** в state-транзакции. Если во время
+проверки появилась unknown operation, возвращается rejected; позднее сравнение
+не стирает эту operation. Перед повтором внешнего commit/push/deploy/сообщения с
+неизвестным outcome сначала наблюдайте фактический итог и запишите proof через
+operation confirmed/failed. Outcome ledger сам операцию не выполняет.
+
+## Интеграция результатов
+
+Каждый writer получает отдельный checkout/worktree и конкретные write claims.
+Shared JSON ограничивается allowed records; shared YAML требует frozen validator
+adapter. Root единолично интегрирует commits/patches и сериализует generated outputs.
+При дефекте верните прежнему owner check ID, exact candidate, log, expected и scope;
+follow-up текст не обновляет checkout. Сохраните dirty работу и безопасно приведите
+его inputs к текущему candidate. [Планирование](ORCHESTRATION_RU.md) не заменяет
+последующие общие интеграционные gates.
+
+## Диагностика установки и откат
+
+Полный install/update/rollback путь находится в [SETUP](../SETUP_RU.md). `doctor` не
+читает credentials; `verify --native` проверяет выбранный local parser и marker,
+но runtime discovery/spawn/cwd/result/behavior требуют отдельных наблюдений.
+Local TOML не подтверждает настройки hosted Work. Не меняйте provider/security
+или permissions ради зелёной диагностики.
+
+Rollback проверяет installed copies/backups и текущие bytes/metadata. Чужие edits
+сохраняются. `rollback_failed_compensated` означает неуспех с компенсацией этой
+попытки; `rollback_failed_recovery_required` требует сверить journal и перечисленные
+конфликты. По умолчанию rollback отменяет последний update, uninstall проходит всю
+сохранённую install history; private runs и evidence не удаляются автоматически.
+Отдельная manual restore старой копии поверх новых user edits недопустима.
+
+Для rename recovery используйте отдельный [LSP receipt](LSP_RU.md#preview-и-применение-rename),
+для installer recovery — его transaction journal. Это разные форматы и locks.
+Приватные manifest/evidence, machine overlay, абсолютные пути и credentials не
+включаются в переносимый package. На другой ОС отдельно проверьте реальные paths,
+line endings, executables и cancellation; отсутствие наблюдения сохраняйте unknown.

@@ -1,53 +1,77 @@
-# Интеграции
+# Интеграции: подключать по задаче
 
-Управляющий слой работает на Python stdlib; scanner/snapshot и RepoMap — на
-bundled Rust helper, с Python fallback для snapshots при отсутствии бинарника.
-Аккаунты, API keys, MCP и фоновые сервисы этому пути не нужны.
-Интеграции включаются по конкретной задаче. Наличие этого каталога не подключает
-плагины в Codex desktop или ChatGPT Work и не доказывает доступ к аккаунтам.
+Справочник релиза **1.4.2**, актуальность **2026-11-01**. Сам harness использует
+Python stdlib для управляющего слоя и файлы private state. Для базового пути не
+нужны отдельная БД, daemon, импорт истории, внешний model API или аккаунты сервисов.
+Модельная сессия самого Codex использует штатные model/provider и авторизацию
+своей среды; установка harness их не заменяет.
 
-| Возможность | Основной путь | Проверка | Fallback / граница |
+Scanner/snapshot и RepoMap могут использовать bundled Rust helper. Python
+snapshot fallback работает без него; syntactic RepoMap требует native backend.
+Semantic code commands используют отдельно доступный language server, child
+которого завершается после одной команды. Ни RepoMap, ни LSP не требуют MCP.
+
+## Выбор минимально достаточной возможности
+
+| Задача | Основной путь | Наблюдение перед использованием | Граница/fallback |
 |---|---|---|---|
-| Структура большого репозитория | `context map --root ... --query ...` | Rust backend, parser versions, hashes и partial scope | Адресный `rg`; syntactic map не даёт semantic references |
-| Точные references и rename | `code symbols/definition/references/rename/apply` | `code doctor`, локальный language server, hash-bound plan | Явно установить сервер языка; child завершается после команды |
-| Git, issues, PR, CI | Подключённый GitHub plugin | Профиль и metadata нужной репы | git + gh; создание репы только при явной задаче |
-| Поиск и документация | Встроенный web search; official docs для API | Открытый первоисточник и дата | Библиотечный docs MCP по потребности; нет сети → ограничение |
-| Браузер и приложения | Доступные browser/computer-use tools | Наблюдаемая страница/состояние | API/CLI, если умеют нужное действие |
-| Документы, PDF, таблицы, слайды | Установленные artifact skills/tools | Файл, расчёты и просмотр оформления | Подходящий локальный runtime; проверять зависимости |
-| Файлы и командная работа | Подключённый Drive/Notion либо выбранное хранилище | Чтение конкретного разрешённого объекта | Локальные файлы; синхронизация не подразумевается |
-| Задачи и проекты | GitHub issues; при необходимости выбранный tracker | Чтение нужного workspace | Приватный локальный task/run store |
-| Почта, календарь, сообщения | Только нужный подключённый provider | Read-only в нужном аккаунте | Без реальной задачи подключение не требуется |
-| Удалённое выполнение | Штатный SSH/CLI или service connector | Версия и разрешённая read-only команда | Локальная изолированная среда; prod требует основания |
-| Данные и БД | Доступный SQL/data connector | Read-only schema/ограниченный запрос | Разрешённый экспорт; не копировать базу целиком |
+| Найти структуру репозитория | `context map --root ... --query ...` | Native backend, parser versions, hashes и partial scope | Адресный `rg`; map не доказывает semantic references |
+| Symbols, definition, references, rename | `code ...` | `code doctor`, доступный local server и актуальные inputs | Явно установить нужный server; без него не обещать semantic result |
+| Посмотреть записанный run status | Разрешённый CLI либо optional harness MCP | Явный store/run ID; `recorded_status`, freshness boundary | [Metadata MCP](../docs/MCP_RU.md) не делает gate/resume |
+| Git, issues, PR, CI | Подключённый GitHub plugin | Нужный account/repository и read-only metadata | `git`/`gh` при достаточной capability и авторизации |
+| Официальная документация | Web search и первоисточник | Конкретная открытая страница и дата | Optional docs MCP, если он нужен задаче |
+| Browser/app interaction | Доступный purpose-built tool | Реальная страница, account, scope действия | Подходящий API/CLI; наличие браузера не означает login |
+| Документы, PDF, таблицы, слайды | Artifact skills/tools | Файл, расчёты и просмотр оформления | Доступный локальный runtime с проверенными зависимостями |
+| Drive/Notion/общие файлы | Нужный подключённый connector | Разрешённый объект и выбранный workspace | Локальные файлы; автоматическая синхронизация не подразумевается |
+| Tasks/projects | Выбранный tracker или GitHub issues | Нужный workspace/проект | Private local run store для состояния самого harness |
+| Почта, календарь, сообщения | Только нужный provider | Правильный account/recipient и разрешённая операция | Без задачи подключение не требуется |
+| Удалённое выполнение | Штатный SSH/CLI/service connector | Версия, target и безопасная read-only команда | Локальная среда; production action требует основания |
+| Данные и БД | Доступный SQL/data connector | Read-only schema и ограниченный запрос | Разрешённый экспорт; не копировать всю базу |
 
-Состояния и права меняются. Перед использованием проверяйте реальные tools,
-account и scope; не переносите список возможностей одного компьютера как факт
-на другой. Шаблон `capabilities.example.json` заполняется наблюдениями в private
-state, не в исходном репозитории. Он не запускает автоматическое обнаружение.
+Наличие строки в таблице не означает установленную интеграцию. Перед каждой
+задачей учитывайте реальные tools, account, permissions и доступность среды.
+Подключённые сервисы одного компьютера нельзя переносить как подтверждённые
+возможности другого. Свойства окружения записывают в private state, не в policy.
 
-Настройку стороннего MCP выполняйте по актуальной официальной документации
-выбранного сервиса: endpoint, transport, auth и capabilities проверяются до
-использования. Не добавляйте «универсальный» URL или случайный пакет из каталога.
-Версии локальных MCP dependencies фиксируйте; не храните секреты в args/TOML.
+## Отconfigured к проверенной capability
 
-Официальные основания формата и поведения (проверены 2026-10-31):
-- [Skills](https://learn.chatgpt.com/docs/build-skills).
-- [Native subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents).
+1. Назовите конкретную потребность и выберите достаточный уже доступный tool.
+2. Если интеграции нет, проверьте официальный endpoint/package, transport,
+   зависимости и способ auth выбранного сервиса. Не устанавливайте пакет из
+   случайного каталога ради совпадения названия.
+3. Настройте только нужную интеграцию в выбранном профиле. Secrets хранятся
+   штатно вне репозитория; не помещайте tokens в CLI args, TOML-примеры или логи.
+4. Откройте новую сессию, подтвердите discovery tools и выполните узкий read-only
+   запрос к правильному account/object. До этого статус остаётся configured/not_run.
+5. Выполняйте запись, отправку, публикацию или production action только в scope
+   текущей разрешённой задачи. Наличие connector не расширяет полномочия.
 
-Список выше — маршрутизация возможностей, а не заявка на автоматическую
-установку всех интеграций. Разрешения задаются средой и текущей задачей.
+[capabilities.example.json](capabilities.example.json) — шаблон для наблюдений,
+а не scanner или автоматический инсталлятор. Заполненный machine overlay,
+private run data, credentials и персональные пути не возвращаются в repository.
 
-## Практическое подключение
+## Готовые необязательные примеры
 
-Для GitHub сначала используйте подключённый plugin. Если его возможности
-недостаточны, проверьте `git --version`, `gh --version`, `gh auth status` в своей
-среде. Авторизация выполняется штатным `gh auth login`; её файлы остаются локально.
-Наличие `gh` не означает доступа к каждой приватной репе. Read-only metadata нужной
-репы подтверждает доступ к ней; push/create требуют действующего запроса.
+- [harness-mcp.example.toml](harness-mcp.example.toml) — local read-only metadata
+  для одного private store. Требует отдельной venv с pinned optional extra;
+  [инструкция MCP](../docs/MCP_RU.md) объясняет границы свежести и bounds.
+- [openai-docs.example.toml](openai-docs.example.toml) — public documentation MCP
+  endpoint из официального примера OpenAI. Добавляйте адресно только нужную table;
+  сам файл ничего не подключает. Затем проверьте реальное получение нужной страницы.
+- [Harness Assistant 1.3.1](../docs/PLUGIN_RU.md) — два portable skills без hooks/MCP.
+  Его версия независима от harness 1.4.2; plugin update/installation и core
+  harness installation выполняются отдельно.
 
-Для официальной документации OpenAI предусмотрен необязательный пример
-`openai-docs.example.toml` с публичным MCP endpoint из официального примера.
-Добавляйте одну таблицу адресно, только при необходимости; после подключения
-проверьте реальный список tools и получение нужной страницы. До такого запроса
-интеграция остаётся configured/not_run, а встроенный web search продолжает работать.
-Текущие connectors в desktop не переносите копированием auth/config целиком.
+Для GitHub сначала используйте достаточный подключённый plugin. При необходимости
+CLI проверьте `git --version`, `gh --version`, `gh auth status`; последний может
+показать account metadata, поэтому не публикуйте raw output без просмотра.
+Штатный `gh auth login` выполняется отдельно пользователем/разрешённым flow.
+Наличие `gh` не даёт доступа ко всем private repositories; read-only запрос
+конкретной репы подтверждает только этот scope, не право создавать/push.
+
+Основные понятия и discovery сверены с официальными
+[Customization](https://learn.chatgpt.com/docs/customization/overview),
+[Skills](https://learn.chatgpt.com/docs/build-skills) и
+[Subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents).
+Клиентские capabilities меняются; при работе используйте актуальный первоисточник.
+[SETUP_RU](../SETUP_RU.md) описывает базовую установку без внешних подключений.

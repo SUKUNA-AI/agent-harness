@@ -1,6 +1,7 @@
 # Optional additions, NOT a replacement for the user's config.toml.
 # Check the installed client schema and preserve explicit user overrides.
 # https://learn.chatgpt.com/docs/config-file/config-reference
+# Harness instructions and byte/token distinctions: docs/CONFIGURATION_RU.md.
 
 # Limits individual tool outputs retained in native history. Raw test evidence
 # must stay in permitted files; retrieve missing details with targeted excerpts.

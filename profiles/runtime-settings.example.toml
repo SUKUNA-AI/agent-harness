@@ -1,6 +1,7 @@
 # Переносимый пример, НЕ замена config.toml. Без путей, секретов и MCP.
 # Model/provider/reasoning/security сохраняются из текущего профиля устройства.
 # Применять отдельные значения после проверки schema установленного клиента.
+# Источники и приоритеты: docs/CONFIGURATION_RU.md (harness 1.4.2).
 
 # Порог сжатия текущей истории; клиент может сжать раньше из-за лимита модели.
 # Установщик сохраняет существующее явное пользовательское значение.
@@ -8,6 +9,7 @@ model_auto_compact_token_limit = 500000
 
 [agents]
 default_subagent_reasoning_effort = "medium"
+# Это opt-in default для ролей без собственного effort; installer его не задаёт.
 enabled = true
 max_concurrent_threads_per_session = 4
 interrupt_message = true

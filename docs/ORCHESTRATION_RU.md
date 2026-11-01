@@ -1,8 +1,11 @@
-# Автоматическая координация native Codex
+# Автоматическая координация native Codex — 1.4.2
 
 Ограниченную самостоятельную задачу root выполняет напрямую. Полезные независимые части автоматически делегируются, обычно двум owners; третий нужен при независимой части и ёмкости. Последовательный план может иметь одного owner. Неделимая работа, меньшая ёмкость или недоступный native tool дают честный последовательный путь без повторного согласования уже разрешённой работы.
 
 Пользователь не заполняет JSON. Root готовит контракт и добавочный план по [схеме](../schemas/orchestration.schema.json), выбирает workflows/skills и сам управляет native tools. Python только проверяет план и печатает рекомендации. Он не запускает LLM, agents, Git mutation, install, внешние запросы или acceptance gate.
+
+Флаги/exit codes собраны в [CLI reference](CLI_REFERENCE_RU.md#planning-helpers);
+рабочий managed run и различие freshness/recovery — в [эксплуатации](OPERATIONS.md).
 
 ## Команды
 
@@ -47,7 +50,71 @@ plan repair-brief --plan <plan.json> --contract <contract.json> --node <id> --re
 
 Зависимость выпускается только при state accepted/integrated и `accepted_result: {run_dir, verdict_digest}` плюс `expected_child: {run_id, task_id, attempt_id, contract_digest}`. У frozen child contract обязательны `lane_id=node.id` и дополнительный `orchestration_binding`: `{node_id, parent_run_id, parent_task_id, parent_attempt_id, parent_contract_digest, plan_revision}` с точными значениями текущего parent contract/plan. Бриф печатает требуемую linkage. После новой parent attempt/revision старое принятие не используется молча: потребуется соответствующий child contract/attempt и новая проверка. Чужая accepted task также не подходит.
 
-Читается реальный Run: проверяются snapshot, accepted verdict hash/identity, toolchain manifest hash, required results с исходными receipt digests и все declared artifact/log hashes, размеры и отсутствие посторонних artifacts. Эти проверки общие с gate; read-only helper также проверяет принятые зависимости child. Удалённый stdout/stderr/result, изменённый log или toolchain не освобождает downstream node при неизменном source. Helper не запускает проверки, не создаёт gate и не меняет run; snapshot может использовать штатные read-only Git queries. Текст `passed` в плане или ready_for_review не освобождает dependency. Проверка не заменяет gates downstream candidate, не криптографически удостоверяет автора и не защищает от редактора с теми же OS правами.
+Читается реальный Run: проверяются snapshot, accepted verdict hash/identity, toolchain manifest hash, required results с исходными receipt digests и все declared artifact/log hashes, размеры и отсутствие посторонних artifacts. Эти проверки общие с gate; read-only helper также проверяет принятые зависимости child. Удалённый stdout/stderr/result, изменённый log или toolchain не освобождает downstream node при неизменном source. Сверяется exact set check receipts: уже принятый optional result также не может исчезнуть, а optional, изначально отсутствовавший, не становится required. Helper не запускает проверки, не создаёт gate и не меняет run; snapshot может использовать штатные read-only Git queries. Текст `passed` в плане или ready_for_review не освобождает dependency. Проверка не заменяет gates downstream candidate, не криптографически удостоверяет автора и не защищает от редактора с теми же OS правами.
+
+## Исполняемый пример структурного плана
+
+Сначала выполните [локальный managed fixture](OPERATIONS.md#полный-локальный-пример).
+Следующий скрипт сохраните вне package как `demo_plan.py` и запустите с теми же
+двумя аргументами: package root и созданный private-demo root. Он вычисляет реальные
+hashes текущего contract/source, создаёт **одну** planned node и выполняет только
+`plan validate`/`plan brief`. Ни agent, ни child run, ни accepted dependency не
+создаются. Node output обозначает будущую работу; существование output не означает
+выполнение node. Для следующей волны потребуется отдельный actual native inventory.
+
+```python
+from pathlib import Path
+import json
+import subprocess
+import sys
+
+package = Path(sys.argv[1]).resolve(strict=True)
+base = Path(sys.argv[2]).resolve(strict=True)
+sys.path.insert(0, str(package / "src"))
+from agent_harness.core import digest, file_hash, snapshot
+
+private = base / "private"
+contract_path = private / "contract.json"
+contract = json.loads(contract_path.read_text(encoding="utf-8"))
+source = Path(contract["cwd"])
+reading = source / "calc.py"
+reference = {"path": str(reading), "sha256": file_hash(reading)}
+plan = {
+    "schema_version": 1, "plan_revision": 1,
+    "contract_digest": digest(contract), "input_digest": snapshot(contract)["digest"],
+    "target_owners": 1, "fallback_reason": "indivisible",
+    "common_context": [reference],
+    "nodes": [{
+        "id": "calc", "role": "owner", "state": "planned",
+        "goal": "Inspect and update only the isolated calc fixture when authorized",
+        "cwd": str(source), "permissions": ["read", "write", "test"],
+        "write_paths": ["calc.py"], "depends_on": [],
+        "checks": ["unit", "source-observation"],
+        "read_sections": [dict(reference, sections=["Whole calc.py fixture"])],
+        "outputs": [{"path": str(source / "calc.py"),
+                     "description": "Scoped calc implementation with applicable check evidence"}],
+    }],
+}
+plan_path = private / "plan.json"
+plan_path.write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
+for action, extra in [("validate", []), ("brief", ["--node", "calc"])]:
+    command = [sys.executable, str(package / "tools" / "harness.py"), "plan", action,
+               "--plan", str(plan_path), "--contract", str(contract_path), *extra]
+    completed = subprocess.run(command, capture_output=True, text=True,
+                               encoding="utf-8", check=True)
+    value = json.loads(completed.stdout)
+    (private / ("plan-" + action + ".json")).write_text(
+        json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
+print(json.dumps({"plan": str(plan_path), "validated": True,
+                  "native_agents_created": 0, "accepted_children": 0}, indent=2))
+```
+
+Минимальный standalone run не требует планирования; этот пример показывает лишь
+формат optional helper. В делегированной задаче root назначает конкретный isolated
+worktree каждому writer. Если изменились source bytes, common_context либо parent
+contract/attempt, обновите input/contract digests и plan_revision осознанно, затем
+повторите validate. Переписывание digests без пересмотра требований не делает старый
+child result текущим.
 
 ## Наблюдение native threads
 
@@ -64,7 +131,11 @@ Root сохраняет адаптированный **реально наблю
 }
 ```
 
-Снимок годен максимум 120 секунд и требует явного boolean `budget.root_counts`, cap/source в контракте. `true` означает общий лимит с root; `false` — лимит только потомков. Текущий `agents.max_concurrent_threads_per_session` Codex исключает основной поток, поэтому для него используется `false`. Кап не превышает текущий наблюдаемый/разрешённый cap контракта. Root указан ровно один раз для идентификации, но считается в cap только при `root_counts=true`. Любой открытый потомок, даже неизвестный плану, считается; idle/done/stopped/unavailable занимают слот. Closed требует `closed_confirmed=true` и `closure_evidence` реального backend. Duplicate native_ref, over-cap и concurrent writer checkout конфликт отклоняются.
+Это формат записи наблюдения, а не готовый достоверный inventory. Подставляются
+реальные refs/status/cap/source из native tool; fixture identifiers из документа
+нельзя выдавать за фактически существующие threads.
+
+Снимок годен максимум 120 секунд и требует явного boolean `budget.root_counts`, cap/source в контракте. `true` означает общий лимит с root; `false` — лимит только потомков. Для canonical `agents.max_concurrent_threads_per_session` Codex лимит относится к дочерним потокам, поэтому используется `false` ([официальный subagents guide](https://learn.chatgpt.com/docs/agent-configuration/subagents), [config reference](https://learn.chatgpt.com/docs/config-file/config-reference)). Это не позволяет переносить child-only семантику на любой runtime/account cap: для другого backend её сверяют по фактическому inventory и документации. Кап не превышает текущий наблюдаемый/разрешённый cap контракта. Root указан ровно один раз для идентификации, но считается в cap только при `root_counts=true`. Любой открытый потомок, даже неизвестный плану, считается; idle/done/stopped/unavailable занимают слот. Closed требует `closed_confirmed=true` и `closure_evidence` реального backend. Duplicate native_ref, over-cap и concurrent writer checkout конфликт отклоняются.
 
 У `next` planned node без native_ref — новый spawn; с известным idle/done/stopped ref — follow-up уже открытого потока, без освобождения слота. Пользовательский backend может не поддерживать повтор stopped; root сверяет фактическую семантику и использует доступный ref, не выдумывает close. Неизвестный/unavailable ref требует reconciliation. `next` не переименовывает и не закрывает потоки; новая lease не должна пересекаться с прежней.
 

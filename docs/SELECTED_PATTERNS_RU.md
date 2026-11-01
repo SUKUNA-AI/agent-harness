@@ -1,5 +1,9 @@
 # Выбранные механизмы без дополнительного runtime
 
+Актуальная карта реализации в **1.4.2**. Pinned источники исследования сохранены
+в provenance; текущий интерфейс описан в [CLI reference](CLI_REFERENCE_RU.md),
+а взаимодействие компонентов — в [архитектуре](ARCHITECTURE_RU.md).
+
 Native Codex исполняет задачу. Python stdlib хранит файлы/контракты, проверяет
 согласованность и evidence. Общий bootstrap остаётся коротким: детали загружаются
 по задаче через skills/workflows. Модели/provider/effort и порог 500000 сохраняются.
@@ -8,6 +12,8 @@ Native Codex исполняет задачу. Python stdlib хранит фай�
 
 | Основание | Механизм в harness | Граница |
 |---|---|---|
+| Aider RepoMap | Rust/Tree-sitter definitions/references, граф файлов, task ranking и byte budget | Реальный локальный `context map`; эвристические links, не semantic references |
+| Serena / SolidLSP | `code symbols/definition/references`, capture/requery targets, preview/apply rename | Собственный stdio LSP adapter, внешний установленный language server; сервер Serena и БД не требуются |
 | Anthropic CWC / long-running agents | Неуспех до evidence, независимый evaluator, handoff | Workflow и существующий deterministic gate; не скопированный Bash hook |
 | Playwright | [Browser acceptance](../workflows/browser.md), strict required JUnit cases, runtime/visual evidence | Доступный tool или установленный проектный пакет; нет глобальной автоустановки |
 | Superpowers | Проверяемая гипотеза, контрпример, review packet, одна консолидированная repair-подборка | Приёмка не прерывается с критичным дефектом ради лимита review waves |
@@ -20,6 +26,8 @@ Native Codex исполняет задачу. Python stdlib хранит фай�
 | Rendergit | `context pack` / `context verify`, явный список файлов, hashes и limits | Нет полного repo dump; omitted/stale видны явно |
 
 Это самостоятельная реализация механизмов. Исходный код upstream не vendored.
+Рабочая навигация и rename уже включены в [LSP adapter](LSP_RU.md), поэтому
+отсутствие vendored Serena не означает отсутствие этой возможности.
 Для LLM Wiki gist и llm-council в исследованном snapshot не было однозначной
 лицензии на копирование; используются идеи, а не их source/prompt. Pinned основания
 и даты находятся в [реестре](../provenance/selected-patterns.json).

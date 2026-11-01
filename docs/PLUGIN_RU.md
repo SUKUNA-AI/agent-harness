@@ -1,44 +1,104 @@
-# Harness Assistant: plugin из двух skills
+# Необязательный Harness Assistant plugin
 
-Пакет находится в `plugins/harness-assistant/`. Он содержит portable `plugin.json`
-и совместимый `.codex-plugin/plugin.json`; все skills лежат внутри пакета.
-Согласно [OpenAI Docs](https://developers.openai.com/plugins/build/plugins),
-portable identity и `skills/` находятся в корне plugin, а OpenAI overlay — в
-`extensions.com.openai`. Здесь hooks явно пустые в обеих формах manifest.
-Схема проверялась 31.10.2026; клиентские поверхности могут отличаться по версии.
+Документация harness **1.4.2**, plugin **1.3.1**, сверено **2026-11-01**.
+Пакет находится в
+[`plugins/harness-assistant/`](../plugins/harness-assistant/). Он распространяет
+две процедуры как skills; основной local installer, глобальный policy bootstrap
+и metadata MCP остаются отдельными механизмами.
 
-Plugin не содержит MCP-конфигурацию, hooks, скрипты, модельный routing, permissions
-или install actions. Он не заменяет глобальную политику harness и не подключает
-MCP автоматически. Локальный metadata MCP включается отдельно по [инструкции](MCP_RU.md).
+## Состав и границы
 
-Установка из локального checkout в поддерживаемом Codex CLI:
+| Часть | Что содержит |
+|---|---|
+| `plugin.json` | Portable identity, версия и OpenAI overlay в `extensions.com.openai` |
+| `.codex-plugin/plugin.json` | Совместимый manifest Codex и путь `./skills/` |
+| `skills/harness-coordinate/` | Результат/scope, пропорциональная координация и проверяемая приёмка |
+| `skills/harness-run-status/` | Записанный run status через доступный read-only MCP либо CLI |
 
-```text
-codex plugin marketplace add /path/to/agent-harness
+Обе формы manifest содержат пустые hooks. Plugin не содержит MCP config,
+install scripts, модельный routing или изменения permissions. Он не включает
+MCP автоматически и не заменяет [глобальную установку](../SETUP_RU.md).
+Номер plugin **1.3.1** независим от общего релиза harness **1.4.2** и читается
+из обоих manifests. Обновление документации/checkout само по себе не обновляет
+уже установленную клиентом копию plugin; проверьте его фактическую версию и
+примените штатный update/install flow клиента.
+
+Формат пакета описан в
+[официальной документации OpenAI](https://developers.openai.com/plugins/build/plugins).
+Исходная схема проверена 31.10.2026; интерфейс установки зависит от доступной
+версии клиента. Перед использованием проверьте `codex plugin --help`.
+
+## Установка из постоянного локального checkout
+
+Команды ниже меняют выбранный Codex profile. Для пробной установки используйте
+изолированный `CODEX_HOME`; для рабочей установки выберите свой действующий
+профиль осознанно. Это отдельный шаг от `python tools/harness.py install`.
+
+POSIX shell, из package root:
+
+```bash
+HARNESS_PLUGIN_HOME="$(mktemp -d)"
+CODEX_HOME="$HARNESS_PLUGIN_HOME" codex plugin --help
+CODEX_HOME="$HARNESS_PLUGIN_HOME" codex plugin marketplace add "$PWD"
+CODEX_HOME="$HARNESS_PLUGIN_HOME" codex plugin add harness-assistant@harness-local
+CODEX_HOME="$HARNESS_PLUGIN_HOME" codex plugin list --json --marketplace harness-local
+```
+
+Windows PowerShell, из package root, в отдельном тестовом окне:
+
+```powershell
+$HarnessPluginHome = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+New-Item -ItemType Directory -Path $HarnessPluginHome | Out-Null
+$env:CODEX_HOME = $HarnessPluginHome
+codex plugin --help
+codex plugin marketplace add "$((Get-Location).Path)"
 codex plugin add harness-assistant@harness-local
 codex plugin list --json --marketplace harness-local
 ```
 
-Marketplace объявлен в `.agents/plugins/marketplace.json`; его source.path
-разрешается от корня репозитория. Команды установки меняют выбранный CODEX_HOME:
-для изолированной проверки заранее укажи отдельный пустой home штатной переменной
-окружения CODEX_HOME. Копирование JSON-файлов не доказывает установку.
+PowerShell пример устанавливает `CODEX_HOME` только для текущего тестового окна
+и его дочерних процессов. Закройте его после проверки; не запускайте из этого
+окна рабочую сессию, ожидая другой профиль. При ошибке не продолжайте следующие
+команды автоматически. Если CLI не поддерживает этот plugin flow, зафиксируйте
+ограничение; копирование manifest-файлов не заменяет установку клиентом.
 
-После установки открой новую сессию, найди оба skill через список доступных skills
-или picker и вызови выбранный skill по имени, которое показывает твой клиент:
+Marketplace описан в
+[`.agents/plugins/marketplace.json`](../.agents/plugins/marketplace.json).
+Его `source.path` разрешается от корня репозитория, поэтому сохраняйте package
+в постоянном месте. Подключение private репозитория/аккаунта не предполагается
+этими локальными командами.
 
-- `harness-coordinate` — результат/scope, пропорциональный план, до 2–3 полезных
-  потоков в общем native budget, fresh checks и приёмка основным чатом.
-- `harness-run-status` — read-only MCP status либо установленный agent-harness
-  CLI с явно выбранным разрешённым run. Без этих инструментов сообщает ограничение.
+## Проверка discovery и поведения
 
-Проверь простой перевод: workflow не должен создавать run или агентов. На задаче
-статуса MCP поля recorded_status и not_checked должны сохраняться как ограничения.
-Содержательный пример исполнения и native spawning требуют отдельного runtime
-наблюдения; structural tests и plugin list их не подтверждают.
+После установки откройте новую сессию именно с выбранным profile. Найдите оба
+skills через catalog/picker и вызовите имя, которое показывает ваш клиент:
 
-Локальные проверки структуры: `python -B -m unittest discover -s tests -p test_plugin.py`.
-Они проверяют standalone copy, внутренние ссылки, marketplace root, consistency
-manifest и отсутствие hooks/MCP/подстановок machine paths. Native CLI discovery,
-установка в изолированный home и реальная активация skills — отдельные статусы;
-не называй source tests доказательством этих этапов.
+- `harness-coordinate`: на небольшой задаче вроде перевода должен выбирать
+  прямое выполнение, без формального run и лишних агентов. Для полезных независимых
+  частей — назначать owners в общем runtime budget и оставлять приёмку primary.
+- `harness-run-status`: должен назвать источник recorded status и предел свежести.
+  При metadata MCP сохраняются ограничения `recorded_status` и `not_checked`;
+  отсутствие доступного CLI/MCP сообщается как ограничение, не исправляется
+  выдуманным результатом.
+
+| Уровень проверки | Достаточное наблюдение |
+|---|---|
+| Структура source package | Локальные tests, согласованные manifests, внутренние ссылки |
+| Установка/discovery | CLI installation и запись обоих skills в фактическом catalog |
+| Активация skill | Новый chat/runtime вызвал выбранную процедуру |
+| Реальное spawning/приёмка | Наблюдаемые native refs, lifecycle и fresh evidence конкретной задачи |
+
+Source tests из package root:
+
+```text
+python -B -m unittest discover -s tests -p test_plugin.py
+```
+
+Они проверяют standalone copy, marketplace root, manifest consistency,
+внутренние ссылки и отсутствие hooks/MCP/machine-path substitutions. Они не
+доказывают последние три runtime-уровня таблицы. Управляйте отключением/удалением
+plugin штатными средствами вашей версии клиента; install state основного
+harness и private run store от этого не удаляются.
+
+[Конфигурация ролей](CONFIGURATION_RU.md) · [MCP](MCP_RU.md) ·
+[Граница hosted Work](../adapters/chatgpt-work/README.md).
