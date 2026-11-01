@@ -1,5 +1,12 @@
 # Контекст, handoff и файловая wiki
 
+Различай два формата run. Supervisor с `state.yaml` предоставляет
+`work status --run-dir <run> --verify-evidence` и `work report --run-dir <run>`;
+его typed handoff хранится в `context/handoff.yaml`. Legacy core с `state.json`
+использует отдельные `handoff`, `checkpoint`, `status` и `resume` без `work`.
+Не передавай supervisor run в legacy CLI. См.
+[Execution Supervisor](../docs/EXECUTION_SUPERVISOR_RU.md).
+
 ## Получать ровно нужный объём
 
 Начни с пути, имени символа или диагностической строки через `rg`; затем читай

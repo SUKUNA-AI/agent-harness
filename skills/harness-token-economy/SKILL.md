@@ -19,7 +19,12 @@ Rename требует preview и `code apply`; recovery_receipt/backups сохр
 Форматы/лимиты: `{{PACKAGE_ROOT}}/docs/CONTEXT_AND_NATIVE_RU.md`,
 `{{PACKAGE_ROOT}}/docs/LSP_RU.md`; флаги — `{{PACKAGE_ROOT}}/docs/CLI_REFERENCE_RU.md`.
 
-Для существующего run начинай с `handoff`; текущую приёмку проверяй через
+Для supervisor run с `state.yaml` используй `work status --verify-evidence`
+и `work report --run-dir <run>`; structured handoff находится в
+`context/handoff.yaml` этого run. Legacy команды ниже относятся к `state.json`.
+Форматы и routing: `{{PACKAGE_ROOT}}/docs/EXECUTION_SUPERVISOR_RU.md`.
+
+Для существующего legacy run начинай с `handoff`; текущую приёмку проверяй через
 `status --verify-evidence`. `status --summary` сокращает output, но всё равно
 сверяет source; это не дешёвый polling. Полные логи/evidence держи отдельно,
 в контекст возвращай status, exit code, нужные строки и path. Пропуски/excerpt

@@ -1,5 +1,12 @@
 # Статус, остановка и продолжение
 
+Сначала различи форматы run. Для foreground supervisor с `state.yaml`
+используй `work status --verify-evidence`, `work report`, `work stop` и
+`work resume` с `--run-dir <run>`. Для legacy core с `state.json` применимы
+описанные ниже `status`, `handoff`, `checkpoint` и `resume` без `work`.
+Эти namespaces не взаимозаменяемы; новый цикл описан в
+[Execution Supervisor](../docs/EXECUTION_SUPERVISOR_RU.md).
+
 Обычный `status` проверяет source, но не обещает целостность artifacts:
 `evidence_current=null` означает not_checked. Для подтверждения актуальной
 сохранённой приёмки вызови `status --run-dir <run> --verify-evidence`; это read-only, без запуска checks
