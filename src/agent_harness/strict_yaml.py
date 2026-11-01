@@ -163,7 +163,9 @@ def validate(value, schema):
             properties = s.get("properties", {})
             # A schema containing only combinators does not additionally close
             # an object already described by its referenced/combined schemas.
-            close = "properties" in s or s.get("type") == "object" or "additionalProperties" in s
+            declared_types = s.get("type", [])
+            declared_types = declared_types if isinstance(declared_types, list) else [declared_types]
+            close = "object" in declared_types or "additionalProperties" in s
             for key, child in v.items():
                 if "propertyNames" in s:
                     visit(key, s["propertyNames"], at + ".<key>", depth + 1)

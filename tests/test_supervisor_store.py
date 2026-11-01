@@ -37,6 +37,14 @@ class StrictYAMLTests(unittest.TestCase):
         with self.assertRaises(sy.StrictYAMLError):
             sy.validate({"a": True}, {"const": {"a": 1}})
 
+    def test_conditional_subschema_does_not_invent_unknown_fields(self):
+        schema = {"type": "object", "properties": {"kind": {"enum": ["command", "content"]}, "argv": {"type": "array"}, "criteria": {"type": "array"}}, "required": ["kind"], "allOf": [{"if": {"properties": {"kind": {"const": "command"}}}, "then": {"required": ["argv"]}, "else": {"required": ["criteria"]}}]}
+        sy.validate({"kind": "command", "argv": ["python"]}, schema)
+        sy.validate({"kind": "content", "criteria": ["complete"]}, schema)
+        for invalid in [{"kind": "command", "criteria": []}, {"kind": "content", "argv": []}, {"kind": "command", "argv": [], "unexpected": True}]:
+            with self.assertRaises(sy.StrictYAMLError):
+                sy.validate(invalid, schema)
+
     def test_depth_size_nonfinite_and_unknown_schema_rejected(self):
         for text in ["[" * 51 + "0" + "]" * 51, "x" * (sy.MAX_BYTES + 1)]:
             with self.assertRaises(sy.StrictYAMLError):
