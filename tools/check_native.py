@@ -144,6 +144,32 @@ def main():
         writer.flush()
         assert len(stream.getvalue()) <= 2048, "Map exceeds actual Windows output budget"
         outcomes.append("focus_priority_partial_scope_and_crlf_byte_budget")
+
+        glob_root = base / "glob-parity"
+        glob_root.mkdir()
+        (glob_root / "a").write_bytes(b"before")
+        (glob_root / "x").write_bytes(b"other")
+        glob_contract = {"cwd": str(glob_root), "scope": {"exclude": ["[a--!a]"]}}
+        first = parity(glob_contract)
+        assert set(first["files"]) == {"a"}
+        (glob_root / "a").write_bytes(b"after")
+        assert parity(glob_contract)["digest"] != first["digest"]
+        outcomes.append("normalized_glob_scope_detects_changed_included_file")
+
+        if os.name == "posix":
+            whitespace_root = base / "git-root \t\n"
+            whitespace_root.mkdir()
+            git(whitespace_root, "init", "-q")
+            (whitespace_root / ".gitignore").write_text("ignored.txt\n", encoding="utf-8")
+            (whitespace_root / "tracked.txt").write_text("tracked", encoding="utf-8")
+            (whitespace_root / "ignored.txt").write_text("ignored", encoding="utf-8")
+            git(whitespace_root, "add", ".gitignore", "tracked.txt")
+            (whitespace_root / "tracked.txt").unlink()
+            whitespace = parity({"cwd": str(whitespace_root)})
+            assert whitespace["kind"] == "git"
+            assert whitespace["files"]["tracked.txt"] == {"kind": "missing"}
+            assert "ignored.txt" not in whitespace["files"]
+            outcomes.append("git_root_trailing_whitespace_keeps_inventory")
     print(json.dumps({"status": "passed", "backend": info["selected"], "platform": info["platform"],
                       "checks": outcomes}, ensure_ascii=False, indent=2))
     return 0

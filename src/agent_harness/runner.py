@@ -18,6 +18,7 @@ import time
 import urllib.parse
 import uuid
 
+from .validation import json_equal
 from .core import HarnessError, Run, _tool_version_probes, atomic_json, canonical, changed_paths, digest, file_hash, identity_alive, lock, now, process_identity, read_json, remaining_budget_seconds, scope_errors, snapshot
 
 
@@ -411,12 +412,15 @@ def run_check(run: Run, check_id, *, cancel_file=None):
     remaining = remaining_budget_seconds(contract)
     if remaining is not None and remaining <= 0:
         raise HarnessError("Run deadline exhausted: check not_run, no process started")
-    folder = _result_path(run, state, check_id).parent
-    folder.mkdir(parents=True, exist_ok=True)
     with ExitStack() as stack:
         stack.enter_context(run.workspace_lock(contract))
+        state = run.state()
+        if state["contract_digest"] != digest(contract):
+            raise HarnessError("Attempt changed before command execution")
+        folder = _result_path(run, state, check_id).parent
+        folder.mkdir(parents=True, exist_ok=True)
         for resource in sorted(set(check.get("resources", []))):
-            stack.enter_context(lock(run.resource_path("resource:" + resource), purpose="check resource: " + resource))
+            stack.enter_context(lock(run.resource_path("resource:" + resource, contract), purpose="check resource: " + resource))
         check_lease = run.path / ".check-locks" / (digest({"attempt": state["current_attempt"], "check": check_id}) + ".lock")
         stack.enter_context(lock(check_lease, purpose="command check " + check_id))
         if _result_path(run, state, check_id).exists():
@@ -456,10 +460,12 @@ def run_check(run: Run, check_id, *, cancel_file=None):
                     if not source.is_absolute():
                         source = Path(record["cwd"]) / source
                     report_before[index] = _report_stamp(source)
-                process, job = _start_contained(check["argv"], record["cwd"])
-                identity = process_identity(process.pid)
-                record["process"] = {"identity": identity, "tree_control": "windows_suspended_job_kill_on_close" if os.name == "nt" else "private_process_group"}
                 with run.edit() as current:
+                    if current["contract_digest"] != state["contract_digest"] or current["current_attempt"] != state["current_attempt"]:
+                        raise HarnessError("Attempt changed before process start")
+                    process, job = _start_contained(check["argv"], record["cwd"])
+                    identity = process_identity(process.pid)
+                    record["process"] = {"identity": identity, "tree_control": "windows_suspended_job_kill_on_close" if os.name == "nt" else "private_process_group"}
                     current.setdefault("processes", {})[check_id] = {"identity": identity, "status": "running", "started_at": now(), "attempt_id": contract["attempt_id"], "argv_digest": digest(check["argv"])}
                     current["status"] = "verifying"
                 for source, path in ((process.stdout, stdout_path), (process.stderr, stderr_path)):
@@ -717,13 +723,13 @@ def _shared_scope_errors(run, state, contract):
             if set(a) != set(b):
                 errors.append(f"shared record IDs changed: {definition['path']}")
             for record_id in set(a) | set(b):
-                if a.get(record_id) != b.get(record_id) and record_id not in allowed:
+                if not json_equal(a.get(record_id), b.get(record_id)) and record_id not in allowed:
                     errors.append(f"foreign shared record changed: {record_id}")
             # Preserve all non-record sections too.
             if key:
                 full_a.pop(key, None)
                 full_b.pop(key, None)
-                if full_a != full_b:
+                if not json_equal(full_a, full_b):
                     errors.append(f"shared metadata changed: {definition['path']}")
         else:
             for source, expected in definition["validator_files"].items():
@@ -815,10 +821,16 @@ def accepted_evidence_errors(run: Run, verdict_digest, *, _ancestors=(), _eviden
             errors.append("frozen toolchain integrity failed")
         check_errors, receipts = _check_evidence_errors(run, state, contract, candidate, toolchains, details=_evidence_validation)
         errors.extend(check_errors)
-        # Receipts bind result metadata to the accepted gate, even if a result was rehashed.
-        for receipt in receipts:
-            if receipt not in verdict.get("receipts", []):
-                errors.append("accepted check receipt changed: " + receipt["check_id"])
+        # Bind the complete receipt set, including optional results present at
+        # acceptance. A never-run optional check contributes no receipt.
+        accepted_receipts = verdict.get("receipts", [])
+        accepted_checks = [item for item in accepted_receipts if "check_id" in item]
+        if not json_equal(receipts, accepted_checks):
+            errors.append("accepted check receipts changed or missing")
+        shared_paths = [item["path"] for item in contract.get("scope", {}).get("shared_files", []) if item["format"] != "json-records"]
+        accepted_shared = [item for item in accepted_receipts if "check_id" not in item]
+        if [item.get("path") for item in accepted_shared] != shared_paths:
+            errors.append("accepted shared scope receipts changed or missing")
         for dependency in contract.get("dependencies", []):
             errors.extend(accepted_evidence_errors(Run(dependency["run_dir"]), dependency["verdict_digest"], _ancestors=(*_ancestors, str(run.path))))
         if any(o["status"] in {"planned", "unknown"} for o in state.get("operations", {}).values()):
@@ -857,13 +869,13 @@ def gate(run: Run, *, actor="orchestrator"):
             errors.append("unknown operation outcomes: " + ", ".join(unresolved))
         if snapshot(contract)["digest"] != candidate["digest"]:
             errors.append("candidate changed during gate")
-        verdict = {"schema_version": 1, "run_id": contract["run_id"], "task_id": contract["task_id"], "attempt_id": contract["attempt_id"], "contract_digest": state["contract_digest"], "candidate_digest": candidate["digest"], "verdict": "accepted" if not errors else "rejected", "errors": errors, "receipts": receipts, "assessor": actor, "created_at": now(), "limitations": "Cooperating-process locks and hashes are process controls, not a sandbox or protection from an actor with the same OS rights. Semantic and visual assessments remain identified as assessments."}
-        verdict["digest"] = digest(verdict)
-        target = run.attempt_dir(state) / "gates" / (uuid.uuid4().hex + ".json")
-        atomic_json(target, verdict, exclusive=True)
         with run.edit() as current:
-            if current["current_attempt"] != state["current_attempt"] or current["contract_digest"] != state["contract_digest"]:
-                raise HarnessError("Attempt changed during gate")
+            if not json_equal(current, state):
+                errors.append("run state changed during gate; repeat acceptance against current state")
+            verdict = {"schema_version": 1, "run_id": contract["run_id"], "task_id": contract["task_id"], "attempt_id": contract["attempt_id"], "contract_digest": state["contract_digest"], "candidate_digest": candidate["digest"], "verdict": "accepted" if not errors else "rejected", "errors": errors, "receipts": receipts, "assessor": actor, "created_at": now(), "limitations": "Cooperating-process locks and hashes are process controls, not a sandbox or protection from an actor with the same OS rights. Semantic and visual assessments remain identified as assessments."}
+            verdict["digest"] = digest(verdict)
+            target = run.attempt_dir(state) / "gates" / (uuid.uuid4().hex + ".json")
+            atomic_json(target, verdict, exclusive=True)
             current["status"] = "accepted" if not errors else "failed"
             current["accepted"] = {"verdict_digest": verdict["digest"], "candidate_digest": candidate["digest"], "verdict_path": target.relative_to(run.path).as_posix()} if not errors else None
         return verdict

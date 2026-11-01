@@ -12,6 +12,7 @@ import stat
 import sys
 
 from .core import HarnessError, atomic_json, canonical, digest, now
+from .file_io import FileReadError, read_regular_file
 
 MAX_PACKET_BYTES = 4 * 1024 * 1024
 MAX_EXCERPT_FILE_BYTES = 16 * 1024 * 1024
@@ -145,10 +146,10 @@ def make_packet(root, includes, *, max_files=64, max_file_bytes=65536, max_bytes
 
 
 def read_packet(path):
-    with Path(path).open("rb") as source:
-        data = source.read(MAX_PACKET_BYTES + 1)
-    if len(data) > MAX_PACKET_BYTES:
-        raise HarnessError("Packet exceeds input size limit")
+    try:
+        data = read_regular_file(path, max_bytes=MAX_PACKET_BYTES)
+    except FileReadError as error:
+        raise HarnessError(str(error)) from error
     return json.loads(data.decode("utf-8"))
 
 

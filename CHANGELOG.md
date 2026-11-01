@@ -1,5 +1,32 @@
 # История изменений
 
+## 1.4.1 — 2026-11-01
+
+Исправления всех R01–R14 из повторного аудита. Подробности и границы проверки —
+[отчёт 1.4.1](docs/REVIEW_1_4_1.md).
+
+- Evidence: JSON boolean больше не равен number, включая вложенные значения;
+  GoogleTest `notrun`/`suppressed` не удовлетворяет обязательный test case.
+- Runner: attempt и workspace lease согласованы до запуска команды; gate
+  повторно проверяет точное состояние под lock перед публикацией acceptance.
+  Исчезновение ранее принятого optional receipt делает evidence устаревшим.
+- Install/rollback: сохраняются Linux ACL/xattrs и поддерживаемые Windows DACL;
+  вся транзакция проходит metadata preflight, обнаруженные чужие изменения
+  сохраняются, неизвестное восстановление отражается в recovery state.
+- LSP navigation повторяет запрос на открытых снимках целевых документов.
+  Rename проверяет backup до компенсации и результат после неё; ограниченный
+  ответ сохраняет статус, counts, digest и recovery receipt. Минимальный ответ
+  проверяется до записи исходников.
+- Чтение context packets и установочных файлов ограничено по размеру,
+  использует nonblocking open и проверяет тип/идентичность открытого файла.
+- Rust scanner: исправлена совместимость character classes с Python fnmatch;
+  оба backend сохраняют пробельные символы в имени Git-root.
+- Native build явно выбирает host target, связывает source fingerprint с
+  собранным и скопированным бинарником, сохраняет прежний bundle при неудачном
+  восстановлении. Реальная offline Cargo-проверка включена в native CI.
+- Порог compaction 500000, model/provider/reasoning и permissions сохранены.
+  Сервер, база данных и новые runtime dependencies не добавлены.
+
 ## 1.4.0 — 2026-11-01
 
 Работающие локальные инструменты для больших репозиториев.

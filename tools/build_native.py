@@ -92,6 +92,40 @@ def rust_library_notices(destination, env, cwd):
     shutil.copytree(docs / "licenses", out / "licenses")
 
 
+class BuildRecoveryRequired(OSError):
+    """An existing bundle remains in a retained recovery directory."""
+
+    def __init__(self, directory, error):
+        self.recovery_path = str(directory)
+        super().__init__(f"Native bundle publication needs recovery at {directory}: {error}")
+
+
+def publish_bundle(staged, destination):
+    """Publish a sibling staging directory, preserving a failed compensation.
+
+    The caller may remove staged.parent only after this returns or raises an
+    ordinary error. BuildRecoveryRequired makes the whole directory persistent.
+    """
+    old = staged.parent / "previous"
+    try:
+        if destination.exists():
+            if destination.is_symlink() or not destination.is_dir():
+                raise ValueError("Native destination must be a regular directory")
+            destination.rename(old)
+        staged.rename(destination)
+    except BaseException:
+        if old.exists():
+            try:
+                # Do not overwrite a destination with an uncertain publication
+                # outcome or one created concurrently by another writer.
+                if destination.exists() or destination.is_symlink():
+                    raise OSError("Destination exists after failed publication; previous bundle retained")
+                old.rename(destination)
+            except BaseException as recovery_error:
+                raise BuildRecoveryRequired(staged.parent, recovery_error) from recovery_error
+        raise
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--offline", action="store_true", help="Use an already populated Cargo cache")
@@ -107,45 +141,49 @@ def main(argv=None):
     common = ["--manifest-path", str(manifest), "--locked"] + (["--offline"] if args.offline else [])
     verbose_version = subprocess.check_output(["rustc", "-vV"], cwd=manifest.parent, env=env, text=True)
     host = next(line.removeprefix("host: ") for line in verbose_version.splitlines() if line.startswith("host: "))
+    fingerprint, inputs = source_fingerprint()
     started = time.perf_counter()
-    subprocess.run([cargo, "build", "--release", *common], cwd=manifest.parent, env=env, check=True)
+    # An explicit host target overrides CARGO_BUILD_TARGET and build.target in
+    # Cargo configuration. Never reuse an unrelated flat target/release file.
+    subprocess.run([cargo, "build", "--release", "--target", host, *common], cwd=manifest.parent, env=env, check=True)
     elapsed = time.perf_counter() - started
     metadata = json.loads(subprocess.check_output([cargo, "metadata", "--format-version", "1", "--filter-platform", host, *common], cwd=manifest.parent, env=env))
     binary_name = "harness-native.exe" if os.name == "nt" else "harness-native"
-    executable = target_dir / "release" / binary_name
+    executable = target_dir / host / "release" / binary_name
     if not executable.is_file():
         raise ValueError("Cargo did not produce the native executable")
     version = subprocess.check_output(["rustc", "--version"], cwd=manifest.parent, env=env, text=True).strip()
-    fingerprint, inputs = source_fingerprint()
+    if source_fingerprint() != (fingerprint, inputs):
+        raise ValueError("Native sources changed during compilation; no bundle published")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     destination = args.output_dir / key
-    # Work in a sibling temporary directory so interrupted builds keep the prior bundle.
-    with tempfile.TemporaryDirectory(prefix="native-build-", dir=args.output_dir) as directory:
-        staged = Path(directory) / key
+    # A failed restore must outlive this process, so cleanup is explicit instead
+    # of TemporaryDirectory's unconditional removal of the only prior copy.
+    directory = Path(tempfile.mkdtemp(prefix="native-build-", dir=args.output_dir))
+    retain_recovery = False
+    try:
+        staged = directory / key
         staged.mkdir()
-        shutil.copy2(executable, staged / binary_name)
+        binary = staged / binary_name
+        shutil.copy2(executable, binary)
         license_dir = staged / "licenses"
         license_dir.mkdir()
         third_party_licenses(metadata, license_dir)
         rust_library_notices(license_dir, env, manifest.parent)
         info = {"schema_version": 1, "version": __version__, "protocol_version": 1,
                 "platform": key, "target": host, "binary": binary_name,
-                "binary_sha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
-                "binary_bytes": executable.stat().st_size,
+                "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+                "binary_bytes": binary.stat().st_size,
                 "source_digest": fingerprint, "source_files": inputs,
                 "rustc": version, "profile": "release", "build_seconds": round(elapsed, 4)}
         write_json(staged / "build-info.json", info)
-        old = Path(directory) / "previous"
-        if destination.exists():
-            if destination.is_symlink() or not destination.is_dir():
-                raise ValueError("Native destination must be a regular directory")
-            destination.rename(old)
-        try:
-            staged.rename(destination)
-        except BaseException:
-            if old.exists():
-                old.rename(destination)
-            raise
+        publish_bundle(staged, destination)
+    except BuildRecoveryRequired:
+        retain_recovery = True
+        raise
+    finally:
+        if not retain_recovery:
+            shutil.rmtree(directory)
     print(json.dumps({"status": "built", "path": str(destination), **info}, ensure_ascii=False, indent=2))
     return 0
 
@@ -153,6 +191,10 @@ def main(argv=None):
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
+    except BuildRecoveryRequired as error:
+        print(json.dumps({"status": "recovery_required", "recovery_path": error.recovery_path,
+                          "error": str(error)}, ensure_ascii=False), file=sys.stderr)
+        raise SystemExit(2)
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         print(json.dumps({"error": str(error)}, ensure_ascii=False), file=sys.stderr)
         raise SystemExit(2)

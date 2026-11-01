@@ -352,6 +352,9 @@ class InstallAuditTests(unittest.TestCase):
         self.assertIn("symlink/reparse", report["error"])
         self.assertTrue(config.is_symlink())
         self.assertEqual(target.read_bytes(), before[config])
+        # Product reads now refuse links; inspect the intentionally retained
+        # fixture link separately instead of asking that reader to follow it.
+        del before[config]
         self.assert_targets(before)
 
     def test_windows_reparse_attribute_is_rejected_without_junction_api(self):

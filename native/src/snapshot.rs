@@ -38,6 +38,13 @@ fn bytes_text(value: &[u8]) -> Result<&str, String> {
     std::str::from_utf8(value).map_err(|_| "Git output is not valid Unicode".into())
 }
 
+fn git_path_record(value: &str) -> &str {
+    let value = value.strip_suffix('\n').unwrap_or(value);
+    #[cfg(windows)]
+    let value = value.strip_suffix('\r').unwrap_or(value);
+    value
+}
+
 fn shown_path(path: &Path) -> Result<String, String> {
     let value = text(path.as_os_str())?;
     #[cfg(windows)]
@@ -90,6 +97,62 @@ enum Token {
     Class(bool, Vec<(char, char)>),
 }
 
+fn character_class(chars: &[char]) -> Token {
+    // Keep literal hyphens separate from range separators. Python fnmatch
+    // normalizes descending ranges before interpreting the leading '!'.
+    // Removing a range can expose a new leading negation character.
+    let mut chunks = Vec::<Vec<char>>::new();
+    let mut start = 0;
+    let mut search = if chars.first() == Some(&'!') { 2 } else { 1 };
+    while search < chars.len() {
+        let Some(offset) = chars[search..].iter().position(|c| *c == '-') else {
+            break;
+        };
+        let dash = search + offset;
+        chunks.push(chars[start..dash].to_vec());
+        start = dash + 1;
+        search = dash + 3;
+    }
+    if start < chars.len() {
+        chunks.push(chars[start..].to_vec());
+    } else if let Some(last) = chunks.last_mut() {
+        last.push('-');
+    }
+    for index in (1..chunks.len()).rev() {
+        if let (Some(left), Some(right)) = (chunks[index - 1].last(), chunks[index].first()) {
+            if left > right {
+                let right = chunks.remove(index);
+                chunks[index - 1].pop();
+                chunks[index - 1].extend(right.into_iter().skip(1));
+            }
+        }
+    }
+    let mut atoms = Vec::new();
+    for (index, chunk) in chunks.iter().enumerate() {
+        if index != 0 {
+            atoms.push(('-', true));
+        }
+        atoms.extend(chunk.iter().map(|c| (*c, false)));
+    }
+    let negated = atoms.first() == Some(&('!', false));
+    let mut cursor = usize::from(negated);
+    let mut ranges = Vec::new();
+    while cursor < atoms.len() {
+        if cursor + 2 < atoms.len()
+            && !atoms[cursor].1
+            && atoms[cursor + 1].1
+            && !atoms[cursor + 2].1
+        {
+            ranges.push((atoms[cursor].0, atoms[cursor + 2].0));
+            cursor += 3;
+        } else {
+            ranges.push((atoms[cursor].0, atoms[cursor].0));
+            cursor += 1;
+        }
+    }
+    Token::Class(negated, ranges)
+}
+
 #[derive(Clone, Debug)]
 struct Pattern {
     tokens: Vec<Token>,
@@ -126,21 +189,7 @@ impl Pattern {
                         tokens.push(Token::Literal('['));
                         continue;
                     }
-                    let negated = chars.get(start) == Some(&'!');
-                    let mut cursor = start + usize::from(negated);
-                    let mut ranges = Vec::new();
-                    while cursor < end {
-                        if cursor + 2 < end && chars[cursor + 1] == '-' {
-                            if chars[cursor] <= chars[cursor + 2] {
-                                ranges.push((chars[cursor], chars[cursor + 2]));
-                            }
-                            cursor += 3;
-                        } else {
-                            ranges.push((chars[cursor], chars[cursor]));
-                            cursor += 1;
-                        }
-                    }
-                    tokens.push(Token::Class(negated, ranges));
+                    tokens.push(character_class(&chars[start..end]));
                     i = end + 1;
                 }
                 other => tokens.push(Token::Literal(other)),
@@ -391,7 +440,7 @@ fn inventory(
     };
     let top = git(root, &["rev-parse", "--show-toplevel"], deadline)?;
     let is_git = match top {
-        Some(top) => resolve(Path::new(trim(bytes_text(&top)?)))? == root,
+        Some(top) => resolve(Path::new(git_path_record(bytes_text(&top)?)))? == root,
         None => false,
     };
     let mut names = Names::default();
@@ -912,6 +961,39 @@ mod tests {
                 "{pattern:?} {path:?}"
             );
         }
+        // Oracle cases from Python fnmatchcase. Descending-range removal can
+        // expose a negation; hyphens inside chunks remain literal characters.
+        let alphabet = "!-/0AZ^_`abz~猫";
+        for (pattern, accepted) in [
+            ("[a--!a]", "!-/0AZ^_`bz~猫"),
+            ("[a--!]", alphabet),
+            ("[z-a!b]", "!-/0AZ^_`az~猫"),
+            ("[!a--]", alphabet),
+            ("[a-b-c]", "-ab"),
+            ("[a--b]", "b"),
+            ("[--a]", "-/0AZ^_`a"),
+            ("[a---z]", "-z"),
+            ("[!a--!z]", "-/0AZ^_`ab~猫"),
+            ("[z-a-b]", "-b"),
+        ] {
+            for value in alphabet.chars() {
+                assert_eq!(
+                    Pattern::new(pattern).matches(&value.to_string()),
+                    accepted.contains(value),
+                    "{pattern:?} {value:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn git_path_output_keeps_filename_whitespace() {
+        assert_eq!(git_path_record("/project \n"), "/project ");
+        assert_eq!(git_path_record("/project\n\n"), "/project\n");
+        #[cfg(unix)]
+        assert_eq!(git_path_record("/project\r\n"), "/project\r");
+        #[cfg(windows)]
+        assert_eq!(git_path_record("C:/project\r\n"), "C:/project");
     }
 
     #[test]

@@ -5,7 +5,7 @@ a protection against a malicious agent with the same user account.
 """
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 import ctypes
@@ -467,7 +467,7 @@ def snapshot_python(contract):
         excludes = [".git", ".git/**", *contract.get("scope", {}).get("exclude", [])]
         head = _git(cwd, "rev-parse", "HEAD")
         root = _git(cwd, "rev-parse", "--show-toplevel")
-        is_root = root is not None and Path(os.fsdecode(root).strip()).resolve() == cwd
+        is_root = root is not None and Path(os.fsdecode(root.removesuffix(b"\n"))).resolve() == cwd
         result.update({"kind": "git" if is_root else "directory", "cwd": str(cwd), "exclude": excludes})
         names = set()
         if is_root:
@@ -571,18 +571,24 @@ class Run:
         validate_contract(result)
         return result
 
-    def resource_path(self, name):
-        contract = self.contract()
+    def resource_path(self, name, contract=None):
+        contract = contract or self.contract()
         root = Path(contract["resource_lock_root"]) if contract.get("resource_lock_root") else self.path.parent / ".harness-resource-locks"
         return root / (hashlib.sha256(name.encode("utf-8")).hexdigest() + ".lock")
+
+    def _workspace_lease(self, contract):
+        # Subdirectories of one Git checkout share a lock; linked worktrees do
+        # not. Resolve both namespace and identity from the same contract.
+        name = "workspace:" + os.path.normcase(str(checkout_identity(contract["cwd"]))) if contract.get("cwd") else "run:" + str(self.path)
+        return self.resource_path(name, contract), name
 
     @contextmanager
     def workspace_lock(self, contract=None):
         contract = contract or self.contract()
-        # Subdirectories of one Git checkout share a lock; linked worktrees do
-        # not. Non-Git callers must agree on the same workspace root/namespace.
-        name = "workspace:" + os.path.normcase(str(checkout_identity(contract["cwd"]))) if contract.get("cwd") else "run:" + str(self.path)
-        with lock(self.resource_path(name), purpose=name):
+        path, name = self._workspace_lease(contract)
+        with lock(path, purpose=name):
+            if self.state()["contract_digest"] != digest(contract):
+                raise HarnessError("Attempt changed before workspace lease; retry with the current contract")
             yield
 
     @classmethod
@@ -631,38 +637,48 @@ class Run:
         validate_contract(contract)
         if not isinstance(reason, str) or not reason.strip():
             raise HarnessError("New attempt requires the new hypothesis or changed requirement")
-        with self.edit() as state:
-            old = self.contract(state)
-            for key in ("run_id", "task_id"):
-                if old[key] != contract[key]:
-                    raise HarnessError("Attempt must belong to the same run and task")
-            if contract["attempt_id"] in state["attempts"]:
-                raise HarnessError("Attempt ID already used")
-            old_budget, new_budget = old.get("budget", {}), contract.get("budget", {})
-            old_limit, new_limit = old_budget.get("max_attempts", 3), new_budget.get("max_attempts", 3)
-            if new_limit > old_limit:
-                raise HarnessError("An ordinary attempt cannot increase the run attempt budget")
-            old_deadline, new_deadline = old_budget.get("deadline"), new_budget.get("deadline")
-            if old_deadline and (not new_deadline or datetime.fromisoformat(new_deadline.replace("Z", "+00:00")) > datetime.fromisoformat(old_deadline.replace("Z", "+00:00"))):
-                raise HarnessError("An ordinary attempt cannot extend or remove the run deadline")
-            if len(state["attempts"]) >= new_limit:
-                raise HarnessError("Attempt budget exhausted; do not reset it with a new agent")
-            if len(state["attempts"]) >= 2 and reason == state.get("attempt_reason"):
-                signatures = []
-                for attempt_id in state["attempts"][-2:]:
-                    records = [read_json(p) for p in sorted((self.path / "attempts" / attempt_id / "checks").glob("*/result.json"))]
-                    failed = [{key: item.get(key) for key in ("check_id", "status", "exit_code", "error", "assertion_errors")} for item in records if item.get("status") not in {"passed", "satisfied"}]
-                    signatures.append(failed)
-                if signatures[0] and signatures[0] == signatures[1]:
-                    raise HarnessError("Two identical failed attempts: supply a new diagnostic hypothesis instead of repeating")
-            self._require_reconciled(state)
-            baseline = snapshot(contract)
-            self._check_base(contract, baseline)
-            sha = digest(contract)
-            atomic_json(self.path / "contracts" / (sha + ".json"), contract, exclusive=True)
-            state.update({"contract_digest": sha, "current_attempt": contract["attempt_id"], "status": "planned", "accepted": None, "attempt_reason": reason})
-            state["attempts"].append(contract["attempt_id"])
-            self._initialize_attempt(state, contract, baseline)
+        observed = self.state()
+        old_contract = self.contract(observed)
+        # Lock both workspaces/namespaces when requirements move the attempt.
+        # No state lock is held while acquiring these leases.
+        leases = dict(self._workspace_lease(value) for value in (old_contract, contract))
+        with ExitStack() as stack:
+            for path, name in sorted(leases.items(), key=lambda item: str(item[0])):
+                stack.enter_context(lock(path, purpose=name))
+            with self.edit() as state:
+                if state["contract_digest"] != observed["contract_digest"]:
+                    raise HarnessError("Attempt changed before transition; retry with current state")
+                old = self.contract(state)
+                for key in ("run_id", "task_id"):
+                    if old[key] != contract[key]:
+                        raise HarnessError("Attempt must belong to the same run and task")
+                if contract["attempt_id"] in state["attempts"]:
+                    raise HarnessError("Attempt ID already used")
+                old_budget, new_budget = old.get("budget", {}), contract.get("budget", {})
+                old_limit, new_limit = old_budget.get("max_attempts", 3), new_budget.get("max_attempts", 3)
+                if new_limit > old_limit:
+                    raise HarnessError("An ordinary attempt cannot increase the run attempt budget")
+                old_deadline, new_deadline = old_budget.get("deadline"), new_budget.get("deadline")
+                if old_deadline and (not new_deadline or datetime.fromisoformat(new_deadline.replace("Z", "+00:00")) > datetime.fromisoformat(old_deadline.replace("Z", "+00:00"))):
+                    raise HarnessError("An ordinary attempt cannot extend or remove the run deadline")
+                if len(state["attempts"]) >= new_limit:
+                    raise HarnessError("Attempt budget exhausted; do not reset it with a new agent")
+                if len(state["attempts"]) >= 2 and reason == state.get("attempt_reason"):
+                    signatures = []
+                    for attempt_id in state["attempts"][-2:]:
+                        records = [read_json(p) for p in sorted((self.path / "attempts" / attempt_id / "checks").glob("*/result.json"))]
+                        failed = [{key: item.get(key) for key in ("check_id", "status", "exit_code", "error", "assertion_errors")} for item in records if item.get("status") not in {"passed", "satisfied"}]
+                        signatures.append(failed)
+                    if signatures[0] and signatures[0] == signatures[1]:
+                        raise HarnessError("Two identical failed attempts: supply a new diagnostic hypothesis instead of repeating")
+                self._require_reconciled(state)
+                baseline = snapshot(contract)
+                self._check_base(contract, baseline)
+                sha = digest(contract)
+                atomic_json(self.path / "contracts" / (sha + ".json"), contract, exclusive=True)
+                state.update({"contract_digest": sha, "current_attempt": contract["attempt_id"], "status": "planned", "accepted": None, "attempt_reason": reason})
+                state["attempts"].append(contract["attempt_id"])
+                self._initialize_attempt(state, contract, baseline)
         return self.status()
 
     def _require_reconciled(self, state):

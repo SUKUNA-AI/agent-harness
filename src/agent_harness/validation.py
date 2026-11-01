@@ -54,6 +54,23 @@ def literal_assertions(assertions):
                and not REGEX_META.intersection(item["regex"]) for item in assertions)
 
 
+def json_equal(left, right):
+    """Compare JSON values recursively, keeping booleans distinct from numbers.
+
+    JSON has one number category, so integral and fractional spellings such as
+    1 and 1.0 retain their existing numeric equality.
+    """
+    if isinstance(left, bool) or isinstance(right, bool):
+        return type(left) is type(right) and left == right
+    if isinstance(left, dict) and isinstance(right, dict):
+        return left.keys() == right.keys() and all(json_equal(left[key], right[key]) for key in left)
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(json_equal(a, b) for a, b in zip(left, right))
+    if type(left) is not type(right) and not (type(left) in (int, float) and type(right) in (int, float)):
+        return False
+    return left == right
+
+
 def _junit(data, definition):
     import xml.etree.ElementTree as ET
 
@@ -65,8 +82,12 @@ def _junit(data, definition):
     for case in root.iter("testcase"):
         tests += 1
         name = f"{case.get('classname', '')}::{case.get('name', '')}"
-        is_skipped = case.find("skipped") is not None
-        is_failed = case.find("failure") is not None or case.find("error") is not None
+        status = case.get("status", "").strip().lower()
+        result = case.get("result", "").strip().lower()
+        is_skipped = (case.find("skipped") is not None or status in {"notrun", "skipped", "disabled"}
+                      or result in {"suppressed", "skipped"})
+        unknown = status not in {"", "run", "notrun", "skipped", "disabled"} or result not in {"", "completed", "suppressed", "skipped"}
+        is_failed = case.find("failure") is not None or case.find("error") is not None or unknown
         skipped += is_skipped
         failed += is_failed
         if len(names) < CASE_SUMMARY_LIMIT:
@@ -150,7 +171,7 @@ def validate(request, *, literals=False, timeout=None):
                             if not isinstance(cursor, dict):
                                 raise ValueError("JSON report path crosses a non-object")
                             cursor = cursor[segment]
-                        if cursor != expected:
+                        if not json_equal(cursor, expected):
                             errors.append(f"report field mismatch: {key}")
                     reports.append({"format": "json", "verified_equals": definition.get("equals", {})})
                 else:

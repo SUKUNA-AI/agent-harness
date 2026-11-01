@@ -385,11 +385,14 @@ class Parent:
             raise
         return name, staged
 
-    def replace(self, staged, *, expected):
+    def replace(self, staged, *, expected, staged_source=None):
         self.check()
         actual = capture(self.root, self.name)
         if actual["identity"] != expected["identity"] or actual["sha256"] != expected["sha256"]:
             raise HarnessError("Rename target changed immediately before replacement")
+        if staged_source is not None:
+            self.verify_backup(staged, staged_source["identity"], staged_source["sha256"],
+                               len(staged_source["data"]))
         if self.fd is not None:
             os.replace(staged, self.path.name, src_dir_fd=self.fd, dst_dir_fd=self.fd)
         elif os.name == "nt":
@@ -398,6 +401,22 @@ class Parent:
             self.windows_dacl_uncertain = False
         else:
             os.replace(self.path.parent / staged, self.path)
+
+    def verify_backup(self, name, expected, sha256, size):
+        self.check()
+        relative = self.path.parent.relative_to(self.root) / name
+        actual = capture(self.root, relative.as_posix())
+        _check_metadata(actual["absolute_path"])
+        # Before publication POSIX ctime must still match staging. Windows
+        # fstat/lstat expose different ctime APIs; all other fields must match.
+        same_identity = (_matches_staged(actual["identity"], expected) if os.name == "nt"
+                         else actual["identity"] == expected)
+        if (not same_identity
+                or actual["sha256"] != sha256 or len(actual["data"]) != size):
+            raise HarnessError("Rename backup changed; preserve recovery files for review")
+        if os.name == "nt" and _windows_get_dacl(actual["absolute_path"]) != _windows_get_dacl(self.path):
+            raise HarnessError("Rename backup DACL changed; preserve recovery files for review")
+        return actual
 
     def unlink(self, name):
         try:
@@ -426,7 +445,57 @@ def _matches_staged(actual, staged):
                ("dev", "ino", "size", "mode", "mtime_ns", "nlink", "uid", "gid"))
 
 
-def apply_plan(root, plan):
+def bound_apply_result(result, max_bytes):
+    """Keep the transaction outcome and recovery handle under every budget.
+
+    The same minimum is checked before staging, when the exact receipt path is
+    known. Diagnostic strings and conflict details may consume only spare bytes.
+    """
+    if type(max_bytes) is not int or not 1024 <= max_bytes <= 262144:
+        raise HarnessError("LSP output budget must be 1024..262144 UTF-8 bytes")
+    def fits(value):
+        try:
+            return len(canonical(value)) + 2 <= max_bytes
+        except UnicodeEncodeError:
+            return False
+    conflicts = result.get("conflicts", [])
+    count = result.get("conflict_count", len(conflicts))
+    full = dict(result, conflict_count=count, total_items=count,
+                returned_items=len(conflicts), truncated=False, max_bytes=max_bytes)
+    if fits(full):
+        return full
+    essential = ("status", "operation", "plan_digest", "recovery_receipt", "files", "edits")
+    bounded = {key: result[key] for key in essential if key in result}
+    bounded.update(conflict_count=count, total_items=count, returned_items=0,
+                   conflicts=[], truncated=True, max_bytes=max_bytes)
+    if not fits(bounded):
+        raise HarnessError("Rename outcome and recovery receipt exceed the output budget; increase --max-bytes before applying")
+    for key in ("globally_atomic", "detected_conflicts_preserved", "cleanup_warning_count"):
+        if key in result and fits(dict(bounded, **{key: result[key]})):
+            bounded[key] = result[key]
+    # Keep a useful error prefix, counting UTF-8 and JSON escaping exactly.
+    if isinstance(result.get("error"), str):
+        low, high = 0, len(result["error"])
+        while low < high:
+            middle = (low + high + 1) // 2
+            if fits(dict(bounded, error=result["error"][:middle])):
+                low = middle
+            else:
+                high = middle - 1
+        if fits(dict(bounded, error=result["error"][:low])):
+            bounded["error"] = result["error"][:low]
+    low, high = 0, len(conflicts)
+    while low < high:
+        middle = (low + high + 1) // 2
+        if fits(dict(bounded, conflicts=conflicts[:middle], returned_items=middle)):
+            low = middle
+        else:
+            high = middle - 1
+    bounded.update(conflicts=conflicts[:low], returned_items=low)
+    return bounded
+
+
+def apply_plan(root, plan, *, result_budget=None):
     root = _root(root)
     if (not isinstance(plan, dict) or plan.get("schema_version") != 1
             or plan.get("purpose") != "lsp_rename"
@@ -455,7 +524,8 @@ def apply_plan(root, plan):
     if total > MAX_TOTAL_BYTES or edit_count > MAX_EDITS or plan.get("edit_count") != edit_count:
         raise HarnessError("Rename plan exceeds total limits or has invalid counts")
     if not files:
-        return {"status": "no_changes", "operation": "apply", "plan_digest": plan["digest"], "files": 0}
+        return {"status": "no_changes", "operation": "apply", "plan_digest": plan["digest"],
+                "files": 0, "edits": 0, "conflict_count": 0}
     with workspace_lock(root):
         prepared = []
         journal_dir = None
@@ -472,12 +542,21 @@ def apply_plan(root, plan):
                     raise HarnessError("Rename output does not match the reviewed plan")
                 prepared.append({"item": item, "source": source, "after": after})
             journal_dir = Path(tempfile.mkdtemp(prefix="agent-harness-rename-recovery-"))
+            if result_budget is not None:
+                try:
+                    bound_apply_result({"status": "failed_compensated", "operation": "apply",
+                                        "plan_digest": plan["digest"], "files": len(files), "edits": edit_count,
+                                        "recovery_receipt": str(journal_dir / "receipt.json"),
+                                        "conflict_count": MAX_FILES + 1, "conflicts": []}, result_budget)
+                except BaseException:
+                    shutil.rmtree(journal_dir)
+                    raise
             journal = {"schema_version": 1, "purpose": "rename_recovery", "root": str(root),
                        "plan_digest": plan["digest"], "status": "staging", "files": []}
             for row in prepared:
                 item = row["item"]
                 parent = row["parent"] = Parent(root, item["path"])
-                row["backup"], _ = parent.stage(row["source"]["data"], item["before_identity"])
+                row["backup"], row["backup_identity"] = parent.stage(row["source"]["data"], item["before_identity"])
                 row["staged"], row["staged_identity"] = parent.stage(row["after"], item["before_identity"])
                 record = row["record"] = {"path": item["path"], "before_sha256": item["before_sha256"],
                                            "after_sha256": item["after_sha256"], "state": "prepared",
@@ -510,7 +589,7 @@ def apply_plan(root, plan):
             journal["status"] = "applied"
             atomic_json(journal_dir / "receipt.json", journal)
             result = {"status": "applied", "operation": "apply", "plan_digest": plan["digest"],
-                      "files": len(files), "edits": edit_count, "globally_atomic": False}
+                      "files": len(files), "edits": edit_count, "conflict_count": 0, "globally_atomic": False}
         except BaseException as error:
             if journal is None:
                 raise
@@ -531,7 +610,13 @@ def apply_plan(root, plan):
                             or not _matches_staged(actual["identity"], staged)
                             or (expected is not None and actual["identity"] != expected)):
                         raise HarnessError("Concurrent change preserved")
-                    row["parent"].replace(row["backup"], expected=actual)
+                    backup = dict(row["source"], identity=row["backup_identity"])
+                    row["parent"].replace(row["backup"], expected=actual, staged_source=backup)
+                    restored = capture(root, row["item"]["path"])
+                    _check_metadata(restored["absolute_path"])
+                    if (restored["sha256"] != row["source"]["sha256"]
+                            or not _matches_staged(restored["identity"], row["backup_identity"])):
+                        raise HarnessError("Rename restoration could not be verified")
                     row["record"]["state"] = "restored"
                 except (HarnessError, OSError) as recovery_error:
                     row["record"]["state"] = "recovery_required"
@@ -546,6 +631,7 @@ def apply_plan(root, plan):
                 conflicts.append({"error": "Could not publish final recovery receipt"})
                 journal["status"] = "recovery_required"
             result = {"status": journal["status"], "operation": "apply", "plan_digest": plan["digest"],
+                      "files": len(files), "edits": edit_count, "conflict_count": len(conflicts),
                       "error": journal["error"], "recovery_receipt": str(journal_dir / "receipt.json"),
                       "conflicts": conflicts, "detected_conflicts_preserved": True, "globally_atomic": False}
             if isinstance(error, (KeyboardInterrupt, SystemExit)):
@@ -569,6 +655,7 @@ def apply_plan(root, plan):
                         parent.close()
             if cleanup_errors and journal_dir is not None:
                 result["cleanup_warnings"] = cleanup_errors
+                result["cleanup_warning_count"] = len(cleanup_errors)
                 result["recovery_receipt"] = str(journal_dir / "receipt.json")
             elif journal_dir is not None and journal is not None and journal.get("status") == "applied":
                 try:

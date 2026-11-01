@@ -18,7 +18,7 @@ from urllib.parse import unquote, urlsplit
 from .context import _path, _root
 from .core import HarnessError, atomic_json
 from .rename import (MAX_FILES, MAX_TOTAL_BYTES, Positions, apply_plan, capture,
-                     make_plan, read_plan)
+                     bound_apply_result, make_plan, read_plan)
 
 MAX_FRAME_BYTES = 16 * 1024 * 1024
 MAX_STREAM_BYTES = 64 * 1024 * 1024
@@ -495,19 +495,30 @@ class Sources:
     def __init__(self, root, initial):
         self.root, self.values = root, {initial["path"]: initial}
         self.bytes = len(initial["data"])
+        self.deadline = None
+
+    def check_deadline(self):
+        if self.deadline is not None and time.monotonic() >= self.deadline:
+            raise HarnessError("LSP request deadline exceeded while capturing targets")
 
     def get(self, name):
+        self.check_deadline()
         if name not in self.values:
+            if len(self.values) >= MAX_FILES:
+                raise HarnessError("LSP result exceeds captured file/byte limits")
             value = capture(self.root, name)
+            self.check_deadline()
             self.bytes += len(value["data"])
-            if len(self.values) >= MAX_FILES or self.bytes > MAX_TOTAL_BYTES:
+            if self.bytes > MAX_TOTAL_BYTES:
                 raise HarnessError("LSP result exceeds captured file/byte limits")
             self.values[name] = value
         return self.values[name]
 
     def verify(self):
         for name, expected in self.values.items():
+            self.check_deadline()
             current = capture(self.root, name)
+            self.check_deadline()
             if current["identity"] != expected["identity"] or current["sha256"] != expected["sha256"]:
                 raise HarnessError("LSP source changed; retry the request from current files")
 
@@ -529,14 +540,13 @@ def _location(root, value, sources):
             "range": {"start": positions.human(selected.get("start")), "end": positions.human(selected.get("end"))}}
 
 
-def _navigation(root, name, operation, response, sources):
+def _navigation_rows(root, name, operation, response):
     if response is None:
         response = []
     if isinstance(response, dict) and operation == "definition":
         response = [response]
     if not isinstance(response, list):
         raise HarnessError("Invalid LSP navigation result")
-    items, omitted = [], 0
     pending = [(value, None) for value in reversed(response)]
     seen = 0
     while pending:
@@ -549,20 +559,41 @@ def _navigation(root, name, operation, response, sources):
                 raise HarnessError("Invalid LSP symbol")
             location = value.get("location") or {"uri": (root / name).as_uri(),
                                                    "range": value.get("selectionRange", value.get("range"))}
-            item = _location(root, location, sources)
-            if item is not None:
-                item.update(name=value["name"], kind=value["kind"])
-                if container or value.get("containerName"):
-                    item["container"] = container or value["containerName"]
+            metadata = {"name": value["name"], "kind": value["kind"]}
+            if container or value.get("containerName"):
+                metadata["container"] = container or value["containerName"]
             children = value.get("children", [])
             if not isinstance(children, list):
                 raise HarnessError("Invalid LSP symbol children")
             pending.extend((child, value["name"]) for child in reversed(children))
+            yield location, metadata
         else:
-            item = _location(root, value, sources)
+            yield value, {}
+
+
+def _navigation_targets(root, name, operation, response):
+    # Discover documents without interpreting potentially stale closed-file
+    # ranges. Those ranges are used only after a request on opened snapshots.
+    names = set()
+    for location, _ in _navigation_rows(root, name, operation, response):
+        if not isinstance(location, dict):
+            raise HarnessError("Invalid LSP location")
+        target = _uri_name(root, location.get("uri", location.get("targetUri")))
+        if target is not None:
+            names.add(target)
+            if len(names) > MAX_FILES:
+                raise HarnessError("LSP result exceeds captured file/byte limits")
+    return names
+
+
+def _navigation(root, name, operation, response, sources):
+    items, omitted = [], 0
+    for location, metadata in _navigation_rows(root, name, operation, response):
+        item = _location(root, location, sources)
         if item is None:
             omitted += 1
         else:
+            item.update(metadata)
             items.append(item)
     return items, omitted
 
@@ -607,6 +638,8 @@ def _changes(root, value):
 def bounded(result, max_bytes):
     if type(max_bytes) is not int or not 1024 <= max_bytes <= 262144:
         raise HarnessError("LSP output budget must be 1024..262144 UTF-8 bytes")
+    if result.get("operation") == "apply":
+        return bound_apply_result(result, max_bytes)
     result = dict(result)
     def fits(value):
         return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) + 2 <= max_bytes
@@ -663,6 +696,7 @@ def query(root, file, *, operation="symbols", line=None, column=None, new_name=N
         params["newName"] = new_name
     sources = Sources(root, source)
     with Session(root, command, timeout=timeout, settings=settings) as client:
+        sources.deadline = client.deadline
         client.open(source, language)
         readiness = client.ready(uri)
         if not client.supports(method, capability):
@@ -696,6 +730,19 @@ def query(root, file, *, operation="symbols", line=None, column=None, new_name=N
                                   "before_sha256": item["before_sha256"], "after_sha256": item["after_sha256"]}
                                  for item in plan["files"]])
         else:
+            opened = {file}
+            targets = _navigation_targets(root, file, operation, response)
+            for _ in range(3):
+                unopened = targets - opened
+                if not unopened:
+                    break
+                for name in sorted(unopened):
+                    client.open(sources.get(name), LANGUAGES.get(Path(name).suffix.lower(), language))
+                    opened.add(name)
+                response = client.request(method, params)
+                targets = _navigation_targets(root, file, operation, response)
+            if targets - opened:
+                raise HarnessError("Navigation target set did not stabilize; retry with a narrower workspace")
             result["items"], result["outside_workspace_omitted"] = _navigation(root, file, operation, response, sources)
             sources.verify()
     result["stderr_bytes"] = client.stderr_bytes
@@ -744,7 +791,7 @@ def dispatch(argv):
         if args.command == "doctor":
             result = doctor(args.root, file=args.file, server=args.server, language=args.language, max_bytes=args.max_bytes)
         elif args.command == "apply":
-            result = bounded(apply_plan(args.root, read_plan(args.plan)), args.max_bytes)
+            result = bounded(apply_plan(args.root, read_plan(args.plan), result_budget=args.max_bytes), args.max_bytes)
         else:
             result = query(args.root, args.file, operation=args.command,
                            line=getattr(args, "line", None), column=getattr(args, "column", None),

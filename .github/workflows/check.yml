@@ -43,6 +43,7 @@ jobs:
       - run: python tools/check_native.py
         env:
           AGENT_HARNESS_BACKEND: native
+      - run: python tools/check_native_build.py
       - run: npm install --prefix .test-tmp/language-tools --no-audit --no-fund --ignore-scripts pyright@1.1.414
       - run: python tools/check_lsp.py
       - run: python tools/release_check.py

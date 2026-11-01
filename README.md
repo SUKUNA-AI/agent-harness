@@ -1,10 +1,13 @@
-# Native Agent Harness 1.4.0
+# Native Agent Harness 1.4.1
 
 [Rust, RepoMap и локальный LSP](docs/CONTEXT_AND_NATIVE_RU.md): scanner/snapshot
 перенесён в Rust, `context map` находит определения и связи файлов по задаче,
 `code` выполняет symbols/definition/references/rename через локальный language
 server, который завершается после команды. БД и постоянные службы не нужны.
 Порог auto-compaction 500000 сохранён.
+[Исправления аудита 1.4.1](docs/REVIEW_1_4_1.md) охватывают все R01–R14:
+приёмку evidence, гонки attempt/gate, метаданные установки, LSP recovery,
+безопасное чтение и воспроизводимость native bundle.
 [Проверка и измерения 1.4.0](docs/REVIEW_1_4_0.md) описывает реальные изменения,
 найденные дефекты, A/B и границы результата.
 [Дополнительное ревью 1.3.0](docs/REVIEW_1_3_0.md) содержит findings и границы проверки.
@@ -102,6 +105,10 @@ python <package>/tools/harness.py verify --codex-home <codex-home> --skills-home
 
 Первый install — dry-run с адресным diff; apply создаёт backups/manifest.
 Сохраняются неизвестные TOML keys, comments, пользовательский текст и чужие роли.
+На Linux сохраняются mode, owner/group и точный набор доступных xattrs/ACL;
+на Windows проверяются DACL и owner/group. Неподдерживаемые метаданные и
+невозможность их переноса отклоняются при preflight всей транзакции. Особенности
+старых backups и восстановления описаны в [отчёте 1.4.1](docs/REVIEW_1_4_1.md).
 Установщик управляет `agents.enabled`, cap и отсутствующим `interrupt_message`;
 model/provider/reasoning/security не меняет. Если корневой параметр
 `model_auto_compact_token_limit` отсутствует, добавляет `500000`: порог автоматического
