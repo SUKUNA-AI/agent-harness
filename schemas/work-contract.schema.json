@@ -1,0 +1,315 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+          "maxLength": 128
+        },
+        "objective": {
+          "type": "string",
+          "maxLength": 16384,
+          "minLength": 1
+        },
+        "repository_revision": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "allowed_write_scopes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 16384
+          },
+          "maxItems": 128
+        },
+        "read_only": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "objective",
+        "allowed_write_scopes",
+        "read_only"
+      ]
+    },
+    "acceptance": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "required"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+            "maxLength": 128
+          },
+          "kind": {
+            "enum": [
+              "command",
+              "source",
+              "content",
+              "visual",
+              "runtime"
+            ]
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "argv": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 16384
+            },
+            "maxItems": 256,
+            "minItems": 1
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "timeout": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 86400
+          },
+          "expected_exit": {
+            "type": "integer"
+          },
+          "effect": {
+            "enum": [
+              "read_only",
+              "local_test"
+            ]
+          },
+          "resources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tool_versions": {
+            "type": "object",
+            "propertyNames": {
+              "not": {
+                "const": "executable"
+              }
+            },
+            "description": "Named version probes; executable is reserved for the command fingerprint.",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 16384
+              },
+              "maxItems": 256,
+              "minItems": 1
+            }
+          },
+          "criteria": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+              "maxLength": 128
+            },
+            "maxItems": 128,
+            "minItems": 1
+          },
+          "assertions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "regex"
+              ],
+              "properties": {
+                "stream": {
+                  "enum": [
+                    "stdout",
+                    "stderr",
+                    "combined"
+                  ]
+                },
+                "regex": {
+                  "type": "string"
+                },
+                "min_matches": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "forbidden": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "reports": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "path",
+                "format"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "format": {
+                  "enum": [
+                    "junit",
+                    "json"
+                  ]
+                },
+                "min_tests": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "max_skipped": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "required_cases": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "equals": {
+                  "type": "object"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "cache_policy": {
+            "enum": [
+              "never",
+              "verified_inputs_only"
+            ]
+          },
+          "input_closure": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 16384
+            },
+            "maxItems": 128
+          }
+        },
+        "additionalProperties": false
+      },
+      "maxItems": 128,
+      "minItems": 1
+    },
+    "budgets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_attempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "max_concurrent_managed_agents": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "max_wall_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 604800
+        },
+        "turn_timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000000
+        }
+      },
+      "required": [
+        "max_attempts",
+        "max_concurrent_managed_agents",
+        "max_wall_seconds",
+        "turn_timeout_seconds"
+      ]
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "inherit_installed_codex_config": {
+          "const": true
+        }
+      },
+      "required": [
+        "inherit_installed_codex_config"
+      ]
+    },
+    "mode": {
+      "enum": [
+        "native",
+        "managed"
+      ]
+    },
+    "memory": {
+      "type": "boolean"
+    },
+    "ledger": {
+      "enum": [
+        "off",
+        "inform",
+        "govern"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "task",
+    "acceptance",
+    "budgets",
+    "model",
+    "mode",
+    "memory",
+    "ledger"
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "argv": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "work-contract v1"
+}

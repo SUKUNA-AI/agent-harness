@@ -1,4 +1,4 @@
-# Архитектура Native Agent Harness 1.4.2
+# Архитектура Native Agent Harness 1.5.0
 
 [Индекс](INDEX.md) · [README](../README.md) · [CLI](CLI_REFERENCE_RU.md)
 
@@ -9,6 +9,13 @@ Harness сочетает штатное исполнение Codex с локал
 и БД отсутствуют.
 
 ## 1. Кто исполняет работу
+
+Версия 1.5.0 добавляет foreground control plane `supervisor.py`, транспорт
+`codex_execution.py`, durable `supervisor_store.py` и `strict_yaml.py`.
+Существующие `core.Run` и `runner` остаются механизмом snapshot/evidence/gate.
+Модельный inference остаётся в Codex. Полный FSM и diagram:
+[Execution Supervisor](EXECUTION_SUPERVISOR_RU.md). Ledger/memory/context:
+[Memory](MEMORY_AND_CONTEXT_RU.md); DAG/worktrees: [Dynamic](DYNAMIC_AGENTS_RU.md).
 
 ```mermaid
 flowchart TD
@@ -36,8 +43,7 @@ flowchart TD
 | Language server | Семантику проекта в пределах своей реализации и настроек | Полноту неиндексированного/неподдерживаемого кода |
 | Private files | Состояние run, checkpoints и recovery evidence | Автоматическое продолжение без активного клиента |
 
-CLI не содержит LLM API client и не создаёт Codex agents. `plan next` показывает
-готовые nodes; реальные spawn/follow-up выполняет основной агент.
+CLI не содержит дополнительного LLM API client. `plan next` показывает ready nodes для native orchestration; `work` запускает штатные Codex exec/resume processes, владеет global slots и отдельными worktrees. Модельный runtime остаётся Codex.
 
 ### Связь с исходниками
 

@@ -1,0 +1,149 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "task_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+      "maxLength": 128
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+            "maxLength": 128
+          },
+          "goal": {
+            "type": "string",
+            "maxLength": 16384,
+            "minLength": 1
+          },
+          "role": {
+            "enum": [
+              "owner",
+              "reviewer",
+              "diagnostician",
+              "architect"
+            ]
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "read_scope": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 16384
+            },
+            "maxItems": 128
+          },
+          "write_scope": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 16384
+            },
+            "maxItems": 128
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+              "maxLength": 128
+            },
+            "maxItems": 128
+          },
+          "acceptance_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+              "maxLength": 128
+            },
+            "maxItems": 128,
+            "minItems": 1
+          },
+          "outputs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 16384
+            },
+            "maxItems": 128
+          },
+          "estimated_seconds": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 604800
+          },
+          "max_attempts": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "max_wall_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 604800
+          },
+          "risk": {
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "impact": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "verification": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 16384
+            },
+            "maxItems": 128,
+            "minItems": 1
+          }
+        },
+        "required": [
+          "id",
+          "goal",
+          "role",
+          "read_only",
+          "read_scope",
+          "write_scope",
+          "depends_on",
+          "acceptance_ids",
+          "outputs",
+          "estimated_seconds",
+          "max_attempts",
+          "max_wall_seconds",
+          "risk",
+          "impact",
+          "verification"
+        ]
+      },
+      "maxItems": 64,
+      "minItems": 1
+    }
+  },
+  "required": [
+    "schema_version",
+    "task_id",
+    "tasks"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "agent-plan v1"
+}

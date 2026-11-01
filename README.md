@@ -1,4 +1,92 @@
-# Native Agent Harness 1.4.2
+# Native Agent Harness 1.5.0
+
+Локальное расширение установленного Codex для длительных задач. Модельные заходы
+исполняет штатный `codex exec`; harness управляет процессами, памятью и независимой
+приёмкой. Сервер, daemon, SQLite/vector DB, дополнительный LLM API/key не нужны.
+
+[Новый execution loop](docs/EXECUTION_SUPERVISOR_RU.md) ·
+[Memory/context](docs/MEMORY_AND_CONTEXT_RU.md) ·
+[Managed agents](docs/DYNAMIC_AGENTS_RU.md) ·
+[Migration](docs/STATE_FORMATS_AND_MIGRATION_RU.md) ·
+[Релиз 1.5.0](docs/RELEASE_NOTES_1.5.0.md)
+
+## Новое в 1.5.0
+
+| Возможность | Проверяемый механизм |
+| --- | --- |
+| Полный цикл | `work start`: preflight → Codex edit → freeze → checks → gate |
+| Автоматическое исправление | Компактный failure packet и exact `codex exec resume <ID>` |
+| Восстановление | Strict YAML checkpoints, hash-chained journal, PID + birth identity |
+| Актуальные факты | Ledger inform/advisory govern, version-bound opt-in memory |
+| Ограниченный контекст | Reducer, адресные pointers, явные omissions/stale warnings |
+| Навигация | `repomap related-tests/trace-to-code/change-impact/symbol-context` |
+| Независимые исполнители | DAG/critical path, отдельные worktrees, последовательная интеграция |
+| Технические документы | `harness-doc-author` и независимый `harness-doc-review`, style50 |
+| Поставка | Детерминированный ZIP, hashes и extracted install/verify/rollback smoke |
+
+Успешный выход модели не означает `ACCEPTED`: существующий gate проверяет
+текущий candidate, required checks, toolchain и immutable receipts. Initial edit
+входит в конечный `max_attempts`; restart не увеличивает бюджет. Raw evidence
+хранится вне prompt. Старые JSON Run/installer artifacts остаются читаемыми.
+
+```text
+python tools/harness.py work start --contract /absolute/private/task.yaml --cwd /absolute/project --run-dir /absolute/private/run
+python tools/harness.py work status --run-dir /absolute/private/run --summary
+python tools/harness.py work report --run-dir /absolute/private/run --format yaml
+python tools/harness.py work stop --run-dir /absolute/private/run --reason "pause requested"
+python tools/harness.py work resume --run-dir /absolute/private/run
+```
+
+Замените example paths; для PowerShell используйте Windows paths и `py -3`.
+Полный runnable YAML/tutorial и ожидаемые ответы — в
+[Execution Supervisor](docs/EXECUTION_SUPERVISOR_RU.md). `work watch` наблюдает
+локальное состояние без model calls. После закрытия foreground процесса нужен
+новый `work resume`; автоматическая фоновая работа не обещается.
+
+**Разрешения.** Контракт разрешает конкретные write scopes. Для такой edit phase
+выбирается per-invocation `workspace-write`, без изменения persistent config и
+approvals. Явный пользовательский `sandbox_mode="read-only"` сохраняется и
+блокирует запись. Reviewer получает `read-only`; bypass flags не применяются.
+
+**Два разных лимита.** `agents.max_concurrent_threads_per_session=5` считает
+native children без root. Managed global slots ограничивают пять отдельных
+model sessions, включая planner/reviewer; native recursion в них отключается.
+Concurrency выше одного требует свежего binary/version-bound inventory proof.
+При отсутствии proof используется явный native/single вариант.
+
+Managed-интеграция проходит в отдельном staging worktree; отчёт указывает путь
+принятого candidate и patches. Исходный пользовательский checkout сохраняется.
+Worktree, hashes и cooperating locks не заменяют OS sandbox.
+
+**TOON и измерения.** По умолчанию компактный JSON. `work format-bench` измеряет
+одинаковые задачи и реальный reported usage; `--render --evaluation RECEIPT`
+выбирает TOON лишь при совпадающем положительном A/B. Nested/heterogeneous данные
+и отрицательные/неполные измерения дают fallback. Token budget проверяется на
+границах turns: у harness нет API жёсткой остановки скрытого inference внутри
+turn. Неизвестный usage обозначается unavailable.
+
+**Совместимость.** Python3.11+, vendored PyYAML6.0.3 (MIT), Rust1.90.0 + C toolchain
+для сборки helper. Реальные проверки выполняются с Codex CLI0.166.0-alpha.5.1.
+State/status/memory и fake-Codex проверки работают offline; модельный Codex может
+требовать сеть. Git checkout не включает готовые binaries: нужен проверенный
+bundle или `python tools/build_native.py`. Found version/hash mismatch — отказ.
+
+```text
+python tools/run_tests.py
+python tools/release_check.py
+cargo test --release --manifest-path native/Cargo.toml --locked
+python tools/build_native.py
+python tools/check_native.py
+python tools/build_release.py --output-dir /absolute/release-output
+```
+
+Сборщик требует чистый committed candidate и проверенные bundles. Он сохраняет
+reproducible ZIP + manifest/SHA256SUMS, проверяет распаковку и isolated install,
+reinstall/verify/rollback. Настоящие user config/state/logs в поставку не входят.
+Source-only artifact выбирается явно и не называется готовым native bundle.
+
+## Существующие инструменты и native workflow
+
 
 Локальный комплект для Codex: общие инструкции, координация исполнителей,
 инструменты для больших репозиториев и проверяемое продолжение долгих задач.
@@ -11,7 +99,7 @@
 сам Codex через свои штатные инструменты. Постоянная служба, БД, векторное
 хранилище и отдельный LLM API для базового комплекта не требуются.
 
-Версия **1.4.2** обновляет документацию, рабочие инструкции и релизный пакет.
+Версия **1.5.0** обновляет документацию, рабочие инструкции и релизный пакет.
 Исправления всех R01–R14 из аудита включены в [1.4.1](docs/REVIEW_1_4_1.md).
 Алгоритмы исполнения в этом обновлении сохранены; параметры моделей,
 provider, reasoning, permissions и порог compaction `500000` не меняются.
@@ -23,7 +111,7 @@ provider, reasoning, permissions и порог compaction `500000` не меня
 [Установка и обновление](SETUP_RU.md) · [Вся документация](docs/INDEX.md) ·
 [Архитектура с диаграммами](docs/ARCHITECTURE_RU.md) ·
 [Справочник CLI](docs/CLI_REFERENCE_RU.md) ·
-[Релиз 1.4.2](docs/RELEASE_1_4_2.md) · [История изменений](CHANGELOG.md)
+[Релиз 1.5.0](docs/RELEASE_1_4_2.md) · [История изменений](CHANGELOG.md)
 
 ## Навигация
 
@@ -179,9 +267,7 @@ flowchart TD
     Findings -->|"Нет"| Accept["Актуальные evidence и итоговая приёмка"]
 ```
 
-Основной агент управляет native spawn/follow-up средствами Codex. Python CLI
-проверяет план, формирует briefs и состояние; собственного LLM execution loop
-у него нет. Один writer работает в одном checkout. Обычно полезны два владельца;
+В native mode основной агент управляет spawn/follow-up средствами Codex, а `plan` готовит read-only briefs. В managed mode namespace `work` запускает штатный `codex exec`, сохраняет точный session ID и управляет конечным циклом edit/freeze/check/gate/repair. Один writer работает в одном checkout. Обычно полезны два владельца;
 третий назначается при независимой работе и свободной ёмкости.
 
 Логические направления, активные исполнители и доступные native slots — разные
@@ -471,7 +557,7 @@ Optional MCP smoke выполняется после отдельной уста
 [CI workflow](.github/workflows/check.yml). Проверяйте Actions конкретного commit:
 наличие workflow не подтверждает его успешное выполнение.
 
-Документация 1.4.2 включает проверяемые CLI-примеры и Mermaid-диаграммы.
+Документация 1.5.0 включает проверяемые CLI-примеры и Mermaid-диаграммы.
 Состав ZIP, порядок применения и материалы проверки описаны в
 [релизной заметке](docs/RELEASE_1_4_2.md). Старые отчёты оставлены с исходными
 версиями и измерениями. Новые проценты ускорения, экономии токенов, полнота

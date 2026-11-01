@@ -5,6 +5,12 @@ description: Делегировать независимые части зада
 
 # Протокол делегации
 
+Этот протокол относится к native orchestration основного чата. Для отдельного
+foreground execution loop через установленный Codex используй `work` и
+`{{PACKAGE_ROOT}}/docs/EXECUTION_SUPERVISOR_RU.md`; managed lifecycle и глобальные
+slots описаны в `{{PACKAGE_ROOT}}/docs/DYNAMIC_AGENTS_RU.md`. Не смешивай native
+child cap с числом отдельных managed processes.
+
 Ограниченную самостоятельную задачу выполняй прямо. При полезном разделении
 назначай owners автоматически, обычно 2–3; неделимую работу веди последовательно.
 Root сам готовит plan по `{{PACKAGE_ROOT}}/schemas/orchestration.schema.json`:

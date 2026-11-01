@@ -1,5 +1,23 @@
 # История изменений
 
+## 1.5.0 — 2026-11-01
+
+- Foreground Execution Supervisor с настоящим Codex exec/exact resume,
+  независимым freeze/check/gate, finite repair, stop/recovery и global writer registry.
+- Strict YAML, pinned vendored parser/license/hash, durable journal/checkpoints,
+  backward-compatible JSON receipts и reversible migration.
+- Evidence-bound Ledger, opt-in three-tier memory, context reducer, conservative
+  cache и четыре RepoMap query; real format A/B и automatic JSON/TOON selection.
+- Validated structured DAG/critical path, managed worktrees, глобальные cap5,
+  process birth identity и serial staging integration.
+- Documentation Author/Reviewer, style50, guides/diagrams, reproducible ZIP_STORED
+  и extracted fresh install/verify/reinstall/rollback checks.
+- Установка сохраняет пользовательские model/provider/reasoning/permissions,
+  compaction500000 и явно выбранный native child cap5.
+
+Детали, migration, наблюдаемые ограничения и pilot results:
+[release notes](docs/RELEASE_NOTES_1.5.0.md).
+
 ## 1.4.2 — 2026-11-01
 
 Полная актуализация документации и релизной поставки поверх исправлений R01–R14.

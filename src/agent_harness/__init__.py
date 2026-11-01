@@ -1,3 +1,3 @@
-"""Tools around native agents; this package never invokes an LLM or spawns an agent."""
+"""Local state, verification and foreground supervision of the installed Codex runtime."""
 
-__version__ = "1.4.2"
+__version__ = "1.5.0"

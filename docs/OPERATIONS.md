@@ -1,4 +1,9 @@
-# Эксплуатация managed runs — 1.4.2
+# Эксплуатация managed runs — 1.5.0
+
+Для foreground исполнения Codex используйте новый
+[Execution Supervisor](EXECUTION_SUPERVISOR_RU.md): `work start/status/watch/resume/stop/report`.
+Этот документ сохраняет совместимый ручной API `init/freeze/check/gate`.
+Его JSON receipts не заменяются произвольной YAML-конвертацией.
 
 Короткую самостоятельную задачу выполняйте напрямую. Managed run нужен для
 длительной, делегированной или возобновляемой работы с разрешённым сохранением.

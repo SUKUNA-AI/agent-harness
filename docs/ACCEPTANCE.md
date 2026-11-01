@@ -1,4 +1,11 @@
-# Приёмка и виды доказательств — 1.4.2
+# Приёмка и виды доказательств — 1.5.0
+
+Supervisor применяет тот же gate после завершения model edit phase. Required
+criteria проходят независимо от model exit/status; optional failure остаётся
+failed в отчёте даже при принятом результате. При managed integration command
+cwd и внутренние source paths привязываются к staging candidate. Process identity
+проверяется также по global slots до recovery/fast accepted return. Наличие
+recovery marker блокирует актуальную приёмку до явной сверки.
 
 Универсальный пакет, его подключение к клиенту и результат конкретной задачи
 принимаются отдельно. Этот документ задаёт критерии; фактические результаты

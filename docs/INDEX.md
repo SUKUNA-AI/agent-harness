@@ -1,4 +1,4 @@
-# Документация Native Agent Harness 1.4.2
+# Документация Native Agent Harness 1.5.0
 
 Этот индекс разделяет актуальные инструкции, короткие процедуры для агента и
 снимки прошлых проверок. Начальная точка — [README](../README.md).
@@ -13,6 +13,17 @@
 | [Native bundles](../bin/README.md) | Готовый бинарник, сборка, version/hash mismatch и поддерживаемые платформы |
 
 ## Понять и применять
+
+Новый `work` namespace описан в следующих действующих руководствах:
+
+| Документ | Содержание |
+| --- | --- |
+| [Execution Supervisor](EXECUTION_SUPERVISOR_RU.md) | Start/status/watch/resume/stop/report, exact sessions, bounded repair |
+| [Memory и context](MEMORY_AND_CONTEXT_RU.md) | Ledger inform/govern, provenance, memory, reducer, четыре RepoMap query |
+| [Dynamic agents](DYNAMIC_AGENTS_RU.md) | Native/managed mode, global slots, DAG, staging integration |
+| [State и migration](STATE_FORMATS_AND_MIGRATION_RU.md) | Strict YAML, схемы, journal и сохранение старых JSON |
+| [Performance/eval](PERFORMANCE_EVAL_RU.md) | Реальные usage, A/B, TOON eligibility и insufficient_data |
+| [Источники](SOURCES_AND_EVALS.md) | Перенесённые механизмы и границы научных claims |
 
 | Документ | Содержание |
 | --- | --- |
@@ -44,7 +55,8 @@
 
 ## Релизы, проверки и архив исследования
 
-Текущий релиз: [1.4.2](RELEASE_1_4_2.md). Полная история:
+Текущий candidate: [1.5.0](RELEASE_NOTES_1.5.0.md). Исходная опубликованная
+база: [1.4.2](RELEASE_1_4_2.md). Полная история:
 [CHANGELOG](../CHANGELOG.md).
 
 | Снимок | Что зафиксировано |

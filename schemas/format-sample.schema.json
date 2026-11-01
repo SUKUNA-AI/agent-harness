@@ -47,6 +47,17 @@
         "null"
       ],
       "maxLength": 512
+    },
+    "execution_status": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "error": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 1024
     }
   },
   "required": [

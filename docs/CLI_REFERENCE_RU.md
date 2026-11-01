@@ -1,4 +1,4 @@
-# Справочник CLI — 1.4.2
+# Справочник CLI — 1.5.0
 
 Этот справочник описывает текущие аргументы парсера и значения по умолчанию.
 Практический полный сценарий — [эксплуатация](OPERATIONS.md#полный-локальный-пример),
@@ -10,7 +10,7 @@
 Из корня исходного пакета: `python tools/harness.py <команда>`. Из другого cwd
 укажите полный путь к `tools/harness.py`. После установки Python-пакета доступны
 `agent-harness <команда>` и `python -m agent_harness <команда>`. Это один dispatcher;
-он не запускает агентов и не эмулирует native API клиента.
+`work` запускает установленный Codex как отдельный процесс; остальные namespaces сохраняют прежнюю семантику. Native API клиента не эмулируется.
 
 `--help` доступен у команд и вложенных подкоманд. `--version` печатает версию
 пакета. Аргументы `--run-dir`, `--contract`, `--record` и output paths не имеют
@@ -37,6 +37,55 @@ code. Полный managed JSON обычно форматирован;
 У установочного `verify` exit 1 означает неуспешную verification.
 
 ## Managed run
+
+## Foreground work supervisor
+
+`work` — отдельный namespace; legacy `init/check/gate` ниже сохраняется.
+
+| Команда | Аргументы и действие |
+| --- | --- |
+| `work start` | `--contract F`; `--cwd` default current directory; optional `--run-dir`, `--state-dir`, `--codex`, `--plan`, `--native-disabled-proof`, `--format text\|yaml\|json` |
+| `work status` | `--run-dir P`, optional `--summary`, `--verify-evidence`, `--format` |
+| `work report` | `--run-dir P`, `--format`; сверяет актуальность evidence |
+| `work watch` | `--run-dir P`; interval2s, timeout3600s, без model calls |
+| `work resume` | `--run-dir P`; optional `--repair-journal`, `--new-attempt REASON`, `--codex`; original budgets сохраняются |
+| `work stop` | `--run-dir P`, optional `--reason`; durable request, exact owned process cancellation |
+
+State directory по умолчанию берётся из установленного machine pointer, затем
+platform state path. Новый run по умолчанию получает UUID под `state/runs`.
+Путь global registry сохраняется в state; несовместимый override при resume
+отклоняется. `work start/resume` имеют exit0 только при `ACCEPTED`, exit1 для
+наблюдённого неуспеха, exit2 для parameter/integrity/capability errors. Status
+различает recorded status и актуальную приёмку; stale acceptance не считается
+accepted task в проверенном report.
+
+Contract: [work schema](../schemas/work-contract.schema.json). Defaults:
+max_attempts3 (initial edit включён), managed concurrency1, max_wall_seconds7200,
+turn_timeout_seconds1800, mode native, memory false, ledger inform. Global cap
+managed sessions5; contract может понизить до1. Max tokens проверяется по native
+reported usage на границах turns, не внутри скрытого model runtime.
+
+```text
+python tools/harness.py work ledger --help
+python tools/harness.py work memory --help
+python tools/harness.py work format-bench --input TABLE.yaml --real-codex --repeats 5 --output BENCH.yaml --evidence-dir /absolute/private/eval
+python tools/harness.py work format-bench --input TABLE.yaml --render --evaluation BENCH.yaml
+python tools/harness.py repomap related-tests --root /absolute/repo --target src/auth.py --revision HEAD
+python tools/harness.py repomap trace-to-code --root /absolute/repo --trace-file TRACE.txt --revision HEAD
+python tools/harness.py repomap change-impact --root /absolute/repo --changed src/auth.py --revision HEAD
+python tools/harness.py repomap symbol-context --root /absolute/repo --path src/auth.py --symbol validate_token --revision HEAD
+```
+
+Format bench optional labels: `--model installed`, `--environment-fingerprint`,
+`--output-type table`. Render использует только совпадающий measured positive
+receipt, иначе JSON. Неполное выполнение/environment failure даёт
+insufficient_data с diagnostics, а не утверждение о model quality. `repomap`
+выдаёт bounded results с source hashes/rank/reason/next_page; heuristics не
+гарантируют полноту. Полные recipes и ограничения:
+[execution](EXECUTION_SUPERVISOR_RU.md), [memory](MEMORY_AND_CONTEXT_RU.md),
+[dynamic](DYNAMIC_AGENTS_RU.md), [eval](PERFORMANCE_EVAL_RU.md).
+
+## Совместимый Run API
 
 | Команда | Обязательные и дополнительные аргументы | Результат и запись |
 | --- | --- | --- |

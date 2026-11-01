@@ -116,6 +116,17 @@ def _read_stream(source, name, target, inbox):
         inbox.put(("eof", name))
 
 
+def configured_settings():
+    """Safe file projection, explicitly distinct from effective session config."""
+    import tomllib
+    path = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "config.toml"
+    if not path.exists():
+        return {}
+    value = tomllib.loads(read_regular_file(path, max_bytes=2 * 1024 * 1024).decode("utf-8-sig"))
+    keys = ("model", "model_provider", "model_reasoning_effort", "service_tier", "sandbox_mode", "approval_policy")
+    return {key: value[key] for key in keys if key in value and isinstance(value[key], (str, bool, int))}
+
+
 class CodexAdapter:
     def __init__(self, executable=("codex",)):
         if isinstance(executable, (str, Path)):
@@ -139,12 +150,12 @@ class CodexAdapter:
                 values[name] = output
             except (OSError, subprocess.TimeoutExpired, HarnessError) as error:
                 return {"status": "unavailable", "reason": type(error).__name__, "native_children_disabled": False}
-        return {"status": "observed", "version": values["version"].strip(), "binary_sha256": _binary_hash(self.executable[0]), "json": "--json" in values["exec"], "resume": "SESSION_ID" in values["resume"], "output_schema": "--output-schema" in values["exec"], "resume_output_schema": "--output-schema" in values["resume"], "native_children_disabled": False, "suppression_proof": "Separate observed tool inventory bound to this binary/version is required"}
+        return {"status": "observed", "version": values["version"].strip(), "binary_sha256": _binary_hash(self.executable[0]), "json": "--json" in values["exec"], "resume": "SESSION_ID" in values["resume"], "output_schema": "--output-schema" in values["exec"], "resume_output_schema": "--output-schema" in values["resume"], "configured_settings": configured_settings(), "native_children_disabled": False, "suppression_proof": "Separate observed tool inventory bound to this binary/version is required"}
 
-    def argv(self, prompt, *, session_id=None, output_schema=None, native_children=False, read_only=False):
+    def argv(self, prompt, *, session_id=None, output_schema=None, native_children=False, read_only=False, write_authorized=False, allow_non_git=False):
         if not isinstance(prompt, str) or not prompt or len(prompt.encode("utf-8")) > MAX_PROMPT_BYTES or "\x00" in prompt:
             raise HarnessError("Prompt must be nonempty and within the explicit byte budget; chunk it without discarding requirements")
-        if type(native_children) is not bool or type(read_only) is not bool:
+        if any(type(value) is not bool for value in (native_children, read_only, write_authorized, allow_non_git)):
             raise HarnessError("Agent mode flags must be booleans")
         if session_id is not None and (not isinstance(session_id, str) or not SESSION.fullmatch(session_id)):
             raise HarnessError("An exact safe session ID is required; --last is forbidden")
@@ -153,10 +164,23 @@ class CodexAdapter:
             argv += ["-c", "agents.enabled=false", "-c", "features.multi_agent_v2=false"]
         if read_only:
             argv += ["-c", 'sandbox_mode="read-only"']
+        elif write_authorized:
+            import tomllib
+            config_path = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "config.toml"
+            configured = None
+            if config_path.exists():
+                configured = tomllib.loads(read_regular_file(config_path, max_bytes=2 * 1024 * 1024).decode("utf-8-sig")).get("sandbox_mode")
+            if configured not in {None, "workspace-write", "danger-full-access"}:
+                raise HarnessError("Permission denied: explicit installed sandbox setting prohibits task writes; no automatic override")
+            # Authorized contract edits get a bounded workspace. This changes no
+            # persistent setting or approvals, and never overrides explicit read-only.
+            argv += ["-c", 'sandbox_mode="workspace-write"']
         argv += ["exec"]
         if session_id is not None:
             argv += ["resume", session_id]
         argv += ["--json"]
+        if allow_non_git:
+            argv += ["--skip-git-repo-check"]
         if output_schema is not None:
             path = Path(output_schema)
             read_regular_file(path, max_bytes=2 * 1024 * 1024)
@@ -166,13 +190,14 @@ class CodexAdapter:
             raise HarnessError("Windows argv budget exceeded; use a smaller referenced context packet")
         return argv
 
-    def run(self, prompt, *, cwd, session_id=None, timeout=600, cancel_file=None, on_process=None, on_event=None, output_schema=None, native_children=False, read_only=False, log_dir=None):
+    def run(self, prompt, *, cwd, session_id=None, timeout=600, cancel_file=None, on_process=None, on_event=None, output_schema=None, native_children=False, read_only=False, log_dir=None, deadline=None, write_authorized=False, allow_non_git=False):
         if type(timeout) not in (int, float) or not 0 < timeout <= 86400:
             raise HarnessError("Codex turn timeout must be finite and between 0 and 86400 seconds")
         cwd = Path(cwd)
         if not cwd.is_absolute() or not cwd.is_dir():
             raise HarnessError("Codex cwd must be an existing absolute directory")
-        argv = self.argv(prompt, session_id=session_id, output_schema=output_schema, native_children=native_children, read_only=read_only)
+        argv = self.argv(prompt, session_id=session_id, output_schema=output_schema, native_children=native_children, read_only=read_only,
+                         write_authorized=write_authorized, allow_non_git=allow_non_git)
         log_dir = Path(log_dir) if log_dir else Path(tempfile.mkdtemp(prefix="harness-codex-"))
         _mkdir(log_dir)
         _parents(log_dir)
@@ -234,7 +259,7 @@ class CodexAdapter:
                 elif event_type in {"error", "turn.failed"}:
                     result["error"] = sanitized(payload.get("message") or payload.get("error") or "Codex turn failed")
                     fatal, terminal = True, "failed"
-                elif not turn_started:
+                elif not turn_started and not (event_type == "item.completed" and isinstance(payload.get("item"), dict) and payload["item"].get("type") == "error"):
                     result["error"], fatal = "Item event before turn.started", True
                 if event_type == "item.completed" and isinstance(payload.get("item"), dict) and payload["item"].get("type") in {"command_execution", "mcp_tool_call", "web_search", "file_change"}:
                     result["observable_tool_calls"] += 1
@@ -247,6 +272,13 @@ class CodexAdapter:
                     result["status"], result["error"] = "cancelled", "Cancelled before process start"
                     result["outcome_known"] = True
                     return result
+                if deadline is not None:
+                    from datetime import datetime, timezone
+                    remaining = (datetime.fromisoformat(deadline.replace("Z", "+00:00")) - datetime.now(timezone.utc)).total_seconds()
+                    if remaining <= 0:
+                        result.update(status="timed_out", error="Absolute task deadline expired before process start", outcome_known=True)
+                        return result
+                    timeout = min(timeout, remaining)
                 process, job = _start_contained(argv, str(cwd))
                 identity = process_identity(process.pid)
                 result["process"] = {"identity": identity, "tree_control": "windows_suspended_job_kill_on_close" if os.name == "nt" else "private_process_group", "started_at": now(), "cwd": str(cwd), "argv_digest": hashlib.sha256(json.dumps(argv, ensure_ascii=False).encode("utf-8")).hexdigest()}
@@ -325,6 +357,8 @@ class CodexAdapter:
                     if stream and not stream.closed:
                         stream.close()
             result["elapsed_seconds"] = time.monotonic() - started
+            result["turn_started"] = turn_started
+            result["turn_completed"] = completed and not fatal
             result["finished_at"] = now()
             result["log_sha256"] = {name: hashlib.sha256(read_regular_file(path, max_bytes=MAX_LOG_BYTES * 2)).hexdigest() for name, path in (("stdout", stdout_path), ("stderr", stderr_path)) if path.exists()}
         return result

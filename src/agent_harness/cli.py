@@ -16,6 +16,12 @@ def main(argv=None):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "work":
+        from .work_cli import dispatch
+        return dispatch(argv[1:])
+    if argv and argv[0] == "repomap":
+        from .repomap_queries import dispatch
+        return dispatch(argv[1:])
     if argv and argv[0] in INSTALL_COMMANDS:
         from .installation import dispatch
         return dispatch(argv[0], argv[1:])
@@ -34,6 +40,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Native Codex harness: state and verification, never a second agent engine")
     parser.add_argument("--version", action="version", version=__version__)
     commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("work", help="Foreground execution supervisor; use work --help")
+    commands.add_parser("repomap", help="Version-bound code/test navigation; use repomap --help")
     commands.add_parser("plan", help="Read-only orchestration helpers; use plan --help")
     commands.add_parser("context", help="Bounded local source packets; use context --help")
     commands.add_parser("code", help="On-demand local symbols, references and rename; use code --help")

@@ -1,0 +1,468 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "run_id": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "task_id": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "status": {
+      "enum": [
+        "ACCEPTED",
+        "BLOCKED_AMBIGUOUS",
+        "BLOCKED_APPROVAL",
+        "BLOCKED_ENVIRONMENT",
+        "CANCELLED",
+        "CANCEL_REQUESTED",
+        "EXECUTING",
+        "FAILED_REPAIRABLE",
+        "FAILED_TERMINAL",
+        "FREEZING",
+        "NEW",
+        "NO_PROGRESS",
+        "PASS",
+        "PLANNING",
+        "PREFLIGHT",
+        "RECOVERY_REQUIRED",
+        "REPAIRING",
+        "TIMED_OUT",
+        "UNKNOWN_OUTCOME",
+        "VERIFYING"
+      ]
+    },
+    "reason": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "cwd": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "source_cwd": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "revision": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "baseline_digest": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "contract_digest": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "started_at": {
+      "type": "string",
+      "maxLength": 16384,
+      "format": "utc"
+    },
+    "updated_at": {
+      "type": "string",
+      "maxLength": 16384,
+      "format": "utc"
+    },
+    "last_progress_at": {
+      "type": "string",
+      "maxLength": 16384,
+      "format": "utc"
+    },
+    "deadline": {
+      "type": "string",
+      "maxLength": 16384,
+      "format": "utc"
+    },
+    "attempts_used": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "max_attempts": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100
+    },
+    "thread_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "process_identity": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "pid": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "created": {
+          "type": "string",
+          "maxLength": 16384
+        }
+      },
+      "required": [
+        "pid",
+        "created"
+      ]
+    },
+    "process_status": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "core_run": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "candidate_digest": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "failure_history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "type": "string",
+            "maxLength": 16384
+          },
+          "signature": {
+            "type": "string",
+            "maxLength": 16384
+          },
+          "repairable": {
+            "type": "boolean"
+          },
+          "detail": {
+            "type": "string",
+            "maxLength": 16384
+          },
+          "snapshot_id": {
+            "type": "string",
+            "maxLength": 16384
+          },
+          "attempt": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "category",
+          "signature",
+          "repairable",
+          "detail",
+          "snapshot_id",
+          "attempt"
+        ]
+      },
+      "maxItems": 100
+    },
+    "current_failure": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "signature": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "repairable": {
+          "type": "boolean"
+        },
+        "detail": {
+          "type": "string",
+          "maxLength": 16384
+        }
+      },
+      "required": [
+        "category",
+        "signature",
+        "repairable",
+        "detail"
+      ]
+    },
+    "acceptance": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 16384
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "passed",
+              "failed",
+              "stale",
+              "not_applicable",
+              "blocked"
+            ]
+          },
+          "evidence_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 16384
+          }
+        },
+        "required": [
+          "id",
+          "required",
+          "status",
+          "evidence_id"
+        ]
+      },
+      "maxItems": 128
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "model_turns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "repair_attempts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "managed_spawns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observable_codex_tool_calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "controlled_tool_calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duplicate_tool_calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fresh_revalidations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stale_memory_prevented": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "manual_interventions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recoveries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recovery_successes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cache_hits_informational": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cache_hits_checks": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "integration_conflicts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "input_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "output_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "reported_usage_turns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "missing_usage_turns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "spawn_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "integration_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "model_invocations": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "model_turns",
+        "repair_attempts",
+        "managed_spawns",
+        "observable_codex_tool_calls",
+        "controlled_tool_calls",
+        "duplicate_tool_calls",
+        "fresh_revalidations",
+        "stale_memory_prevented",
+        "manual_interventions",
+        "recoveries",
+        "recovery_successes",
+        "cache_hits_informational",
+        "cache_hits_checks",
+        "integration_conflicts",
+        "input_tokens",
+        "output_tokens",
+        "reported_usage_turns",
+        "missing_usage_turns",
+        "spawn_seconds",
+        "integration_seconds"
+      ]
+    },
+    "agents": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 16384
+      },
+      "maxItems": 64
+    },
+    "plan_path": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "integration_worktree": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "harness_version": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "platform": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "python": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "codex_version": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "model_profile": {
+          "type": "string",
+          "maxLength": 16384
+        }
+      },
+      "required": [
+        "harness_version",
+        "platform",
+        "python",
+        "codex_version",
+        "model_profile"
+      ]
+    },
+    "state_dir": {
+      "type": "string",
+      "maxLength": 16384
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "task_id",
+    "status",
+    "reason",
+    "cwd",
+    "source_cwd",
+    "revision",
+    "baseline_digest",
+    "contract_digest",
+    "generation",
+    "started_at",
+    "updated_at",
+    "last_progress_at",
+    "deadline",
+    "attempts_used",
+    "max_attempts",
+    "thread_id",
+    "process_identity",
+    "process_status",
+    "core_run",
+    "candidate_digest",
+    "failure_history",
+    "current_failure",
+    "acceptance",
+    "metrics",
+    "agents",
+    "plan_path",
+    "integration_worktree",
+    "environment",
+    "state_dir"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Supervisor state v1"
+}

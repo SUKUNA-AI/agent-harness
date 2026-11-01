@@ -1,0 +1,188 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "role": {
+      "enum": [
+        "owner",
+        "reviewer",
+        "architect",
+        "diagnostician"
+      ]
+    },
+    "task_contract_digest": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "worktree": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "path": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "base_revision": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "branch": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "ownership_token": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "created_at": {
+          "type": "string",
+          "maxLength": 16384,
+          "format": "utc"
+        }
+      },
+      "required": [
+        "schema_version",
+        "id",
+        "path",
+        "base_revision",
+        "branch",
+        "role",
+        "ownership_token",
+        "created_at"
+      ]
+    },
+    "thread_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "process_identity": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "pid": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "created": {
+          "type": "string",
+          "maxLength": 16384
+        }
+      },
+      "required": [
+        "pid",
+        "created"
+      ]
+    },
+    "status": {
+      "enum": [
+        "spawned",
+        "running",
+        "ready_for_review",
+        "verified",
+        "integrated",
+        "stopped",
+        "timed_out",
+        "cancelled",
+        "blocked",
+        "unknown_outcome",
+        "failed"
+      ]
+    },
+    "started_at": {
+      "type": "string",
+      "maxLength": 16384,
+      "format": "utc"
+    },
+    "last_progress_at": {
+      "type": "string",
+      "maxLength": 16384,
+      "format": "utc"
+    },
+    "allowed_write_scope": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 16384
+      },
+      "maxItems": 128
+    },
+    "read_only": {
+      "type": "boolean"
+    },
+    "deadline": {
+      "type": "string",
+      "maxLength": 16384,
+      "format": "utc"
+    },
+    "max_attempts": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "attempts_used": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "stdout_offset": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "stderr_offset": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "checkpoint": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "spawn_reason": {
+      "type": "string",
+      "maxLength": 16384
+    }
+  },
+  "required": [
+    "schema_version",
+    "id",
+    "role",
+    "task_contract_digest",
+    "worktree",
+    "thread_id",
+    "process_identity",
+    "status",
+    "started_at",
+    "last_progress_at",
+    "allowed_write_scope",
+    "read_only",
+    "deadline",
+    "max_attempts",
+    "attempts_used",
+    "stdout_offset",
+    "stderr_offset",
+    "checkpoint",
+    "spawn_reason"
+  ]
+}

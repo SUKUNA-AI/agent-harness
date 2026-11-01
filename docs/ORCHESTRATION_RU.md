@@ -1,8 +1,14 @@
-# Автоматическая координация native Codex — 1.4.2
+# Автоматическая координация native Codex — 1.5.0
 
 Ограниченную самостоятельную задачу root выполняет напрямую. Полезные независимые части автоматически делегируются, обычно двум owners; третий нужен при независимой части и ёмкости. Последовательный план может иметь одного owner. Неделимая работа, меньшая ёмкость или недоступный native tool дают честный последовательный путь без повторного согласования уже разрешённой работы.
 
-Пользователь не заполняет JSON. Root готовит контракт и добавочный план по [схеме](../schemas/orchestration.schema.json), выбирает workflows/skills и сам управляет native tools. Python только проверяет план и печатает рекомендации. Он не запускает LLM, agents, Git mutation, install, внешние запросы или acceptance gate.
+В native workflow пользователь не заполняет JSON. Root готовит контракт и
+добавочный план по [схеме](../schemas/orchestration.schema.json), выбирает skills
+и управляет native tools. Команды `plan` только проверяют и рекомендуют.
+Отдельный `work` namespace 1.5.0 запускает штатный Codex, валидирует structured
+plan, управляет глобальными model slots и изолированными worktrees; он использует
+существующий acceptance gate. Эти два режима не объединяют рекурсивные деревья.
+Полный managed lifecycle: [Dynamic agents](DYNAMIC_AGENTS_RU.md).
 
 Флаги/exit codes собраны в [CLI reference](CLI_REFERENCE_RU.md#planning-helpers);
 рабочий managed run и различие freshness/recovery — в [эксплуатации](OPERATIONS.md).

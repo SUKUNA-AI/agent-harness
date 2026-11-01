@@ -1,0 +1,3 @@
+recursive-include schemas *.json
+include src/agent_harness/_vendor/pyyaml-manifest.json
+include src/agent_harness/_vendor/yaml/LICENSE

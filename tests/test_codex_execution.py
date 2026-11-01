@@ -29,6 +29,7 @@ if mode=='partial':
     sys.stdout.write('{"type":"thread.started","thread_id":"'+session+'"}');sys.stdout.flush();sys.exit(0)
 event('thread.started',thread_id=session)
 if mode=='no-turn':sys.exit(0)
+if mode=='early-warning':event('item.completed',item={'type':'error','message':'Under-development features enabled: local_thread_store_compression'})
 event('turn.started')
 if mode=='duplicate':event('thread.started',thread_id=session)
 if mode=='timeout':
@@ -180,6 +181,18 @@ class CodexExecutionTests(unittest.TestCase):
         self.assertNotIn("--worktree", argv)
         self.assertNotIn("--last", argv)
         self.assertFalse(any("danger" in x or x == "--yolo" for x in argv))
+
+    def test_observed_pre_turn_diagnostic_is_preserved_without_weakening_terminal_checks(self):
+        result = self.run_fake("early-warning")
+        self.assertEqual(result["status"], "completed", result)
+        self.assertIn("Under-development features enabled", Path(result["logs"]["stdout"]).read_text())
+
+    def test_expired_absolute_deadline_prevents_process_creation(self):
+        created = []
+        result = self.run_fake("edit", deadline="2000-01-01T00:00:00+00:00", on_process=created.append)
+        self.assertEqual(result["status"], "timed_out", result)
+        self.assertEqual(created, [])
+        self.assertFalse((self.cwd / "result.txt").exists())
 
 
 if __name__ == "__main__":
