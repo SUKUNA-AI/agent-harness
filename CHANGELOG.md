@@ -1,6 +1,6 @@
 # История изменений
 
-## 1.5.0 — 2026-11-01
+## 1.5.0 — 2026-11-02
 
 - Foreground Execution Supervisor с настоящим Codex exec/exact resume,
   независимым freeze/check/gate, finite repair, stop/recovery и global writer registry.

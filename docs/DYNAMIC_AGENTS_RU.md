@@ -110,5 +110,10 @@ Timeout/cancel сначала запрашивает мягкое заверше
 прежде чем разрешить новый writer. Финальные combined-test repairs выполняет
 integration owner в прежнем staging cwd через exact session resume.
 
+Планировщик сохраняет process identity и usage до перехода к workers.
+При заданном token budget восстановление interrupted wave блокируется,
+если полные usage receipts не были сохранены: restart не обнуляет расход.
+Обычное восстановление без token cap сохраняет прежние attempts и deadline.
+
 Сравнение single/2/3/5 требует одинаковых задач и учёта planner/spawn/merge/check
 costs. До таких измерений дополнительная параллельность не означает ускорение.

@@ -527,6 +527,9 @@ class Supervisor:
                 self.transition("RECOVERY_REQUIRED", "owned process is absent; independent verification precedes retry")
             self._core().resume()
             if self.contract["mode"] == "managed" and (unfinished_agents or self.state["integration_worktree"] is None):
+                if unfinished_agents and self.contract["budgets"].get("max_tokens") is not None:
+                    self.transition("BLOCKED_ENVIRONMENT", "Interrupted managed wave has no complete persisted usage receipts; original token budget cannot be verified")
+                    return self._loop()
                 self.native_disabled_proof = native_disabled_proof
                 from .managed_execution import execute_managed
                 return execute_managed(self, recovering=True)

@@ -107,6 +107,41 @@ class ManagedSchedulingTests(unittest.TestCase):
         with self.assertRaisesRegex(HarnessError, "suppression proof"):
             validate_suppression(None, {"version": "unproven", "binary_sha256": "x"})
 
+    def test_interrupted_wave_cannot_reset_a_configured_token_budget(self):
+        from unittest.mock import patch
+        from agent_harness.agent_lifecycle import Worktrees
+        class FakeManaged(CodexAdapter):
+            def capabilities(self):
+                return {**super().capabilities(), "native_children_disabled": True}
+        class ControllerCrash(BaseException):
+            pass
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "source"
+            source.mkdir()
+            for name in ("left", "right"):
+                (source / (name + ".py")).write_text("VALUE = 0\n")
+            for args in (["init"], ["add", "."], ["-c", "user.name=Fixture", "-c", "user.email=fixture@localhost", "commit", "-m", "fixture"]):
+                subprocess.run(["git", *args], cwd=source, check=True, capture_output=True)
+            fake = root / "fake.py"
+            fake.write_text(FAKE)
+            contract = deepcopy(self.contract)
+            contract["budgets"]["max_tokens"] = 10000
+            task, plan = root / "task.yaml", root / "plan.yaml"
+            dump(task, contract); dump(plan, self.plan)
+            adapter = FakeManaged((sys.executable, str(fake)))
+            supervisor = Supervisor.create(task, run_dir=root / "private" / "run", cwd=source,
+                state_dir=root / "state", adapter=adapter)
+            supervisor.plan_input = str(plan)
+            with patch.object(Worktrees, "integrate", side_effect=ControllerCrash):
+                with self.assertRaises(ControllerCrash):
+                    supervisor.start()
+            calls = fake.with_suffix(".calls").read_bytes()
+            result = Supervisor(supervisor.path, adapter=adapter).resume()
+            self.assertEqual(result["status"], "BLOCKED_ENVIRONMENT")
+            self.assertIn("usage receipts", result["reason"])
+            self.assertEqual(fake.with_suffix(".calls").read_bytes(), calls)
+
     def test_acceptance_cwd_and_internal_paths_are_rebased_to_staging(self):
         from agent_harness.work_contract import legacy_contract
         with tempfile.TemporaryDirectory() as temp:

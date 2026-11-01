@@ -79,12 +79,20 @@ def _plan(supervisor, capabilities):
                   json.dumps(supervisor.contract, ensure_ascii=False))
         with GlobalSlots(supervisor.state_dir).acquire(supervisor.state["run_id"], "planner", "architect",
                 cancel_file=supervisor.path / "cancel.yaml", timeout=min(60, supervisor.remaining())) as slot:
+            def planner_process(value):
+                slot.bind(value)
+                supervisor.state["process_identity"] = value["identity"]
+                supervisor.state["process_status"] = "running"
+                supervisor._save("structured planner process bound before waiting")
             result = supervisor._adapter().run(prompt, cwd=supervisor.state["cwd"],
                 timeout=min(supervisor.remaining(), 300), deadline=supervisor.state["deadline"], read_only=True, native_children=False,
-                output_schema=str(schema_path), log_dir=supervisor.path / "planner", on_process=slot.bind,
+                output_schema=str(schema_path), log_dir=supervisor.path / "planner", on_process=planner_process,
                 cancel_file=supervisor.path / "cancel.yaml")
             slot.complete()
         telemetry.observe(supervisor.state["metrics"], result)
+        supervisor.state["process_identity"] = None
+        supervisor.state["process_status"] = result["status"]
+        supervisor._save("structured planner outcome and usage recorded")
         if not supervisor._model_budget_ok():
             raise HarnessError("Planner exhausted or could not verify original token budget")
         if result["status"] != "completed":
@@ -106,6 +114,8 @@ def _plan(supervisor, capabilities):
 
 def execute_managed(supervisor, *, recovering=False):
     contract, state = supervisor.contract, supervisor.state
+    if not supervisor._model_budget_ok(for_spawn=True):
+        return supervisor._loop()
     capabilities = supervisor._adapter().capabilities()
     if contract["budgets"]["max_concurrent_managed_agents"] > 1:
         try:
@@ -226,6 +236,8 @@ def execute_managed(supervisor, *, recovering=False):
         return result, time.monotonic() - start, agent
 
     while len(completed) < len(scheduler.nodes):
+        if not supervisor._model_budget_ok(for_spawn=True):
+            return supervisor._loop()
         wave = scheduler.next(completed)
         supervisor.store.write("plans/last-wave.yaml", {"schema_version": 1, **wave},
                                {"type": "object", "additionalProperties": True})
