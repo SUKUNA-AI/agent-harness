@@ -4,6 +4,7 @@ import io
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -104,7 +105,7 @@ class SourcePacketTests(unittest.TestCase):
     def test_json_escaping_cannot_create_an_unreadable_packet(self):
         names = [f"source-{index}.py" for index in range(4)]
         for name in names:
-            (self.root / name).write_text("#" + "\x01" * 262142 + "\n", encoding="utf-8")
+            (self.root / name).write_bytes(b"#" + b"\x01" * 262142 + b"\n")
         with self.assertRaisesRegex(HarnessError, "Serialized packet"):
             make_packet(self.root, names, max_file_bytes=262144, max_bytes=1048576)
 
@@ -131,6 +132,31 @@ class SourcePacketTests(unittest.TestCase):
 
         with patch.object(context, "_read", side_effect=swap), self.assertRaises(HarnessError):
             make_packet(self.root, ["sub/module.py"])
+
+    def test_stat_and_fstat_ctime_domains_can_differ_without_disabling_change_checks(self):
+        import agent_harness.context as context
+        original = context.os.fstat
+
+        def changed_domain(fd):
+            value = original(fd)
+            fields = {name: getattr(value, name) for name in ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")}
+            fields["st_ctime_ns"] += 10000000
+            return SimpleNamespace(**fields)
+
+        with patch.object(context.os, "fstat", side_effect=changed_domain):
+            packet = make_packet(self.root, ["main.py"])
+            self.assertEqual("current", verify_packet(self.root, packet)["status"])
+        calls = 0
+
+        def changing_fd(fd):
+            nonlocal calls
+            calls += 1
+            value = changed_domain(fd)
+            value.st_ctime_ns += calls
+            return value
+
+        with patch.object(context.os, "fstat", side_effect=changing_fd), self.assertRaisesRegex(HarnessError, "Source changed"):
+            make_packet(self.root, ["main.py"])
 
 
 if __name__ == "__main__":

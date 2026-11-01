@@ -48,7 +48,7 @@ POSIX reads привязаны к directory descriptors с no-follow на каж
 
 ## Проверки
 
-- Полный `python tools/run_tests.py`: **259 tests, OK, 3 platform-specific skips**
+- Полный `python tools/run_tests.py`: **260 tests, OK, 3 platform-specific skips**
   в Linux / Python 3.12.14. Это unit/integration/regression coverage, не LLM eval.
 - `python tools/release_check.py`: portable files, metadata, links и 6 skills.
 - `git diff --check`: passed.
@@ -57,6 +57,14 @@ POSIX reads привязаны к directory descriptors с no-follow на каж
 - GitHub Actions выполняет Ubuntu/Windows × Python 3.11/3.13, включая отдельный
   MCP smoke. Результат конкретного commit проверяется в Actions; этот локальный
   отчёт не подменяет Windows/native runtime qualification.
+
+Первый Windows CI обнаружил две portability проблемы нового context packet:
+точный byte-size fixture зависел от CRLF translation, а CPython 3.12+ использует
+разный смысл `st_ctime` в path stat и descriptor fstat. Fixture теперь пишет bytes;
+ctime сравнивается отдельно внутри каждого API, а cross-API проверка сохраняет
+dev/ino/size/mtime. Проверки изменения файла не отключены. Добавлена regression
+на несовпадающие ctime domains и изменение descriptor ctime во время чтения.
+Основание: [CPython issue 157671](https://github.com/python/cpython/issues/157671).
 
 ## Измерение локальной накладной работы
 

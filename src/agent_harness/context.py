@@ -50,8 +50,12 @@ def _path(root, value):
     return path
 
 
-def _stamp(value):
-    return (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+def _stamp(value, *, cross_api=False):
+    fields = (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns)
+    # Windows CPython can expose birth time through stat().st_ctime and change
+    # time through fstat().st_ctime. Keep ctime checks within the same API.
+    # https://github.com/python/cpython/issues/157671
+    return fields if cross_api else (*fields, value.st_ctime_ns)
 
 
 @contextmanager
@@ -88,12 +92,15 @@ def _read(path, limit, *, root, name):
         return None, before.st_size
     with _open_source(root, name) as source:
         opened = os.fstat(source.fileno())
-        if _stamp(before) != _stamp(opened):
+        if _stamp(before, cross_api=True) != _stamp(opened, cross_api=True):
             raise HarnessError("Source changed before packet read")
         data = source.read(limit + 1)
         after = os.fstat(source.fileno())
     _path(root, name)
-    if len(data) > limit or _stamp(before) != _stamp(opened) or _stamp(opened) != _stamp(after) or _stamp(after) != _stamp(path.stat()):
+    last = path.stat()
+    if (len(data) > limit or _stamp(opened) != _stamp(after)
+            or _stamp(before) != _stamp(last)
+            or _stamp(after, cross_api=True) != _stamp(last, cross_api=True)):
         raise HarnessError("Source changed while reading packet; retry from current inputs")
     return data, len(data)
 
