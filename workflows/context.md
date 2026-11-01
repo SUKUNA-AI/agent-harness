@@ -8,6 +8,25 @@
 статус, exit code, число ошибок, нужные строки и ссылку на полный файл. Обрезанный
 вывод помечай как excerpt; отсутствие ошибки в нём не означает успешную проверку.
 
+Если для незнакомого проекта нужны определения и связи файлов:
+
+```text
+agent-harness context map --root <project> --query <task-or-symbol> --max-bytes 8192
+agent-harness context map --root <project> --focus-file <relative-file> --query <task>
+```
+
+Rust/Tree-sitter карта возвращает ranked symbols, строки, hashes и соседние файлы.
+Граф строится в памяти, БД/daemon нет. Проверяй `scan.partial` и revision scope:
+лимит сканирования не означает полноту репозитория. Focus files читаются раньше
+лимита. Карта содержит синтаксические name links; точные references/rename:
+`agent-harness code references|rename --help`. Локальный LSP запускается на один
+запрос. `code rename --output <private-state>/rename.json` сохраняет полный план;
+`code apply --root <project> --plan <file>` сверяет hashes до записи. При отсутствии
+language server `code doctor` показывает доступные инструменты. Не заменяй
+semantic rename массовой строковой подстановкой на основании одной карты.
+После apply выполни затронутую проверку проекта: компиляцию/тест или реальный
+сценарий. LSP response не является готовым acceptance gate.
+
 Для исходника или уже сохранённого журнала:
 
 ```text

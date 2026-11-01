@@ -6,6 +6,18 @@
 библиотеку; устанавливать сервер, БД или дополнительные Python-пакеты не нужно.
 Отдельные плагины и коннекторы необязательны и автоматически не подключаются.
 
+Native-архив 1.4 включает готовые `harness-native` для Linux x86_64 и Windows
+x86_64. Они ускоряют scanner/snapshot и выполняют RepoMap; compiler при работе
+не нужен. ZIP исходников, который GitHub создаёт кнопкой Download ZIP, не содержит
+бинарников: их можно собрать `python tools/build_native.py` с Rust 1.90.0 и C
+toolchain. `python tools/harness.py native status` показывает, что действительно
+выбрано. Без native helper обычные snapshots остаются доступны на Python.
+
+Для semantic symbols/references/rename используется локальный language server
+нужного языка. `python tools/harness.py code doctor` проверяет доступность без
+запуска серверов. LSP child работает только на время одной команды, затем
+закрывается. БД, daemon и отдельный MCP для этих возможностей не нужны.
+
 ## Самый простой способ
 
 Скачайте полный ZIP из приватного GitHub либо клонируйте репозиторий в постоянный

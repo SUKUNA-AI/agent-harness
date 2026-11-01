@@ -1,0 +1,37 @@
+{
+  "reason": "Notices missing from the published crate archives; pins from .cargo_vcs_info.json",
+  "sources": [
+    {
+      "repo": "tree-sitter/tree-sitter",
+      "ref": "da6fe9beb4f7f67beb75914ca8e0d48ae48d6406",
+      "label": "tree-sitter-0.25.10",
+      "path": "native/third_party/tree-sitter-0.25.10/LICENSE",
+      "url": "https://github.com/tree-sitter/tree-sitter/blob/da6fe9beb4f7f67beb75914ca8e0d48ae48d6406/LICENSE",
+      "blob": "451fe1d26ee6043ac94f6c8a81a6143f17748b4d"
+    },
+    {
+      "repo": "tree-sitter/tree-sitter-cpp",
+      "ref": "f41e1a044c8a84ea9fa8577fdd2eab92ec96de02",
+      "label": "tree-sitter-cpp-0.23.4",
+      "path": "native/third_party/tree-sitter-cpp-0.23.4/LICENSE",
+      "url": "https://github.com/tree-sitter/tree-sitter-cpp/blob/f41e1a044c8a84ea9fa8577fdd2eab92ec96de02/LICENSE",
+      "blob": "4b52d191cead337b11e274b79459a86f1b5a7779"
+    },
+    {
+      "repo": "tree-sitter/tree-sitter-rust",
+      "ref": "18b0515fca567f5a10aee9978c6d2640e878671a",
+      "label": "tree-sitter-rust-0.24.0",
+      "path": "native/third_party/tree-sitter-rust-0.24.0/LICENSE",
+      "url": "https://github.com/tree-sitter/tree-sitter-rust/blob/18b0515fca567f5a10aee9978c6d2640e878671a/LICENSE",
+      "blob": "ceaf3c9adca54f7d3242593dd4db8065b1611699"
+    },
+    {
+      "repo": "tree-sitter/tree-sitter-typescript",
+      "ref": "f975a621f4e7f532fe322e13c4f79495e0a7b2e7",
+      "label": "tree-sitter-typescript-0.23.2",
+      "path": "native/third_party/tree-sitter-typescript-0.23.2/LICENSE",
+      "url": "https://github.com/tree-sitter/tree-sitter-typescript/blob/f975a621f4e7f532fe322e13c4f79495e0a7b2e7/LICENSE",
+      "blob": "aa9f858db5722d9576104726471b11cc0e31f131"
+    }
+  ]
+}

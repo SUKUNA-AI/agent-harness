@@ -1,11 +1,15 @@
 # Интеграции
 
-Ядро работает на Python stdlib без аккаунтов, API keys, MCP и фоновых сервисов.
+Управляющий слой работает на Python stdlib; scanner/snapshot и RepoMap — на
+bundled Rust helper, с Python fallback для snapshots при отсутствии бинарника.
+Аккаунты, API keys, MCP и фоновые сервисы этому пути не нужны.
 Интеграции включаются по конкретной задаче. Наличие этого каталога не подключает
 плагины в Codex desktop или ChatGPT Work и не доказывает доступ к аккаунтам.
 
 | Возможность | Основной путь | Проверка | Fallback / граница |
 |---|---|---|---|
+| Структура большого репозитория | `context map --root ... --query ...` | Rust backend, parser versions, hashes и partial scope | Адресный `rg`; syntactic map не даёт semantic references |
+| Точные references и rename | `code symbols/definition/references/rename/apply` | `code doctor`, локальный language server, hash-bound plan | Явно установить сервер языка; child завершается после команды |
 | Git, issues, PR, CI | Подключённый GitHub plugin | Профиль и metadata нужной репы | git + gh; создание репы только при явной задаче |
 | Поиск и документация | Встроенный web search; official docs для API | Открытый первоисточник и дата | Библиотечный docs MCP по потребности; нет сети → ограничение |
 | Браузер и приложения | Доступные browser/computer-use tools | Наблюдаемая страница/состояние | API/CLI, если умеют нужное действие |

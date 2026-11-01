@@ -4,6 +4,8 @@ permissions:
   contents: read
 jobs:
   test:
+    env:
+      AGENT_HARNESS_BACKEND: python
     strategy:
       fail-fast: false
       matrix:
@@ -21,3 +23,32 @@ jobs:
       - run: python tools/run_tests.py
       - run: python -m pip install --disable-pip-version-check "mcp==2.3.0"
       - run: python -I -B tools/check_mcp.py
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+      - run: rustup toolchain install 1.90.0 --profile minimal
+      - run: cargo +1.90.0 test --release --manifest-path native/Cargo.toml --locked
+        working-directory: .
+      - run: python tools/build_native.py
+      - run: python tools/check_native.py
+        env:
+          AGENT_HARNESS_BACKEND: native
+      - run: npm install --prefix .test-tmp/language-tools --no-audit --no-fund --ignore-scripts pyright@1.1.414
+      - run: python tools/check_lsp.py
+      - run: python tools/release_check.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: native-${{ runner.os }}
+          path: bin/
+          if-no-files-found: error
+          retention-days: 30

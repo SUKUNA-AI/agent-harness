@@ -3,7 +3,9 @@
 This is a bounded secret-pattern scan, not a guarantee against every secret.
 """
 from pathlib import Path
+import hashlib
 import json
+import os
 import re
 import sys
 import tomllib
@@ -50,11 +52,45 @@ def skill_errors(path):
 
 def main():
     errors = []
-    files = [p for p in ROOT.rglob("*") if p.is_file() and not any(part in IGNORED or part.endswith(".egg-info") for part in p.relative_to(ROOT).parts)]
+    files = []
+    # Do not descend into Cargo's potentially large generated build directory.
+    for directory, dirs, names in os.walk(ROOT, followlinks=False):
+        base = Path(directory)
+        dirs[:] = [name for name in dirs if name not in IGNORED and not name.endswith(".egg-info")
+                   and base / name != ROOT / "native" / "target"]
+        for name in dirs:
+            if (base / name).is_symlink():
+                errors.append(f"{(base / name).relative_to(ROOT)}: symlink directory")
+        files.extend(base / name for name in names)
+    native_binaries = set()
+    for manifest in (ROOT / "bin").glob("*/build-info.json"):
+        try:
+            from build_native import source_fingerprint
+            from agent_harness import __version__ as native_version
+            info = json.loads(manifest.read_text(encoding="utf-8"))
+            key = manifest.parent.name
+            if not re.fullmatch(r"(?:linux|windows|macos)-(?:x86_64|aarch64)", key):
+                raise ValueError("unsupported platform")
+            name = "harness-native.exe" if key.startswith("windows-") else "harness-native"
+            binary = manifest.parent / name
+            if binary.is_symlink() or not binary.is_file() or info.get("binary") != name:
+                raise ValueError("missing or linked executable")
+            if (info.get("schema_version") != 1 or info.get("protocol_version") != 1 or info.get("version") != native_version
+                    or info.get("platform") != key or info.get("source_digest") != source_fingerprint()[0]
+                    or info.get("binary_sha256") != hashlib.sha256(binary.read_bytes()).hexdigest()
+                    or info.get("binary_bytes") != binary.stat().st_size):
+                raise ValueError("native bundle identity/hash mismatch")
+            if not (manifest.parent / "licenses" / "index.json").is_file():
+                raise ValueError("native dependency notices missing")
+            native_binaries.add(binary)
+        except (OSError, ValueError, KeyError) as error:
+            errors.append(f"{manifest.relative_to(ROOT)}: {error}")
     for path in files:
         rel = path.relative_to(ROOT).as_posix()
         if path.is_symlink() or path.name in DENIED or rel.startswith(("private/", "runs/", "backups/", "adapters/projects/")):
             errors.append(f"{rel}: private or nonportable file")
+        if path in native_binaries:
+            continue
         try:
             text = path.read_text(encoding="utf-8-sig")
         except UnicodeDecodeError:

@@ -1,8 +1,12 @@
-# Native Agent Harness 1.3.0
+# Native Agent Harness 1.4.0
 
-[Контекст и решение по Rust](docs/CONTEXT_AND_NATIVE_RU.md): ограниченные выдержки
-из файлов, компактный status/handoff, реальный статус integrations и измеренные
-узкие места ядра. Порог auto-compaction 500000 сохранён.
+[Rust, RepoMap и локальный LSP](docs/CONTEXT_AND_NATIVE_RU.md): scanner/snapshot
+перенесён в Rust, `context map` находит определения и связи файлов по задаче,
+`code` выполняет symbols/definition/references/rename через локальный language
+server, который завершается после команды. БД и постоянные службы не нужны.
+Порог auto-compaction 500000 сохранён.
+[Проверка и измерения 1.4.0](docs/REVIEW_1_4_0.md) описывает реальные изменения,
+найденные дефекты, A/B и границы результата.
 [Дополнительное ревью 1.3.0](docs/REVIEW_1_3_0.md) содержит findings и границы проверки.
 
 [Исправления и проверка 1.2.0](docs/REVIEW_1_2_0.md): корректность приёмки,
@@ -60,6 +64,7 @@ experiments описаны в [практиках развития](docs/SELECTE
 | `policies/global.md`, `adapters/codex/bootstrap.md` | Общая политика и короткий автоматически подключаемый prompt |
 | `workflows/`, `roles/` | Процедуры исследования, реализации, review, документов, эксплуатации и recovery |
 | `src/agent_harness/`, `schemas/` | Contracts, snapshots, checks/evidence/gates, ledger, checkpoints и read-only DAG helpers |
+| `native/`, `bin/` | Rust scanner/snapshot, Tree-sitter RepoMap; готовые бинарники в release-архиве |
 | `skills/` | Создание skills, экономия контекста, integrations и автоматическая orchestration |
 | `plugins/harness-assistant/` | Отдельный переносимый plugin с двумя самостоятельными skills |
 | `integrations/` | Маршрутизация tools, public docs MCP и пример локального read-only connector |
@@ -72,7 +77,15 @@ Python не вызывает LLM и не создаёт native agents. Он де
 
 ## Установка
 
-Нужен Python 3.11+; ядро использует stdlib. Работайте из полного source checkout:
+Нужен Python 3.11+; управляющий слой использует stdlib. Native-архив содержит
+готовые бинарники для Linux x86_64 и Windows x86_64; компилятор на машине
+пользователя им не нужен. Сборка из Git: `python tools/build_native.py`, Rust
+1.90.0 и C toolchain для Tree-sitter. Обычные команды ничего не скачивают и не
+собирают. `native status` показывает выбранный backend. В `auto` маленькие деревья
+остаются на Python, большие/неопределённые используют Rust; принудительный режим
+`AGENT_HARNESS_BACKEND=native` доступен. При отсутствии бинарника
+снимки работают на совместимом Python backend; `context map` требует Rust helper.
+Работайте из полного source checkout:
 wheel без policy/workflow assets не является самостоятельной поставкой.
 Подойдёт также ZIP с полным содержимым репозитория. Git нужен для клонирования
 и обновления, но не для установки из ZIP. [Инструкция переноса](SETUP_RU.md)
@@ -128,6 +141,20 @@ Rollback/uninstall сначала проверяют всю транзакцию
 
 ## Повседневное использование
 
+Для незнакомого большого проекта:
+
+```text
+python tools/harness.py context map --root <project> --query "cache invalidation" --max-bytes 8192
+python tools/harness.py context read --root <project> --file <returned-path> --start-line <returned-line> --lines 60
+python tools/harness.py code references --root <project> --file <path> --line <line> --column <column>
+```
+
+`context map` работает полностью локально: синтаксические definitions/references,
+ранжирование связей и ограниченный ответ с hashes/revision. Для точных references
+и rename нужен установленный сервер соответствующего языка: `code doctor`.
+Rename сначала готовит план; `code apply` применяет его только к прежним bytes.
+Команды и ограничения: [LSP](docs/LSP_RU.md), [контекст](workflows/context.md).
+
 Примеры обычных запросов:
 
 - «Реализуй изменение и проверь конечный сценарий».
@@ -172,6 +199,8 @@ Serena и browser tools — специализированными возмож�
 ```text
 python tools/release_check.py
 python tools/run_tests.py
+python tools/build_native.py
+python tools/check_native.py
 python -m pip install "mcp==2.3.0"
 python -I -B tools/check_mcp.py
 ```

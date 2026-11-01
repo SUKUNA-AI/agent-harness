@@ -53,14 +53,14 @@ fixture с реальными subprocess checks и gate. Команда не в�
 не меняет пользовательский checkout. Snapshot time включает Git time: их нельзя
 складывать. Parent CPU не включает дочерние процессы.
 
-Полный перенос на Rust пока не нужен для correctness и не даёт обещания ускорить
-модель. Сначала устраняются лишние subprocess и повторная работа. Если замеры
-реальных проектов покажут существенный CPU hot path либо нужен единый portable
-binary, Rust разумнее оценивать отдельным compatibility-preserving прототипом:
-те же CLI/schema/receipts, golden fixtures и Windows/Linux acceptance.
-C++ имеет смысл при конкретной существующей ABI/библиотеке; сейчас такой причины
-не выявлено. Rust тоже требует compiler/linker для сборки из source; готовые
-release binaries могут убрать toolchain у пользователя для обоих языков.
+В 1.4 scanner/snapshot перенесён в Rust: обход, metadata, SHA-256 и manifest.
+Там же выполняется RepoMap с Tree-sitter и ранжированием графа файлов. Python
+сохраняет contracts, runner/gate, installer и файловый handoff. Exact manifests
+сопоставляются в `tools/check_native.py`; старые evidence/schema не мигрируют.
+Готовые бинарники убирают compiler у пользователя; source build требует Rust и
+C toolchain для grammars. БД и постоянный индекс не нужны. Язык этого слоя сам
+по себе не меняет модельную задержку. Команды и границы —
+[Rust и контекст](CONTEXT_AND_NATIVE_RU.md).
 
 Основания: [native Codex](https://github.com/openai/codex/discussions/1174),
 [Rust installation](https://doc.rust-lang.org/book/ch01-01-installation.html),

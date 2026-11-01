@@ -19,7 +19,7 @@ import tempfile
 import tomllib
 import uuid
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 START = "<!-- agent-harness:begin -->"
 END = "<!-- agent-harness:end -->"
 AUTO_COMPACT_TOKEN_LIMIT = 500000

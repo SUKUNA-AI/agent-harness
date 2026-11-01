@@ -14,7 +14,9 @@
 | mini-SWE-agent | Принцип наблюдаемого ограниченного цикла, без второго agent runtime |
 | GEPA/gskill / autoresearch | Процедура offline-эксперимента и template; optimizer и model-eval campaign не запускались |
 | Deep Agents | Использованы идеи управления контекстом; отдельный behavioral evaluation suite не подключён |
-| Aider RepoMap / Serena | Не входят в исполняемую поставку: нет готового определения symbols/references или LSP сервера |
+| RepoMap по механизму Aider | Исполняемый Rust/Tree-sitter map: definitions, синтаксические связи файлов, task ranking и output budget |
+| LSP по механизму Serena/SolidLSP | `code symbols/definition/references/rename/apply`; локальный сервер на одну команду, без daemon |
+| Rust scanner/snapshot | Нативный обход и хеширование; exact совместимость manifest/digest с Python |
 
 Источник идей и pins — [реестр](../provenance/selected-patterns.json). Процедура
 задаёт поведение агенту, но не доказывает его соблюдение нативной моделью. Tests
@@ -95,70 +97,107 @@ Metadata reader ограничивает state/contract 1 MiB, checkpoint 4 MiB,
 она не является подтверждением доступности любого API hook в установленном UI.
 Продолжение после закрытия приложения/сессии не обещается без нового сообщения.
 
-## Где нужен RepoMap, а где LSP
+## RepoMap: встроенный локальный инструмент
 
-У pinned [Aider RepoMap](https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/repomap.py)
-есть definitions/references, graph ranking и task personalization. В исходной
-реализации также есть `diskcache`/SQLite и дополнительные parser/graph dependencies.
-Целиком переносить модуль в пакет с требованием «без БД» не следует.
+```text
+agent-harness context map --root <project> --query "session refresh token" --max-bytes 8192
+agent-harness context map --root <project> --focus-file src/session.ts --query refresh --max-files 4096
+```
 
-Следующий содержательный шаг для большого незнакомого проекта — optional source
-map со следующим контрактом:
+Rust helper извлекает определения и ссылки на идентификаторы через Tree-sitter,
+строит взвешенный граф файлов и ранжирует его с учётом запроса и выбранных файлов.
+В ответ входят symbols/signatures, диапазоны строк, SHA-256, соседние файлы,
+Git HEAD и content digest наблюдённого scope. Dirty changes меняют binding даже
+при прежнем HEAD. Это синтаксические связи по именам; точное разрешение типов и
+одноимённых символов выполняет LSP. Parser errors и неполный scope обозначаются.
 
-- `query`, явно выбранный root/scope, язык и бюджет ответа;
-- symbols/definitions и ограниченные соседние файлы с причиной ранжирования;
-- parser version, file hashes и Git revision; uncommitted changes учитываются
-  hashes, одного HEAD недостаточно;
-- output cap, omitted counts и честная граница между syntactic references и
-  семантически разрешёнными references;
-- in-memory graph и при необходимости обычный JSON cache, invalidation по bytes;
-- запуск после того, как локальный поиск не дал нужных связей; отсутствие daemon
-  и обязательного полного индексирования при каждой маленькой задаче.
+Defaults: 4096 файлов, 256 KiB на файл, 64 MiB суммарно, 10 секунд и 8192 bytes
+ответа с учётом JSON и Windows CRLF. Пределы можно изменить явно; hard caps:
+50000 файлов, 1 MiB на файл, 128 MiB суммарно, 30 секунд и 65536 bytes вывода.
+`--focus-file` и совпадения query с путями повышают приоритет перед ограничением
+сканирования. Если нужный символ остался за лимитом, сузь scope/укажи focus:
+`partial=true` не является полной картой проекта. Content digest относится
+только к наблюдённым файлам и не заменяет acceptance snapshot всего контракта.
 
-Это спецификация следующего механизма, не описание уже реализованного RepoMap.
-Нужны измерения indexing overhead, время до нужного символа, полезные найденные
-связи и ошибки устаревания. Экономия токенов без правильного найденного кода
-недостаточна.
+Поддерживаются Python, JavaScript, TypeScript/TSX, Rust, Go, C и C++.
+Git-ignore и явные excludes учитываются; generated/credential paths и symlinks
+не используются для выдачи исходника. Ограниченный secret scan не гарантирует
+распознавание всех секретов. БД, embeddings и постоянного индекса нет: graph и
+parser state живут в памяти одного процесса. Небольшая адресная задача по-прежнему
+начинается с `rg`, без ненужного полного сканирования.
 
-Для точных references/rename у типизированных языков полезен LSP. Согласно
-[pinned license overview Serena](https://github.com/oraios/serena/blob/ede329aaf0c824bea75455a2926f01420d7aa620/LICENSE),
-приложение — GPL-3.0-or-later, SolidLSP — MIT. Это разные компоненты. Возможное
-внешнее подключение и отдельное использование компонента рассматриваются отдельно;
-весь пакет Serena не обозначается MIT. В этом релизе исходники не копировались.
+Механизм взят из [Aider RepoMap](https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/repomap.py):
+definitions/references, weighted file graph, task personalization и бюджет карты.
+Здесь используется собственная Rust-реализация этих механизмов; `diskcache`,
+SQLite и Python graph runtime не нужны. Точные parser versions закреплены в
+`native/Cargo.lock`, происхождение — в [реестре](../provenance/selected-patterns.json).
 
-## Решение по Rust
+## Семантические операции через LSP
 
-Полная замена Python не является условием экономии model tokens. Генерацию модели,
-Git и пользовательские тесты язык этого слоя не ускоряет автоматически. В текущем
-пакете Python используется без обязательной предварительной native-сборки.
-Rust требует compiler/linker для source build, а release-оптимизации могут
-увеличивать время сборки: [установка](https://doc.rust-lang.org/book/ch01-01-installation.html),
-[Cargo profiles](https://doc.rust-lang.org/cargo/reference/profiles.html).
+```text
+agent-harness code doctor --root <project>
+agent-harness code symbols --root <project> --file src/service.py
+agent-harness code references --root <project> --file src/service.py --line 12 --column 5
+agent-harness code rename --root <project> --file src/service.py --line 12 --column 5 --new-name new_name --output <private-state>/rename.json
+agent-harness code apply --root <project> --plan <private-state>/rename.json
+```
 
-Диагностика 1.2.0 на Linux/CPython 3.12.14 показала две конкретные области:
+Встроенный клиент запускает установленный локальный language server по stdio,
+выполняет запрос, закрывает сессию и убирает дочерние процессы. Постоянная служба,
+MCP server и БД этому пути не нужны. Python: Pyright/pylsp; Rust: rust-analyzer;
+JS/TS: typescript-language-server; C/C++: clangd; Go: gopls. Сервера — обычные
+локальные инструменты соответствующего языка, их установка не происходит
+незаметно. `--server` принимает явный JSON argv без shell. Настройки конкретного
+проекта, например compilation database clangd, остаются ответственностью его
+локального toolchain. Подробности — [LSP](LSP_RU.md).
 
-- eager imports CLI. В изолированном paired эксперименте с готовым bytecode cache
-  `--version`: 46.71 → 33.57 ms, `status`: 62.72 → 57.89 ms; по 10 чередующихся
-  запусков, warm OS cache. Lazy imports включены в текущий CLI;
-- snapshot больших деревьев. Fixture 3000 × 16384 bytes, три checks и 11 snapshots:
-  median 2.176 s, из них snapshot observations около 1.827 s. Это уже импортированный
-  Python-процесс, не весь shell workflow. Один cProfile snapshot дал 15002 stat
-  calls на 3000 файлов. Текущий `_entry` сокращает повторные metadata queries и
-  дополнительно отклоняет изменение файла между hash и финальным наблюдением.
+Preview rename привязан к bytes и identity всех затронутых файлов. Apply сверяет
+весь план до записи, отвергает stale inputs, выход за root, неоднозначные edits
+и неподдержанные resource operations. Межфайловая запись не является одним
+атомарным filesystem commit: при ошибке применяется компенсация, а конфликт с
+чужой правкой сохраняется для восстановления. Обрезанный stdout не заменяет
+полный план; для крупного rename используйте `--output`.
 
-Хеширование уже выполняется через нативный `hashlib`; CPU процесса включает C и
-filesystem syscalls. Его нельзя целиком объявлять стоимостью Python bytecode.
-В этой среде Rust compiler отсутствует: Rust speedup, compile time и binary size
-не измерялись. Проценты ускорения модели из этих локальных fixtures не следуют.
+У Serena приложение GPL-3.0-or-later, SolidLSP MIT: это подтверждает
+[pinned overview](https://github.com/oraios/serena/blob/ede329aaf0c824bea75455a2926f01420d7aa620/LICENSE).
+В этом пакете реализована нужная функциональность symbol/navigation/refactoring
+по LSP; установка полного Serena runtime не требуется. Лицензия не используется
+как причина откладывать работоспособные инструменты.
 
-**Практическая граница будущего переноса:** scanner/snapshot — кандидат для
-нативного исполнения после A/B; полный Rust — отдельное решение ради поставки
-готового бинарника. Для миграции нужно сохранить exact JSON/hash bytes, CLI/exit
-codes, filesystem semantics, Windows job containment, OS locks, recovery journals
-и installer-preservation. Один набор одинаковых контрактов должен давать те же
-приёмочные результаты на обеих реализациях, включая негативные сценарии.
+## Rust в критическом пути
 
-Optional Rust helper оставляет Python зависимость основной программы. Полный
-бинарник также должен корректно доставить policy/skills/workflow assets и обновить
-пути установки. Эти издержки нужно включать в решение, а не оценивать только
-микротест скорости запуска.
+`core.snapshot` автоматически выбирает backend по короткому осмотру дерева.
+До 512 наблюдённых файлов используется Python: здесь стоимость отдельного
+процесса превышает выигрыш. Большое дерево или неопределённый размер выбирает
+найденный bundled Rust helper. Hint хранится только в памяти текущего CLI
+процесса, не является inventory и не кэширует hashes/приёмку. В Rust
+выполняются обход, Git inventory/settings, metadata, параллельное чтение и
+SHA-256, формирование manifest/digest; RepoMap также работает в этом бинарнике.
+Управляющий слой Python сохраняет contracts, checks/gate, OS process containment,
+installer и handoff. Замена scanner не меняет схемы сохранённых evidence.
+
+```text
+agent-harness native status
+agent-harness native build
+```
+
+Native-архив включает готовые бинарники и notices зависимостей. Для обычного
+исполнения compiler не нужен. Source build требует Rust 1.90.0 и C toolchain
+(Tree-sitter grammars); Cargo.lock фиксирует зависимости. Команда build явная:
+обычный check/context map не устанавливает и не компилирует ничего в фоне.
+
+`AGENT_HARNESS_BACKEND=auto` — default с указанным выбором размера; отсутствие
+бинарника оставляет совместимый Python snapshot. `native status` показывает
+`selected=adaptive` и фактическую политику выбора. `python` явно выбирает прежнюю реализацию; `native` требует Rust.
+Найденный повреждённый/несовместимый helper и ошибки scanner не маскируются
+успешным Python fallback. `AGENT_HARNESS_NATIVE` — явный абсолютный путь к
+локальному бинарнику для разработки/проверки. Bundle имеет SHA-256 и build info;
+временные Rust/source caches не входят в историю Codex или git.
+
+`tools/check_native.py` проверяет compiled backend, exact manifests/digests,
+Git/non-Git и реальные command/gate outcomes. `tools/profile_native.py` сравнивает
+обе реализации попарно на одном input tree с warmup, фиксированным объёмом и
+полным cycle init/freeze/3 checks/gate. Native subprocess startup и сериализация
+входят в измерение. Это локальная производительность, не скорость генерации
+модели и не измерение её токенов. Фактические результаты конкретного релиза
+публикуются отдельно; наличие Rust не заменяет A/B.

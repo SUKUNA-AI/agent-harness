@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "accessed_utc": "2026-11-01",
-  "scope": "Selected file-based mechanisms; not full upstream qualification",
+  "scope": "Selected local mechanisms; runtime qualification is recorded per release",
   "repositories": [
     {
       "repo": "earendil-works/pi",
@@ -140,6 +140,32 @@
       "mechanism": "offline feedback and held-out evaluation procedure",
       "adoption": "independent mechanism implementation; no upstream code vendored",
       "runtime_status": "not_installed_or_executed"
+    },
+    {
+      "repo": "Aider-AI/aider",
+      "url": "https://github.com/Aider-AI/aider",
+      "sha": "5dc9490bb35f9729ef2c95d00a19ccd30c26339c",
+      "license": "Apache-2.0",
+      "license_path": "LICENSE.txt",
+      "license_source_url": "https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/LICENSE.txt",
+      "source_url": "https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/repomap.py",
+      "mechanism": "definitions/references, weighted file graph, task-personalized PageRank, bounded map",
+      "adoption": "native Rust implementation with Tree-sitter; no diskcache/SQLite/networkx runtime",
+      "runtime_status": "implemented_local_command; see current release validation"
+    },
+    {
+      "repo": "oraios/serena",
+      "url": "https://github.com/oraios/serena",
+      "sha": "ede329aaf0c824bea75455a2926f01420d7aa620",
+      "license": {
+        "application": "GPL-3.0-or-later",
+        "SolidLSP": "MIT"
+      },
+      "license_path": "LICENSE",
+      "license_source_url": "https://github.com/oraios/serena/blob/ede329aaf0c824bea75455a2926f01420d7aa620/LICENSE",
+      "mechanism": "symbol-aware navigation, semantic references and workspace rename over LSP",
+      "adoption": "independent on-demand stdio LSP client and digest-bound rename; no full application runtime",
+      "runtime_status": "implemented_local_commands; language server required; see current release validation"
     }
   ],
   "llm_wiki": {

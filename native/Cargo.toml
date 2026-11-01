@@ -1,0 +1,33 @@
+[package]
+name = "harness-native"
+version = "1.4.0"
+edition = "2021"
+rust-version = "1.90"
+publish = false
+
+[dependencies]
+serde_json = "1.0"
+sha2 = "0.10"
+rayon = "1.11"
+ignore = "0.4"
+tempfile = "3.20"
+tree-sitter = "=0.25.10"
+tree-sitter-python = "=0.25.0"
+tree-sitter-javascript = "=0.25.0"
+tree-sitter-typescript = "=0.23.2"
+tree-sitter-rust = "=0.24.0"
+tree-sitter-go = "=0.25.0"
+tree-sitter-c = "=0.24.1"
+tree-sitter-cpp = "=0.23.4"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+

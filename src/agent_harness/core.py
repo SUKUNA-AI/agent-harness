@@ -452,6 +452,13 @@ def _git_settings(cwd):
 
 
 def snapshot(contract):
+    """Select a verified native backend when available; preserve manifest format."""
+    from .native import snapshot as native_snapshot
+    value = native_snapshot(contract)
+    return snapshot_python(contract) if value is None else verify_snapshot(value, "Native snapshot")
+
+
+def snapshot_python(contract):
     """Actual bytes, including tracked deletion and nonignored untracked files."""
     cwd_value = contract.get("cwd")
     result = {"schema_version": 1, "kind": "non_file", "files": {}, "external_inputs": {}}
@@ -464,15 +471,21 @@ def snapshot(contract):
         result.update({"kind": "git" if is_root else "directory", "cwd": str(cwd), "exclude": excludes})
         names = set()
         if is_root:
-            raw = _git(cwd, "ls-files", "--cached", "--others", "--exclude-standard", "-z") or b""
-            names.update(os.fsdecode(n).replace("\\", "/") for n in raw.split(b"\0") if n)
+            raw = _git(cwd, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
+            if raw is None:
+                raise HarnessError("Required Git file inventory unavailable")
+            # Git's NUL-delimited paths already use '/' on every platform.
+            # A backslash in a Unix filename is literal and must not alias a directory.
+            names.update(os.fsdecode(n) for n in raw.split(b"\0") if n)
             settings = _git_settings(cwd)
             result["git"] = {"head": os.fsdecode(head).strip() if head else None, "branch": os.fsdecode(_git(cwd, "symbolic-ref", "--short", "HEAD") or b"").strip() or None, "settings": settings}
             # Gitlinks need the actual submodule tree as well as the recorded SHA.
-            stages = _git(cwd, "ls-files", "--stage", "-z") or b""
+            stages = _git(cwd, "ls-files", "--stage", "-z")
+            if stages is None:
+                raise HarnessError("Required Git stage inventory unavailable")
             for line in stages.split(b"\0"):
                 if line.startswith(b"160000 "):
-                    name = os.fsdecode(line.split(b"\t", 1)[1]).replace("\\", "/")
+                    name = os.fsdecode(line.split(b"\t", 1)[1])
                     sub = cwd / name
                     if sub.is_dir():
                         for directory, dirs, files in os.walk(sub, followlinks=False):

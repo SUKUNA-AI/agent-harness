@@ -1,5 +1,31 @@
 # История изменений
 
+## 1.4.0 — 2026-11-01
+
+Работающие локальные инструменты для больших репозиториев.
+
+- Scanner/snapshot перенесён в Rust: inventory, metadata, SHA-256 и canonical
+  manifest. Python backend сохранён для совместимости и прямого A/B; отсутствие
+  native helper допускает fallback, найденная ошибка native — нет.
+- `context map`: Tree-sitter definitions/references, граф файлов и PageRank с
+  приоритетом задачи/выбранных файлов, output budget и content/revision binding.
+  Граф живёт в памяти процесса; SQLite, daemon и embedding store отсутствуют.
+- `code symbols/definition/references/rename/apply`: LSP по локальному stdio,
+  cleanup child tree, UTF-16 positions, digest-bound rename preview и применение
+  с проверкой всех входов/компенсацией ошибок.
+- `native status/build`, фиксированный Cargo.lock, готовые native bundles и
+  notices зависимостей. Обычная работа не требует compiler или скачивания.
+- Убраны задержки POSIX subprocess polling; auto оставляет маленькие деревья
+  на Python и использует Rust для больших, сохраняя полный rehash inputs.
+- Исправлены silent-empty Git inventory/stage failures, слияние разных Unix
+  имён с backslash, потеря concurrent permissions при rollback rename, неверный
+  fallback повреждённого bundled symlink и пустая карта при слишком подробной
+  metadata в бюджете 2 KiB.
+- CLI/workflows/skills используют готовые возможности по задаче. Existing
+  handoff, bounded excerpts, compaction 500000 и пользовательские модели сохранены.
+- FIFO/nonblocking, CRLF output cap, running MCP status и snapshot identity guards
+  из 1.3 сохранены; native compatibility и command/gate проверяются отдельно.
+
 ## 1.3.0 — 2026-11-01
 
 Дополнительное ревью, ограниченные tool outputs и продолжение долгих задач.

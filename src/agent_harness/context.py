@@ -275,8 +275,12 @@ def excerpt_source(root, name, *, start_line=1, lines=80, offset=None,
 
 
 def dispatch(argv):
+    if argv and argv[0] == "map":
+        from .repo_map import dispatch as map_dispatch
+        return map_dispatch(argv[1:])
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("map", help="Task-ranked Rust symbol map; use context map --help")
     pack = commands.add_parser("pack")
     pack.add_argument("--root", required=True)
     pack.add_argument("--include", required=True, action="append")

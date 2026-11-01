@@ -25,11 +25,19 @@ def main(argv=None):
     if argv and argv[0] == "context":
         from .context import dispatch
         return dispatch(argv[1:])
+    if argv and argv[0] == "code":
+        from .lsp import dispatch
+        return dispatch(argv[1:])
+    if argv and argv[0] == "native":
+        from .native_cli import dispatch
+        return dispatch(argv[1:])
     parser = argparse.ArgumentParser(description="Native Codex harness: state and verification, never a second agent engine")
     parser.add_argument("--version", action="version", version=__version__)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("plan", help="Read-only orchestration helpers; use plan --help")
     commands.add_parser("context", help="Bounded local source packets; use context --help")
+    commands.add_parser("code", help="On-demand local symbols, references and rename; use code --help")
+    commands.add_parser("native", help="Rust backend status and local build; use native --help")
     for name in ("init", "attempt"):
         p = commands.add_parser(name)
         p.add_argument("--run-dir", required=True)
