@@ -21,7 +21,8 @@ class OrchestrationTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.base = Path(self.temp.name)
+        # Windows TEMP may use an 8.3 alias; compare canonical checkout paths.
+        self.base = Path(self.temp.name).resolve()
         self.source = self.base / "source"
         self.source.mkdir()
         (self.source / "main.py").write_text("value = 1\n", encoding="utf-8")
@@ -385,6 +386,8 @@ class OrchestrationTests(unittest.TestCase):
     def test_separate_git_directory_pointer_detects_shared_checkout(self):
         root = self.base / "owner-a"
         self.git(root, "init", "--quiet", "--separate-git-dir", str(self.base / "git-metadata"))
+        # Replace our own marker: Git for Windows may mark it hidden, blocking truncation.
+        (root / ".git").unlink()
         (root / ".git").write_text("gitdir: ../git-metadata\n", encoding="utf-8")
         (root / "one").mkdir()
         (root / "two").mkdir()
