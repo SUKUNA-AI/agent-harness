@@ -90,7 +90,12 @@ class KnowledgeScenarios(unittest.TestCase):
             "effect": "read_only", "input_closure_complete": True, "toolchain_digest": digest("rg-v1"),
             "env_digest": digest({}), "config_digest": digest({})}
         decision = ledger.govern(operation, self.current)
-        self.assertEqual(decision["decision"], "allow")
+        if shutil.which("rg") is None:
+            self.assertEqual(decision["decision"], "requires_revalidation", decision)
+            self.assertIn("executable identity", decision["reason"])
+            self.assertIsNone(decision["reused_event_id"])
+            return
+        self.assertEqual(decision["decision"], "allow", decision)
         record = ledger.append("command", {"argv": operation["argv"], "cwd": str(self.repo),
             "effect": "read_only", "status": "completed", "exit_code": 1,
             "operation_fingerprint": decision["operation_fingerprint"], "evidence_path": str(output),
@@ -102,6 +107,17 @@ class KnowledgeScenarios(unittest.TestCase):
         self.assertEqual(ledger.govern(operation, self.provenance())["decision"], "allow")
         self.assertNotEqual(ledger.govern(operation, self.current)["decision"], "suggest_reuse")
         self.assertEqual(ledger.govern(operation, self.current, force=True)["decision"], "allow")
+
+    def test_missing_rg_requires_revalidation_without_inventing_a_tool_identity(self):
+        operation = {"argv": ["rg", "--no-config", "--no-ignore-parent", "--no-ignore-global",
+            "--no-ignore-vcs", "absent", "."], "cwd": str(self.repo), "effect": "read_only",
+            "purpose": "missing tool fixture", "input_closure_complete": True,
+            "toolchain_digest": digest("rg-v1"), "env_digest": digest({}), "config_digest": digest({})}
+        with patch("shutil.which", return_value=None):
+            decision = self.ledger().govern(operation, self.current)
+        self.assertEqual(decision["decision"], "requires_revalidation", decision)
+        self.assertIn("executable identity", decision["reason"])
+        self.assertIsNone(decision["reused_event_id"])
 
     def test_state_sensitive_write_unknown_and_unproven_reads_never_reuse(self):
         ledger = self.ledger()
