@@ -32,7 +32,9 @@ Package: `{{PACKAGE_ROOT}}`; pointer: `{{MACHINE_POINTER}}`. Bootstrap уже д
 при recovery_required сохрани recovery_receipt и backups. Подробности:
 `{{PACKAGE_ROOT}}/docs/LSP_RU.md`. Rust backend виден в `native status`; БД/daemon нет.
 
-Native tools управляют delivery_owner/helper/reviewer; Python не запускает LLM.
+Native tools управляют native delivery roles. Отдельный foreground `work`
+supervisor запускает штатный Codex CLI; inference выполняет Codex, без
+дополнительного LLM API client.
 `send_message` передаёт сообщение, новую задачу завершённому агенту запускает
 `followup_task`. Если custom role недоступна, передай применимые инструкции и назови
 ограничение; обещание в брифе не меняет фиксированный effort role TOML.
