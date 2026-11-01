@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "python-runtime-closure v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "policy": {
+      "const": "closed_windows_literal_python_runtime_v1"
+    },
+    "root": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "files": {
+      "type": "object",
+      "maxProperties": 16,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 16777216
+          }
+        },
+        "required": [
+          "sha256",
+          "bytes"
+        ]
+      }
+    },
+    "absent_startup_paths": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {
+        "type": "string",
+        "maxLength": 512
+      }
+    },
+    "stdlib_reference_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "total_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 33554432
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  },
+  "required": [
+    "schema_version",
+    "policy",
+    "root",
+    "files",
+    "absent_startup_paths",
+    "stdlib_reference_digest",
+    "total_bytes",
+    "digest"
+  ]
+}

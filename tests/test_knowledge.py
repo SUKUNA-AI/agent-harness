@@ -11,6 +11,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import encodings
+import zipfile
 from unittest.mock import patch
 
 from agent_harness.core import HarnessError, digest, now, snapshot
@@ -21,6 +23,28 @@ from agent_harness.check_cache import CheckCache, make_proof
 from agent_harness.repomap_queries import query_repository
 from agent_harness.format_bench import benchmark, select_format, encode_toon, render
 from agent_harness.strict_yaml import StrictYAMLError, dump, load, validate
+
+
+def closed_python_fixture(base):
+    """An actual, private bounded runtime; ordinary external Python is unsupported."""
+    if os.name != "nt":
+        raise unittest.SkipTest("Optional Python cache has no proven self-contained runtime on this platform")
+    runtime = Path(base) / "closed-python-runtime"
+    runtime.mkdir(exist_ok=True)
+    source = Path(sys.executable).resolve().parent
+    stem = "python" + str(sys.version_info.major) + str(sys.version_info.minor)
+    for name in ("python.exe", stem + ".dll", "python3.dll", "vcruntime140.dll", "vcruntime140_1.dll"):
+        candidate = Path(sys.executable).resolve() if name == "python.exe" else source / name
+        if not candidate.is_file():
+            raise unittest.SkipTest("Private runtime dependency unavailable: " + name)
+        shutil.copyfile(candidate, runtime / name)
+    reference = Path(encodings.__file__).parent
+    with zipfile.ZipFile(runtime / (stem + ".zip"), "w", compression=zipfile.ZIP_STORED) as archive:
+        for path in reference.glob("*.py"):
+            archive.write(path, "encodings/" + path.name)
+        archive.write(reference.parent / "linecache.py", "linecache.py")
+    (runtime / (stem + "._pth")).write_text(stem + ".zip\n", encoding="utf-8")
+    return runtime / "python.exe"
 
 
 class KnowledgeScenarios(unittest.TestCase):
@@ -183,7 +207,8 @@ class KnowledgeScenarios(unittest.TestCase):
             reduce([], max_bytes=1024, required={"contract": "x" * 10000})
 
     def test_cache_requires_pure_closure_and_invalidates_config_toolchain_evidence(self):
-        check = {"id": "pure-one", "argv": [sys.executable, "-I", "-S", "-c", "print(1)"], "cache_policy": "verified_inputs_only", "deterministic": True, "effect": "pure"}
+        executable = closed_python_fixture(self.base)
+        check = {"id": "pure-one", "argv": [str(executable), "-I", "-S", "-c", "print(1)"], "cache_policy": "verified_inputs_only", "deterministic": True, "effect": "pure"}
         proof = make_proof(self.repo, check, toolchain_digest=digest("python-v1"), environment={}, config={"strict": True},
                            isolated_environment=True, no_external_dependencies=True)
         evidence = self.base / "proof.txt"
@@ -318,7 +343,8 @@ class ReuseSafetyRegressions(unittest.TestCase):
         self.temp.cleanup()
 
     def cache_case(self, filename):
-        check = {"id": "closed-read", "argv": [sys.executable, "-I", "-S", "-c", "assert open(" + repr(filename) + ", encoding='utf-8').read() == 'one'"],
+        executable = closed_python_fixture(self.base)
+        check = {"id": "closed-read", "argv": [str(executable), "-I", "-S", "-c", "assert open(" + repr(filename) + ", encoding='utf-8').read() == 'one'"],
                  "cache_policy": "verified_inputs_only", "deterministic": True, "effect": "pure"}
         proof = make_proof(self.repo, check, toolchain_digest=digest("python"), environment={}, config={},
                            isolated_environment=True, no_external_dependencies=True)
@@ -451,6 +477,60 @@ class ReuseSafetyRegressions(unittest.TestCase):
         self.assertEqual(fresh["snapshot_id"], current["snapshot_id"])
         self.assertEqual(subprocess.run(argv, cwd=self.repo, capture_output=True).returncode, 0)
         self.assertNotEqual(ledger.govern(operation, current)["decision"], "suggest_reuse")
+
+    def test_external_python_runtime_does_not_gain_closure_from_booleans(self):
+        check = {"id": "literal", "argv": [sys.executable, "-I", "-S", "-c", "print(1)"],
+                 "cache_policy": "verified_inputs_only", "deterministic": True, "effect": "pure"}
+        with self.assertRaises(HarnessError):
+            make_proof(self.repo, check, toolchain_digest=digest("python"), environment={}, config={},
+                       isolated_environment=True, no_external_dependencies=True)
+
+    def test_actual_closed_runtime_startup_present_absent_and_stdlib_revalidation(self):
+        executable = closed_python_fixture(self.base)
+        check = {"id": "literal", "argv": [str(executable), "-I", "-S", "-c", "print(1)"],
+                 "cache_policy": "verified_inputs_only", "deterministic": True, "effect": "pure"}
+        proof = make_proof(self.repo, check, toolchain_digest=digest("python"), environment={}, config={},
+                           isolated_environment=True, no_external_dependencies=True)
+        before = subprocess.run(check["argv"], cwd=self.repo, env={}, capture_output=True)
+        self.assertEqual((before.returncode, before.stdout.strip()), (0, b"1"))
+        evidence = self.base / "literal.txt"
+        evidence.write_bytes(before.stdout)
+        cache = CheckCache(self.base / "cache", allowlist=["literal"])
+        self.assertTrue(cache.put(check, proof, {"id": "literal-receipt", "path": str(evidence), "status": "passed"}, run_id="first")["stored"])
+        self.assertTrue(cache.get(check, proof)["hit"])
+        runtime = executable.parent
+        stem = "python" + str(sys.version_info.major) + str(sys.version_info.minor)
+        startup = runtime / (stem + "._pth")
+        original = startup.read_bytes()
+        archive_path = runtime / (stem + ".zip")
+        original_archive = archive_path.read_bytes()
+        startup.write_text("missing_stdlib\n")
+        self.assertNotEqual(subprocess.run(check["argv"], cwd=self.repo, env={}, capture_output=True).returncode, 0)
+        self.assertFalse(cache.get(check, proof)["hit"])
+        with self.assertRaises(HarnessError):
+            make_proof(self.repo, check, toolchain_digest=digest("python"), environment={}, config={},
+                       isolated_environment=True, no_external_dependencies=True)
+        startup.write_bytes(original)
+        self.assertTrue(cache.get(check, proof)["hit"])
+        startup.unlink()
+        self.assertFalse(cache.get(check, proof)["hit"])
+        startup.write_bytes(original)
+        alternate = runtime / "python._pth"
+        alternate.write_text(stem + ".zip\n")
+        self.assertFalse(cache.get(check, proof)["hit"])
+        alternate.unlink()
+        parent_venv = self.base / "pyvenv.cfg"
+        parent_venv.write_text("home = outside\n")
+        self.assertFalse(cache.get(check, proof)["hit"])
+        parent_venv.unlink()
+        with zipfile.ZipFile(archive_path, "w") as archive:
+            archive.writestr("unrelated.py", "# no codec startup")
+        self.assertNotEqual(subprocess.run(check["argv"], cwd=self.repo, env={}, capture_output=True).returncode, 0)
+        self.assertFalse(cache.get(check, proof)["hit"])
+        archive_path.write_bytes(original_archive)
+        self.assertTrue(cache.get(check, proof)["hit"])
+        (runtime / (stem + ".dll")).write_bytes(b"invalid private DLL fixture")
+        self.assertFalse(cache.get(check, proof)["hit"])
 
 
 if __name__ == "__main__":

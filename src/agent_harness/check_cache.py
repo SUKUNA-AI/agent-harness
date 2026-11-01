@@ -14,20 +14,22 @@ from .execution_ledger import HASH, SHORT, object_schema, safe_private, sanitize
 from .file_io import read_regular_file
 
 from .input_closure import CLOSURE_SCHEMA, bounded_closure
+from .python_runtime import RUNTIME_SCHEMA, runtime_closure
 
-PROOF_SCHEMA = object_schema({"schema_version": {"const": 2}, "snapshot_id": HASH,
+PROOF_SCHEMA = object_schema({"schema_version": {"const": 3}, "snapshot_id": HASH,
     "repository_identity": HASH, "toolchain_digest": HASH, "binary_digest": HASH,
     "binary_path": SHORT, "input_closure": CLOSURE_SCHEMA, "live_environment_digest": HASH,
     "check_definition_digest": HASH,
     "probe_policy": {"const": "isolated_literal_python_probe_v1"},
+    "runtime_closure": RUNTIME_SCHEMA,
     "argv": {"type": "array", "items": SHORT}, "cwd": SHORT, "env_digest": HASH,
     "config_digest": HASH, "platform": SHORT, "input_closure_complete": {"const": True},
     "isolated_environment": {"const": True}, "no_external_dependencies": {"const": True}},
     ("schema_version", "snapshot_id", "repository_identity", "toolchain_digest", "binary_digest", "binary_path",
-     "input_closure", "live_environment_digest", "check_definition_digest", "probe_policy",
+     "input_closure", "live_environment_digest", "check_definition_digest", "probe_policy", "runtime_closure",
      "argv", "cwd", "env_digest", "config_digest", "platform", "input_closure_complete",
      "isolated_environment", "no_external_dependencies"))
-CACHE_SCHEMA = object_schema({"schema_version": {"const": 2}, "key": HASH,
+CACHE_SCHEMA = object_schema({"schema_version": {"const": 3}, "key": HASH,
     "first_run_id": SHORT, "original_timestamp": SHORT, "proof": PROOF_SCHEMA,
     "evidence_id": SHORT, "evidence_path": SHORT, "evidence_digest": HASH,
     "status": {"const": "passed"}}, ("schema_version", "key", "first_run_id",
@@ -44,7 +46,7 @@ def _literal_probe(root, check):
     argv = check.get("argv", [])
     if not isinstance(argv, list) or len(argv) < 5 or any(not isinstance(a, str) for a in argv):
         raise HarnessError("Optional cache supports isolated literal Python probes only")
-    if Path(argv[0]).resolve() != Path(sys.executable).resolve() or argv.count("-c") != 1:
+    if argv.count("-c") != 1:
         raise HarnessError("Opaque command/tool inputs cannot be proven by a purity declaration")
     index = argv.index("-c")
     flags = argv[1:index]
@@ -110,12 +112,14 @@ def make_proof(root, check, *, toolchain_digest, environment, config, isolated_e
     binary_digest = _executable_hash(executable, {})
     if not binary_digest:
         raise HarnessError("Cache executable fingerprint unavailable")
+    runtime = runtime_closure(executable)
     tree = snapshot({"cwd": str(Path(root).resolve()), "scope": {"exclude": []}})
     closure = bounded_closure(root)
-    return {"schema_version": 2, "snapshot_id": tree["digest"],
+    return {"schema_version": 3, "snapshot_id": tree["digest"],
         "repository_identity": repository_identity(root), "toolchain_digest": toolchain_digest,
         "binary_digest": binary_digest, "binary_path": str(Path(executable).absolute()),
-        "input_closure": closure, "live_environment_digest": digest(dict(os.environ)), "probe_policy": probe_policy,
+        "input_closure": closure, "runtime_closure": runtime,
+        "live_environment_digest": digest(dict(os.environ)), "probe_policy": probe_policy,
         "check_definition_digest": digest(check), "argv": argv, "cwd": str(Path(root).resolve()),
         "env_digest": digest(environment), "config_digest": digest(config),
         "platform": platform.platform() + "/" + platform.machine(), "input_closure_complete": True,
@@ -164,6 +168,8 @@ class CheckCache:
                 return False
             if _executable_hash(proof["binary_path"], {}) != proof["binary_digest"]:
                 return False
+            if runtime_closure(proof["binary_path"]) != proof["runtime_closure"]:
+                return False
             return True
         except (OSError, ValueError, HarnessError, KeyError):
             return False
@@ -175,7 +181,7 @@ class CheckCache:
         source = safe_private(evidence["path"])
         data = read_regular_file(source, max_bytes=16 * 1024 * 1024)
         key = digest({"check": check, "proof": proof})
-        row = sanitized({"schema_version": 2, "key": key, "first_run_id": run_id,
+        row = sanitized({"schema_version": 3, "key": key, "first_run_id": run_id,
             "original_timestamp": now(), "proof": proof, "evidence_id": evidence["id"],
             "evidence_path": str(source), "evidence_digest": hashlib.sha256(data).hexdigest(), "status": "passed"})
         path = self.root / (key + ".yaml")
