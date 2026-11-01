@@ -14,10 +14,73 @@ from agent_harness import installation as install
 
 
 class ConfigPatchTests(unittest.TestCase):
+    def test_auto_compact_default_is_root_level_and_idempotent(self):
+        """Порог добавляется в корень TOML, сохраняя произвольные секции и строки."""
+        cases = (
+            '', 'model="mine"', '[opaque]\nx=1\n',
+            'model="mine"\r\n[agents]\r\nenabled=true\r\n',
+            'notes="""\n[not_a_table]\n"""\n',
+            '[other]\nmodel_auto_compact_token_limit=42\n',
+            '#:schema https://example.invalid/schema.json\n# user header\n[other]\nx=1\n',
+        )
+        for text in cases:
+            with self.subTest(text=text):
+                changed, meta = install.patch_config(text)
+                self.assertEqual(tomllib.loads(changed)["model_auto_compact_token_limit"], 500000)
+                self.assertEqual(install.patch_config(changed)[0], changed)
+                if text.startswith("#:schema"):
+                    self.assertTrue(changed.startswith(text[:text.index("[other]")]))
+                self.assertEqual(install.revert_config(text, changed, changed, meta), text)
+
+    def test_auto_compact_explicit_user_policy_is_preserved(self):
+        """Установка не заменяет явно заданный пользователем порог."""
+        for key in ('model_auto_compact_token_limit', '"model_auto_compact_token_limit"'):
+            for value in (100000, 800000, 0):
+                text = f'{key} = {value} # user policy\n[agents]\nenabled=true\n'
+                with self.subTest(text=text):
+                    changed, _ = install.patch_config(text)
+                    self.assertTrue(changed.startswith(text.split('[agents]')[0]))
+                    self.assertEqual(tomllib.loads(changed)["model_auto_compact_token_limit"], value)
+
+    def test_auto_compact_rollback_keeps_unrelated_user_changes(self):
+        """Откат удаляет только добавленный порог и сохраняет последующие правки."""
+        before = 'model="mine"\n[opaque]\nx=1\n'
+        installed, meta = install.patch_config(before)
+        current = installed.replace('x=1', 'x=2')
+        restored = install.revert_config(before, installed, current, meta)
+        self.assertEqual(tomllib.loads(restored), tomllib.loads(before.replace('x=1', 'x=2')))
+        self.assertIn('[opaque]\nx=2\n', restored)
+
+    def test_auto_compact_manual_change_blocks_rollback(self):
+        """Ручная правка установленного порога останавливает откат без перезаписи."""
+        installed, meta = install.patch_config('model="mine"\n')
+        current = installed.replace('model_auto_compact_token_limit = 500000', 'model_auto_compact_token_limit = 200000')
+        with self.assertRaises(install.InstallError):
+            install.revert_config('model="mine"\n', installed, current, meta)
+
+    def test_auto_compact_rollback_does_not_edit_multiline_user_text(self):
+        """Строка внутри пользовательского текста не считается управляемым root-ключом."""
+        before = 'model="mine"\n'
+        installed, meta = install.patch_config(before)
+        without_default = installed.replace('model_auto_compact_token_limit = 500000\n', '', 1)
+        for root_line in ('', '"model_auto_compact_token_limit" = 500000\n'):
+            current = root_line + without_default.replace('model="mine"\n', 'model="mine"\nnotes="""\nmodel_auto_compact_token_limit = 500000\n"""\n')
+            with self.subTest(root_line=root_line), self.assertRaises(install.InstallError):
+                install.revert_config(before, installed, current, meta)
+
+    def test_legacy_config_metadata_without_root_keys_can_rollback(self):
+        """Откат прежнего manifest без root_keys остаётся совместимым."""
+        before = 'model_auto_compact_token_limit=300000\n[agents]\nmax_concurrent_threads_per_session=9\n'
+        installed, meta = install.patch_config(before)
+        meta.pop('root_keys', None)
+        current = installed + '[user]\nx=1\n'
+        restored = install.revert_config(before, installed, current, meta)
+        self.assertEqual(restored, before + '[user]\nx=1\n')
+
     def test_unrelated_bytes_comments_and_security_preserved(self):
         original = '# user comment\r\nmodel = "user-model"\r\nsandbox_mode = "read-only"\r\n[opaque]\r\nfuture = [1, 2]\r\n'
         changed, meta = install.patch_config(original)
-        self.assertTrue(changed.startswith(original))
+        self.assertTrue(changed.replace("model_auto_compact_token_limit = 500000\r\n", "", 1).startswith(original))
         self.assertEqual(tomllib.loads(changed)["opaque"], {"future": [1, 2]})
         self.assertEqual(tomllib.loads(changed)["sandbox_mode"], "read-only")
         self.assertEqual(install.revert_config(original, changed, changed, meta), original)
@@ -222,7 +285,9 @@ class InstallerTests(unittest.TestCase):
         original = b'\xef\xbb\xbf# user\r\nmodel="mine"\r\n'
         p.write_bytes(original)
         self.apply()
-        self.assertTrue(p.read_bytes().startswith(original))
+        installed = p.read_bytes()
+        self.assertTrue(installed.replace(b"model_auto_compact_token_limit = 500000\r\n", b"", 1).startswith(original))
+        self.assertNotIn(b"\n", installed.replace(b"\r\n", b""))
         restored = {q["path"]: q["after"] for q in install.rollback_plan(install.active_manifest(self.state))}
         self.assertEqual(restored[p], original)
 
@@ -234,7 +299,13 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(result["status"], "failed")
 
     def test_uninstall_unwinds_updates_preserving_user_fields(self):
-        self.apply()
+        # Воспроизводим прежнюю установку без root_keys, затем обновляем новым кодом.
+        legacy = self.make_plan()
+        config_plan = next(p for p in legacy if p["kind"] == "config")
+        config_plan["after"] = config_plan["after"].replace(b"model_auto_compact_token_limit = 500000\n", b"", 1)
+        config_plan["meta"].pop("root_keys")
+        with install.lock(self.state):
+            install.apply_plan(legacy, self.state, self.package)
         source = self.package / "adapters/codex/agents/delivery_owner.toml"
         source.write_text(source.read_text(encoding="utf-8") + "\n# package update\n", encoding="utf-8")
         self.apply()
@@ -247,7 +318,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(result, 0, output.getvalue())
         self.assertFalse((self.home / "agents/delivery_owner.toml").exists())
         self.assertNotIn(install.START, (self.home / "AGENTS.md").read_text(encoding="utf-8"))
-        self.assertEqual(tomllib.loads(config.read_text(encoding="utf-8"))["user_added"], {"keep": 12})
+        self.assertEqual(tomllib.loads(config.read_text(encoding="utf-8")), {**tomllib.loads(self.original_config), "user_added": {"keep": 12}})
         self.assertFalse((self.state / "active.json").exists())
 
     def test_diff_does_not_expose_secret(self):

@@ -21,6 +21,7 @@ import uuid
 VERSION = "1.1.0"
 START = "<!-- agent-harness:begin -->"
 END = "<!-- agent-harness:end -->"
+AUTO_COMPACT_TOKEN_LIMIT = 500000
 MANAGED = {"enabled": True, "max_concurrent_threads_per_session": 4, "interrupt_message": True}
 SENSITIVE = re.compile(r"(?i)(token|secret|password|credential|authorization|api[_-]?key|headers)")
 
@@ -104,8 +105,8 @@ def replace_block(text: str, block: str) -> str:
     return text + ("\n" if text.endswith("\n") else "\n\n" if text else "") + block + "\n"
 
 
-def assignment(text: str, key: str) -> tuple[int, str] | None:
-    """Find one managed assignment, supporting normal and root dotted form."""
+def assignment(text: str, key: str, root: bool = False) -> tuple[int, str] | None:
+    """Находит управляемую строку в корне TOML или agents, включая dotted-форму."""
     table = ""
     matches = []
     for i, line in enumerate(text.splitlines(keepends=True)):
@@ -115,10 +116,12 @@ def assignment(text: str, key: str) -> tuple[int, str] | None:
             table = "agents" if m else "other"
             continue
         pattern = rf"\s*{re.escape(key)}\s*=" if table == "agents" else rf"\s*agents\.{re.escape(key)}\s*=" if table == "" else None
+        if root:
+            pattern = rf"\s*{re.escape(key)}\s*=" if table == "" else None
         if pattern and re.match(pattern, line):
             matches.append((i, line))
     if len(matches) > 1:
-        raise InstallError(f"Duplicate managed key agents.{key}")
+        raise InstallError(f"Duplicate managed key {key if root else 'agents.' + key}")
     return matches[0] if matches else None
 
 
@@ -205,26 +208,50 @@ def patch_config(text: str, preferred_cap: int = 4, explicit_cap: bool = False) 
         else:
             table_created = True
             result += (eol if result.endswith(eol) else eol + eol if result else "") + "[agents]" + eol + "".join(additions)
+    root_edits = {}
+    compact_key = "model_auto_compact_token_limit"
+    if compact_key not in data:
+        # Вставка после ведущих комментариев не путает таблицы с multiline-строками.
+        new = f"{compact_key} = {AUTO_COMPACT_TOKEN_LIMIT}{eol}"
+        at = re.match(r"(?:[ \t]*(?:#[^\r\n]*)?\r?\n)*", result).end()
+        result = result[:at] + new + result[at:]
+        root_edits[compact_key] = {"before": None, "after": new}
     parsed = tomllib.loads(result)
     if parsed.get("agents", {}) != {**agents, **desired}:
         raise InstallError("Config patch changed unexpected agent settings")
     original_other = {k: v for k, v in data.items() if k != "agents"}
+    if root_edits:
+        original_other[compact_key] = AUTO_COMPACT_TOKEN_LIMIT
     if {k: v for k, v in parsed.items() if k != "agents"} != original_other:
         raise InstallError("Config patch changed unrelated settings")
-    return result, {"keys": edits, "table_created": table_created}
+    return result, {"keys": edits, "root_keys": root_edits, "table_created": table_created}
 
 
 def revert_config(before: str, installed: str, current: str, meta: dict) -> str:
     if current == installed:
         return before
     result = current
-    for key, edit in meta["keys"].items():
-        found = assignment(result, key)
-        if found is None or found[1] != edit["after"]:
-            raise InstallError(f"Rollback conflict at agents.{key}; user edit preserved")
-        lines = result.splitlines(keepends=True)
-        lines[found[0]] = edit["before"] or ""
-        result = "".join(lines)
+    # Старые manifests содержат только keys; root_keys появился вместе с порогом.
+    for root, edits in ((False, meta["keys"]), (True, meta.get("root_keys", {}))):
+        for key, edit in edits.items():
+            if root:
+                expected = tomllib.loads(result)
+                if key not in expected or expected[key] != tomllib.loads(installed).get(key):
+                    raise InstallError(f"Rollback conflict at {key}; user edit preserved")
+                original = tomllib.loads(before)
+                if key in original:
+                    expected[key] = original[key]
+                else:
+                    expected.pop(key)
+            found = assignment(result, key, root=root)
+            if found is None or found[1] != edit["after"]:
+                raise InstallError(f"Rollback conflict at {key if root else 'agents.' + key}; user edit preserved")
+            lines = result.splitlines(keepends=True)
+            lines[found[0]] = edit["before"] or ""
+            result = "".join(lines)
+            # Regex не различает multiline-строки: чужие TOML-значения обязаны совпасть.
+            if root and tomllib.loads(result) != expected:
+                raise InstallError(f"Rollback conflict at {key}; unrelated settings preserved")
     if meta["table_created"]:
         # Remove our table only if no user content was added to it.
         result = re.sub(r"(?m)^\[agents\]\r?\n(?=\s*(?:\[|\Z))", "", result)

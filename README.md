@@ -75,7 +75,13 @@ python <package>/tools/harness.py verify --codex-home <codex-home> --skills-home
 Первый install — dry-run с адресным diff; apply создаёт backups/manifest.
 Сохраняются неизвестные TOML keys, comments, пользовательский текст и чужие роли.
 Установщик управляет `agents.enabled`, cap и отсутствующим `interrupt_message`;
-model/provider/reasoning/security не меняет. Portable default cap — 4 children;
+model/provider/reasoning/security не меняет. Если корневой параметр
+`model_auto_compact_token_limit` отсутствует, добавляет `500000`: порог автоматического
+сжатия истории Codex. Явный пользовательский порог сохраняется; повторная установка
+и откат поддерживаются. Это не увеличение окна модели и не сумма токенов за всё
+время работы. Ограничения модели/клиента могут вызвать сжатие раньше.
+[Описание параметра OpenAI](https://learn.chatgpt.com/docs/config-file/config-reference).
+Portable default cap — 4 children;
 существующий более строгий cap сохраняется. Явный `--max-child-threads N` адресно
 разрешает иной cap. Число логических направлений, target active owners и backend
 slots — разные значения; фактическую ёмкость наблюдают в текущем клиенте.
