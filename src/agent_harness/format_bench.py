@@ -6,6 +6,7 @@ parser. Reference: https://github.com/toon-format/spec (MIT specification).
 from __future__ import annotations
 
 import argparse
+import hashlib
 from datetime import datetime, timezone
 import json
 import math
@@ -240,7 +241,7 @@ def codex_measure(rows, *, executable="codex", cwd=None, timeout=90, evidence_di
                 sanitized(raw)
                 atomic_write(destination / raw_path, raw.encode("utf-8"), exclusive=True)
                 dump(destination / evidence, {"schema_version": 1, "format": name,
-                    "stdout_digest": digest(raw), "thread_id": thread_id,
+                    "stdout_digest": hashlib.sha256(raw.encode("utf-8")).hexdigest(), "thread_id": thread_id,
                     "raw_path": raw_path, "input_tokens": usage, "correct": correct,
                     "expected_answer": expected, "actual_answer": answer}, FORMAT_SAMPLE_SCHEMA, exclusive=True)
             return {"input_tokens": usage, "correct": correct,

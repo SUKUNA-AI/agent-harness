@@ -172,10 +172,26 @@ def paginate(value, *, offset=0, limit=8192):
     if type(offset) is not int or offset < 0 or type(limit) is not int or not 256 <= limit <= 65536:
         raise HarnessError("Pagination needs offset>=0 and limit=256..65536")
     data = canonical(value)
-    fragment = data[offset:offset + limit].decode("utf-8", errors="replace")
-    return {"content": fragment, "offset": offset, "total_bytes": len(data),
-            "next_offset": offset + limit if offset + limit < len(data) else None,
-            "sha256": hashlib.sha256(data).hexdigest(), "trust": "untrusted_observation"}
+    if offset > len(data) or offset < len(data) and data[offset] & 0xC0 == 0x80:
+        raise HarnessError("Pagination offset must be a UTF-8 boundary within the record")
+    end = min(len(data), offset + limit)
+    while end > offset:
+        try:
+            fragment = data[offset:end].decode("utf-8")
+        except UnicodeDecodeError:
+            end -= 1
+            continue
+        result = {"content": fragment, "offset": offset, "total_bytes": len(data),
+                  "next_offset": end if end < len(data) else None,
+                  "sha256": hashlib.sha256(data).hexdigest(), "trust": "untrusted_observation"}
+        if len(canonical(result)) + 2 <= limit:
+            return result
+        end -= max(1, (end - offset) // 8)
+    result = {"content": "", "offset": offset, "total_bytes": len(data), "next_offset": None,
+              "sha256": hashlib.sha256(data).hexdigest(), "trust": "untrusted_observation"}
+    if offset != len(data) or len(canonical(result)) + 2 > limit:
+        raise HarnessError("Pagination envelope exceeds byte budget")
+    return result
 
 
 class Ledger:
@@ -192,6 +208,8 @@ class Ledger:
             raise HarnessError("Invalid ledger event kind or missing typed payload fields")
         if self.repository_identity and provenance.get("repository_identity") != self.repository_identity:
             raise HarnessError("Ledger repository identity mismatch")
+        if kind in {"file_read", "symbol_examined"} and provenance.get("files", {}).get(payload.get("path")) != payload.get("digest"):
+            raise HarnessError("Ledger file/symbol content digest differs from provenance")
         event = sanitized({"schema_version": 1, "event_id": "event-" + uuid.uuid4().hex,
             "run_id": self.run_id, "task_id": self.task_id, "kind": kind, "actor": actor,
             "session_id": session_id, "causal_parent": causal_parent, "timestamp": now(),
@@ -241,6 +259,8 @@ class Ledger:
             payload = row["payload"]
             evidence = (payload["evidence_path"], payload["evidence_digest"]) if payload.get("evidence_path") and payload.get("evidence_digest") else None
             state = validity(row["provenance"], current, status="superseded" if row["event_id"] in superseded else row["validity_status"], evidence=evidence)
+            if row["kind"] == "check" and payload.get("status") in {"passed", "accepted", "satisfied"} and evidence is None:
+                state = "needs_revalidation"
             item = {"event_id": row["event_id"], "kind": row["kind"], "payload": payload,
                     "provenance": row["provenance"], "validity_status": state,
                     "pointer": "ledger/events/" + row["event_id"] + ".yaml"}

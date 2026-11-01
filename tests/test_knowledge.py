@@ -279,6 +279,27 @@ class KnowledgeScenarios(unittest.TestCase):
         self.assertEqual(recalled["verified_facts"], [])
         self.assertEqual(recalled["stale_memory_prevented"], 1)
 
+    def test_missing_check_proof_and_mismatched_file_digest_not_verified(self):
+        ledger = self.ledger()
+        ledger.append("check", {"check_id": "auth", "status": "passed", "evidence_id": "missing-receipt"}, self.current)
+        self.assertEqual(ledger.inform(self.current)["items"], [])
+        with self.assertRaises(HarnessError):
+            ledger.append("file_read", {"path": "auth.py", "digest": digest("wrong"), "purpose": "review"}, self.current)
+
+    def test_programmatic_recall_utf8_pages_obey_serialized_budget(self):
+        from agent_harness.execution_ledger import paginate
+        value = {"observation": "Ошибка строки: \"данные\"\n" * 1000}
+        offset, chunks = 0, []
+        while True:
+            page = paginate(value, offset=offset, limit=512)
+            self.assertLessEqual(len(json.dumps(page, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) + 2, 512)
+            chunks.append(page["content"])
+            if page["next_offset"] is None:
+                break
+            offset = page["next_offset"]
+        from agent_harness.core import canonical
+        self.assertEqual("".join(chunks), canonical(value).decode("utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()
