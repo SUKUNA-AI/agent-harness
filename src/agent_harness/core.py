@@ -16,6 +16,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import time
 import uuid
@@ -58,7 +59,12 @@ def digest(value):
 
 def file_hash(path):
     h = hashlib.sha256()
-    with Path(path).open("rb") as source:
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0)
+    # A regular path may have become a FIFO since the caller inspected it.
+    # Nonblocking open permits descriptor validation without waiting for a writer.
+    with os.fdopen(os.open(path, flags), "rb") as source:
+        if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+            raise HarnessError("Hash input must be a regular file: " + str(path))
         for block in iter(lambda: source.read(1024 * 1024), b""):
             h.update(block)
     return h.hexdigest()
@@ -284,6 +290,15 @@ def matches(path, patterns):
     return any(fnmatch.fnmatchcase(path, p) or (p.endswith("/**") and path == p[:-3]) for p in patterns)
 
 
+def _tool_version_probes(check):
+    probes = check.get("tool_versions", {})
+    if not isinstance(probes, dict):
+        raise HarnessError("tool_versions must be an object")
+    if "executable" in probes:
+        raise HarnessError("tool_versions name 'executable' is reserved for the command fingerprint")
+    return probes
+
+
 def validate_contract(contract):
     if not isinstance(contract, dict) or contract.get("schema_version") != SCHEMA_VERSION:
         raise HarnessError("Unsupported contract schema_version")
@@ -331,6 +346,7 @@ def validate_contract(contract):
         if check.get("kind") not in KINDS or not isinstance(check.get("required"), bool):
             raise HarnessError("Every check needs a kind and required boolean")
         if check["kind"] == "command":
+            _tool_version_probes(check)
             if "test" not in permissions:
                 raise HarnessError("Command checks require test permission")
             argv = check.get("argv")
@@ -402,15 +418,25 @@ def _git(cwd, *args):
 
 
 def _entry(path):
-    path = Path(path)
-    if path.is_symlink():
-        target = os.readlink(path)
-        return {"kind": "symlink", "target": target, "sha256": hashlib.sha256(target.encode("utf-8")).hexdigest()}
-    if not path.exists():
+    if not isinstance(path, Path):
+        path = Path(path)
+    try:
+        before = path.lstat()
+    except (FileNotFoundError, NotADirectoryError):
         return {"kind": "missing"}
-    if path.is_file():
-        return {"kind": "file", "sha256": file_hash(path), "size": path.stat().st_size, "executable": bool(path.stat().st_mode & 0o111) if os.name != "nt" else None}
-    return {"kind": "directory"}
+    if stat.S_ISLNK(before.st_mode):
+        target = os.readlink(path)
+        entry = {"kind": "symlink", "target": target, "sha256": hashlib.sha256(target.encode("utf-8")).hexdigest()}
+    elif stat.S_ISREG(before.st_mode):
+        entry = {"kind": "file", "sha256": file_hash(path), "size": before.st_size,
+                 "executable": bool(before.st_mode & 0o111) if os.name != "nt" else None}
+    else:
+        return {"kind": "directory"}
+    after = path.lstat()
+    fields = ("st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns")
+    if any(getattr(before, field) != getattr(after, field) for field in fields):
+        raise HarnessError("Source changed during snapshot: " + str(path))
+    return entry
 
 
 def _git_settings(cwd):

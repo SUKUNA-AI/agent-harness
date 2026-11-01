@@ -148,6 +148,65 @@ class MetadataTests(unittest.TestCase):
         with self.assertRaises(MetadataError):
             self.reader.run_status("demo")
 
+    def test_running_check_without_final_result_keeps_status_available(self):
+        self.check.unlink()
+        self.state.update(status="verifying", processes={"unit": {"status": "running", "attempt_id": "a1"}})
+        self.write_state()
+        before = self.snapshot()
+        result = self.reader.run_status("demo")
+        check = result["checks"][0]
+        self.assertEqual("running", check["recorded_status"])
+        self.assertIs(check["result_available"], False)
+        self.assertIsNone(check["matches_recorded_candidate"])
+        self.assertEqual("not_checked", result["evidence_freshness"])
+        self.assertEqual("builder", result["owners"][0]["owner_id"])
+        self.assertEqual(before, self.snapshot())
+
+    def test_check_folder_before_process_registration_is_unknown(self):
+        self.check.unlink()
+        self.state["status"] = "verifying"
+        self.write_state()
+        check = self.reader.run_status("demo")["checks"][0]
+        self.assertEqual("unknown", check["recorded_status"])
+        self.assertIs(check["result_available"], False)
+
+    def test_missing_result_rechecks_after_process_finalizes(self):
+        final = self.check.read_bytes()
+        self.check.unlink()
+        self.state.update(status="verifying", processes={"unit": {"status": "running", "attempt_id": "a1"}})
+        self.write_state()
+        original = self.reader._read
+        published = False
+
+        def publish_after_missing(*parts, **kwargs):
+            nonlocal published
+            value = original(*parts, **kwargs)
+            if parts[-1] == "result.json" and value is None and not published:
+                published = True
+                self.check.write_bytes(final)
+                self.state["processes"]["unit"]["status"] = "passed"
+                self.write_state()
+            return value
+
+        with patch.object(self.reader, "_read", side_effect=publish_after_missing):
+            check = self.reader.run_status("demo")["checks"][0]
+        self.assertTrue(published)
+        self.assertEqual("passed", check["recorded_status"])
+        self.assertTrue(check["result_available"])
+
+    def test_in_progress_does_not_hide_corrupt_or_wrong_attempt_records(self):
+        self.state.update(status="verifying", processes={"unit": {"status": "running", "attempt_id": "a1"}})
+        self.write_state()
+        self.check.write_bytes(b"{invalid")
+        with self.assertRaises(MetadataError):
+            self.reader.run_status("demo")
+        self.check.unlink()
+        for status, attempt in (("passed", "a1"), ("running", "previous")):
+            self.state["processes"]["unit"] = {"status": status, "attempt_id": attempt}
+            self.write_state()
+            with self.assertRaises(MetadataError):
+                self.reader.run_status("demo")
+
     def test_file_and_directory_symlink_escapes_rejected(self):
         external = self.base / "outside"
         external.mkdir()

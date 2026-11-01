@@ -26,7 +26,8 @@ STATUSES = frozenset({"planned", "running", "verifying", "ready_for_review", "ac
                       "rejected", "blocked", "paused", "stale", "complete", "completed",
                       "open", "idle", "done", "stopped", "closed", "unavailable", "unknown",
                       "passed", "failed", "satisfied", "not_run", "skipped", "timeout",
-                      "cancelled", "interrupted", "missing_dependency", "error"})
+                      "cancelled", "interrupted", "missing_dependency", "error",
+                      "budget_exhausted", "toolchain_changed", "inputs_changed", "validation_timeout"})
 WORKFLOWS = frozenset({"answer", "research", "plan", "review", "diagnostics", "change",
                        "performance", "document", "learning", "operations", "mixed"})
 KINDS = frozenset({"command", "source", "content", "visual", "runtime"})
@@ -167,7 +168,7 @@ class RunMetadataStore:
         self._validate(path, directory=True)
         return sorted(names)
 
-    def _read(self, *parts):
+    def _read(self, *parts, missing_ok=False):
         path = self.root.joinpath(*parts)
         try:
             before = self._validate(path)
@@ -196,6 +197,10 @@ class RunMetadataStore:
             return value
         except MetadataError:
             raise
+        except FileNotFoundError:
+            if missing_ok:
+                return None
+            raise MetadataError("Metadata is missing, inaccessible or invalid") from None
         except (OSError, ValueError, RecursionError):
             raise MetadataError("Metadata is missing, inaccessible or invalid") from None
 
@@ -268,12 +273,38 @@ class RunMetadataStore:
             for check_id in names:
                 if not _id(check_id):
                     raise MetadataError("Invalid check identifier")
-                record = self._read(run_id, "attempts", attempt, "checks", check_id, "result.json")
+                record = self._read(run_id, "attempts", attempt, "checks", check_id, "result.json", missing_ok=True)
+                if record is None:
+                    # run_check creates its folder before publishing a final
+                    # result. Re-read state, then the result: finalization may
+                    # have completed between the first missing read and now.
+                    latest = self._state(run_id)
+                    for key in ("task_id", "current_attempt", "contract_digest", "candidate_digest"):
+                        if latest.get(key) != state.get(key):
+                            raise MetadataError("Run identity changed while reading checks")
+                    record = self._read(run_id, "attempts", attempt, "checks", check_id, "result.json", missing_ok=True)
+                    if record is None:
+                        processes = latest.get("processes", {})
+                        if not isinstance(processes, dict):
+                            raise MetadataError("Invalid process metadata")
+                        process = processes.get(check_id)
+                        running = (isinstance(process, dict) and process.get("status") == "running"
+                                   and process.get("attempt_id") == attempt)
+                        starting = process is None and latest.get("status") == "verifying"
+                        if not (running or starting):
+                            raise MetadataError("Completed check has no result metadata")
+                        result["checks"].append({"check_id": check_id,
+                                                 "kind": "command" if running else "unknown",
+                                                 "recorded_status": "running" if running else "unknown",
+                                                 "attempt_id": attempt, "result_available": False,
+                                                 "matches_recorded_candidate": None})
+                        continue
                 if record.get("check_id") != check_id:
                     raise MetadataError("Invalid check metadata identity")
                 digest = _sha(record.get("candidate_digest"))
                 result["checks"].append({"check_id": check_id, "kind": _choice(record.get("kind"), KINDS),
                                           "recorded_status": _status(record.get("status")),
+                                          "result_available": True,
                                           "exit_code": _integer(record.get("exit_code"), -2147483648, 4294967295),
                                           "attempt_id": _id(record.get("attempt_id")),
                                           "candidate_digest": digest,

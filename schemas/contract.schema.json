@@ -46,7 +46,7 @@
           "expected_exit": {"type": "integer"},
           "effect": {"enum": ["read_only", "local_test"]},
           "resources": {"type": "array", "items": {"type": "string"}},
-          "tool_versions": {"type": "object", "additionalProperties": {"$ref": "#/$defs/argv"}},
+          "tool_versions": {"type": "object", "propertyNames": {"not": {"const": "executable"}}, "description": "Named version probes; executable is reserved for the command fingerprint.", "additionalProperties": {"$ref": "#/$defs/argv"}},
           "criteria": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/id"}},
           "assertions": {"type": "array", "items": {"type": "object", "required": ["regex"], "properties": {"stream": {"enum": ["stdout", "stderr", "combined"]}, "regex": {"type": "string"}, "min_matches": {"type": "integer", "minimum": 1}, "forbidden": {"type": "boolean"}}}},
           "reports": {"type": "array", "items": {"type": "object", "required": ["path", "format"], "properties": {"path": {"type": "string"}, "format": {"enum": ["junit", "json"]}, "min_tests": {"type": "integer", "minimum": 1}, "max_skipped": {"type": "integer", "minimum": 0}, "required_cases": {"type": "array", "items": {"type": "string"}}, "equals": {"type": "object"}}}}

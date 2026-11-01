@@ -14,6 +14,7 @@ import sys
 from .core import HarnessError, atomic_json, canonical, digest, now
 
 MAX_PACKET_BYTES = 4 * 1024 * 1024
+MAX_EXCERPT_FILE_BYTES = 16 * 1024 * 1024
 DENIED_PARTS = {".git", ".ssh", ".aws", "node_modules", ".venv", "__pycache__"}
 DENIED_NAMES = {"auth.json", "credentials", "credentials.json", "cookies.json", "id_rsa", "id_ed25519"}
 SECRET = re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,}|sk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{32,})\b|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|https?://[^\s/@:]+:[^\s/@]+@")
@@ -62,7 +63,8 @@ def _stamp(value, *, cross_api=False):
 def _open_source(root, name):
     """Anchor POSIX reads to directory descriptors, refusing every symlink hop."""
     path = _path(root, name)
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+             | getattr(os, "O_NONBLOCK", 0))
     if os.open in os.supports_dir_fd and hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NOFOLLOW"):
         with ExitStack() as stack:
             directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
@@ -92,6 +94,8 @@ def _read(path, limit, *, root, name):
         return None, before.st_size
     with _open_source(root, name) as source:
         opened = os.fstat(source.fileno())
+        if not stat.S_ISREG(opened.st_mode):
+            raise HarnessError("Packet input must remain a regular file")
         if _stamp(before, cross_api=True) != _stamp(opened, cross_api=True):
             raise HarnessError("Source changed before packet read")
         data = source.read(limit + 1)
@@ -180,6 +184,96 @@ def verify_packet(root, packet):
     return {"status": "stale" if errors else "current", "files_checked": len(files), "complete": packet.get("complete") is True and not packet.get("omitted"), "errors": errors, "limitation": "Source context only; omitted files and task acceptance are not verified"}
 
 
+def excerpt_source(root, name, *, start_line=1, lines=80, offset=None,
+                   max_bytes=8192, expect_sha256=None):
+    """Read a bounded view, retaining a hash of the entire observed UTF-8 file.
+
+    The byte budget includes JSON escaping, metadata and a final LF or CRLF.
+    ``next_offset`` is a UTF-8 boundary for continuing an overlong line. A caller
+    can supply the returned hash on the next read to refuse a changed source.
+    This is a local read, not a persistent index or an acceptance check.
+    """
+    if (type(start_line) is not int or not 1 <= start_line <= MAX_EXCERPT_FILE_BYTES + 1
+            or type(lines) is not int or not 1 <= lines <= 2000
+            or type(max_bytes) is not int or not 1024 <= max_bytes <= 65536
+            or (offset is not None and (type(offset) is not int or offset < 0))):
+        raise HarnessError("Excerpt requires positive line bounds, 1..2000 lines and 1024..65536 output bytes")
+    if offset is not None and start_line != 1:
+        raise HarnessError("Select start_line or offset, not both")
+    if expect_sha256 is not None and (not isinstance(expect_sha256, str)
+                                     or not re.fullmatch(r"[a-f0-9]{64}", expect_sha256)):
+        raise HarnessError("Expected source hash must be a lowercase SHA-256")
+    root = _root(root)
+    path = _path(root, name)
+    data, size = _read(path, MAX_EXCERPT_FILE_BYTES, root=root, name=name)
+    if data is None:
+        raise HarnessError("Excerpt input exceeds 16 MiB; narrow or rotate the source locally")
+    sha = hashlib.sha256(data).hexdigest()
+    if expect_sha256 is not None and sha != expect_sha256:
+        raise HarnessError("Source hash changed; locate the current passage before continuing")
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HarnessError("Excerpt requires UTF-8 text") from None
+    if "\x00" in text:
+        raise HarnessError("Excerpt does not read binary files")
+    if SECRET.search(text):
+        raise HarnessError("Possible credential in selected file; inspect locally: " + name)
+    total_lines = data.count(b"\n") + int(bool(data) and not data.endswith(b"\n"))
+    if offset is None:
+        if start_line > total_lines + 1:
+            raise HarnessError("Requested line is beyond the source")
+        begin = 0
+        for _ in range(start_line - 1):
+            newline = data.find(b"\n", begin)
+            begin = len(data) if newline < 0 else newline + 1
+    else:
+        begin = offset
+        if begin > len(data) or (begin < len(data) and data[begin] & 0xC0 == 0x80):
+            raise HarnessError("Offset must be a UTF-8 boundary within the source")
+        start_line = data.count(b"\n", 0, begin) + 1
+    requested_end = begin
+    for _ in range(lines):
+        newline = data.find(b"\n", requested_end)
+        requested_end = len(data) if newline < 0 else newline + 1
+        if requested_end == len(data):
+            break
+
+    def result_for(length):
+        # The whole file was decoded strictly above. Only a final partial UTF-8
+        # codepoint may be omitted here; returned offsets always reflect bytes
+        # actually delivered, so repeated reads never skip or replace content.
+        content = data[begin:begin + length].decode("utf-8", errors="ignore")
+        end = begin + len(content.encode("utf-8"))
+        return {"purpose": "context_excerpt_only", "path": name,
+                "root_identity": digest(str(root)), "sha256": sha,
+                "source_bytes": size, "total_lines": total_lines,
+                "start_line": start_line, "start_offset": begin, "end_offset": end,
+                "next_offset": end if end < len(data) else None,
+                "selection_complete": end == requested_end,
+                "file_complete": begin == 0 and end == len(data),
+                "truncated": end < requested_end, "max_output_bytes": max_bytes,
+                "content": content}
+
+    def fits(value):
+        # Text stdout may translate print's newline to CRLF on Windows.
+        return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) + 2 <= max_bytes
+
+    if not fits(result_for(0)):
+        raise HarnessError("Excerpt metadata exceeds output budget; increase max_bytes")
+    low, high = 0, min(requested_end - begin, max_bytes)
+    while low < high:
+        middle = (low + high + 1) // 2
+        if fits(result_for(middle)):
+            low = middle
+        else:
+            high = middle - 1
+    result = result_for(low)
+    if result["end_offset"] == begin and requested_end > begin:
+        raise HarnessError("Excerpt budget cannot include source content; increase max_bytes")
+    return result
+
+
 def dispatch(argv):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -193,6 +287,15 @@ def dispatch(argv):
     verify = commands.add_parser("verify")
     verify.add_argument("--root", required=True)
     verify.add_argument("--packet", required=True)
+    read = commands.add_parser("read", help="Bounded UTF-8 source/log excerpt with full-file hash")
+    read.add_argument("--root", required=True)
+    read.add_argument("--file", required=True)
+    position = read.add_mutually_exclusive_group()
+    position.add_argument("--start-line", type=int, default=1)
+    position.add_argument("--offset", type=int)
+    read.add_argument("--lines", type=int, default=80)
+    read.add_argument("--max-bytes", type=int, default=8192)
+    read.add_argument("--expect-sha256")
     args = parser.parse_args(argv)
     try:
         if args.command == "pack":
@@ -203,9 +306,16 @@ def dispatch(argv):
             # Exclusive creation preserves existing handoffs and evidence.
             atomic_json(output, packet, exclusive=True)
             result = {"path": str(output), "digest": packet["digest"], "files": len(packet["files"]), "source_bytes": packet["source_bytes"], "complete": packet["complete"], "omitted": packet["omitted"]}
-        else:
+        elif args.command == "verify":
             result = verify_packet(args.root, read_packet(args.packet))
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            result = excerpt_source(args.root, args.file, start_line=args.start_line,
+                                    lines=args.lines, offset=args.offset,
+                                    max_bytes=args.max_bytes, expect_sha256=args.expect_sha256)
+        if args.command == "read":
+            print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+        else:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
         return 1 if result.get("status") == "stale" else 0
     except (HarnessError, ValueError, OSError, TypeError) as error:
         print(json.dumps({"error": str(error), "type": type(error).__name__}, ensure_ascii=False), file=sys.stderr)

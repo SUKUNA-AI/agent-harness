@@ -1,5 +1,37 @@
 # История изменений
 
+## 1.3.0 — 2026-11-01
+
+Дополнительное ревью, ограниченные tool outputs и продолжение долгих задач.
+Архитектура и границы — [контекст и native core](docs/CONTEXT_AND_NATIVE_RU.md).
+
+- Зарезервированное имя `tool_versions.executable` больше не может затереть
+  fingerprint проверяемого executable; validation и runtime отклоняют коллизию.
+- Regexp/report validation имеет отдельный timeout и изолированный worker.
+  Строго literal assertions без reports остаются в быстром ограниченном пути.
+  Таймаут сохраняет неуспешный receipt и закрывает ledger; raw evidence остаются.
+- Выполняющаяся проверка без готового `result.json` видна через MCP metadata.
+  Неполные/повреждённые evidence не выдаются за passed.
+- Добавлены `status --summary`, read-only `handoff` и `context read` с полным
+  file hash, проверкой изменения и ограничением реального размера JSON.
+- Checkpoint проверяется на integrity и binding. Notes предыдущей попытки
+  не переносятся в текущие инструкции. Freshness по умолчанию неизвестна.
+- CLI загружает runner только на нужных маршрутах. Snapshot сокращает повторные
+  metadata queries и отклоняет изменение объекта во время чтения.
+- Nonblocking regular-file reads закрывают зависание при подмене файла на FIFO;
+  UTF-8 pagination и Windows CRLF входят в проверки output budget.
+- Optional `tool_output_token_limit=4096` описан отдельным примером; автоматически
+  не применяется. Compaction 500000, модели, reasoning и безопасность сохранены.
+
+## 1.2.0 — 2026-11-01
+
+[Отчёт 1.2.0](docs/REVIEW_1_2_0.md): исправления F01–F11, OS-lock recovery,
+обязательные JUnit cases, shared-record IDs, сохранение чужих edits при rollback,
+точные executable fingerprints, зависимые задачи и честная свежесть evidence.
+Добавлены source packets, review/handoff/wiki/experiment templates и browser
+workflow. Локальное ускорение достигнуто сокращением повторных Git/probe/hash
+операций; provider/model/effort и порог 500000 сохранены.
+
 ## 1.1.1 — 2026-11-01
 
 Исправления по аудиту исходного `main` и сокращение повторяющихся инструкций.

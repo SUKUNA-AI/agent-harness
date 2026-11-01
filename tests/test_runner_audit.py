@@ -177,6 +177,33 @@ class RunnerAuditTests(unittest.TestCase):
             runner.run_check(run, "unit")
         self.assertFalse((run.attempt_dir() / "checks/unit/result.json").exists())
 
+    def test_version_probe_cannot_replace_the_executable_fingerprint(self):
+        check = self.contract["checks"][0]
+        check["tool_versions"] = {"executable": [sys.executable, "--version"]}
+        directory = self.base / "invalid-run"
+        with self.assertRaisesRegex(HarnessError, "'executable' is reserved"):
+            Run.create(directory, self.contract)
+        self.assertFalse(directory.exists(), "Invalid contracts must fail before persistence")
+        # Direct callers of the fingerprint helper must also fail closed.
+        with patch.object(runner, "_contained_capture") as capture:
+            with self.assertRaisesRegex(HarnessError, "'executable' is reserved"):
+                runner._versions(check, cwd=self.cwd)
+            capture.assert_not_called()
+
+    @unittest.skipUnless(os.name == "posix", "POSIX executable search uses the child cwd")
+    def test_normal_version_probe_keeps_changed_executable_detection(self):
+        self.executable(text="original command")
+        self.contract["checks"][0].update(argv=["./.tools/verify"], tool_versions={"python": [sys.executable, "--version"]})
+        run = self.create()
+        run.freeze()
+        tools = read_json(run.attempt_dir() / "toolchains.json")["unit"]
+        self.assertIn("sha256", tools["executable"])
+        self.assertIn("Python", tools["python"]["version"])
+        self.executable(text="changed command")
+        with self.assertRaisesRegex(HarnessError, "Toolchain changed"):
+            runner.run_check(run, "unit")
+        self.assertEqual("rejected", runner.gate(run)["verdict"])
+
     @unittest.skipUnless(os.name == "posix", "POSIX executable search uses the child cwd")
     def test_unchanged_relative_executable_in_overridden_cwd_is_accepted(self):
         other = self.base / "different cwd"

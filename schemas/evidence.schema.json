@@ -6,7 +6,15 @@
   "properties": {
     "schema_version": {"const": 1},
     "kind": {"enum": ["command", "source", "content", "visual", "runtime"]},
-    "status": {"enum": ["passed", "failed", "timeout", "missing_dependency", "cancelled", "not_run", "inputs_changed", "toolchain_changed", "budget_exhausted", "satisfied"]},
+    "status": {"enum": ["passed", "failed", "timeout", "validation_timeout", "missing_dependency", "cancelled", "not_run", "inputs_changed", "toolchain_changed", "budget_exhausted", "satisfied"]},
+    "validation": {"type": "object", "required": ["status", "mode"], "properties": {
+      "status": {"enum": ["not_run", "not_required", "passed", "failed", "cancelled", "validation_timeout"]},
+      "mode": {"enum": ["none", "literal", "worker"]},
+      "timeout": {"type": "number", "minimum": 0, "maximum": 5},
+      "elapsed_seconds": {"type": "number", "minimum": 0},
+      "input_bytes": {"type": "integer", "minimum": 0},
+      "process": {"type": "object", "properties": {"identity": {"type": ["object", "null"]}}}
+    }},
     "method": {"enum": ["source_review", "agent_assessment", "human_assessment", "agent_visual_review", "human_visual_review", "observed_runtime"]},
     "assessor": {"type": "string"}, "assessment": {"type": "string"},
     "criteria": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}},

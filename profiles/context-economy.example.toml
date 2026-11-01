@@ -1,0 +1,15 @@
+# Optional additions, NOT a replacement for the user's config.toml.
+# Check the installed client schema and preserve explicit user overrides.
+# https://learn.chatgpt.com/docs/config-file/config-reference
+
+# Limits individual tool outputs retained in native history. Raw test evidence
+# must stay in permitted files; retrieve missing details with targeted excerpts.
+# This is a starting budget to evaluate on real tasks, not a measured savings %.
+tool_output_token_limit = 4096
+
+# Existing owner-selected compaction threshold remains unchanged. This is NOT
+# a context-window expansion and is not a cumulative session token budget.
+model_auto_compact_token_limit = 500000
+
+# The installer does not apply this optional output budget automatically.
+# Do not lower reasoning effort, change models, or disable safety to save tokens.

@@ -11,13 +11,14 @@ import shutil
 import signal
 import stat
 import subprocess
+import sys
+import tempfile
 import threading
 import time
 import urllib.parse
 import uuid
-import xml.etree.ElementTree as ET
 
-from .core import HarnessError, Run, atomic_json, canonical, changed_paths, digest, file_hash, identity_alive, lock, now, process_identity, read_json, remaining_budget_seconds, scope_errors, snapshot
+from .core import HarnessError, Run, _tool_version_probes, atomic_json, canonical, changed_paths, digest, file_hash, identity_alive, lock, now, process_identity, read_json, remaining_budget_seconds, scope_errors, snapshot
 
 
 class WindowsJob:
@@ -248,57 +249,95 @@ def _report_stamp(path):
     return {key: getattr(observed, "st_" + key) for key in ("dev", "ino", "size", "mtime_ns", "ctime_ns")}
 
 
-def _verify_assertions(check, stdout, stderr, report_paths):
-    errors = []
-    for assertion in check.get("assertions", []):
-        stream = {"stdout": stdout, "stderr": stderr, "combined": stdout + "\n" + stderr}.get(assertion.get("stream", "combined"))
-        if stream is None:
-            errors.append("unknown assertion stream")
-            continue
-        count = len(re.findall(assertion["regex"], stream, re.M))
-        if assertion.get("forbidden", False) and count:
-            errors.append(f"forbidden output pattern found: {assertion['regex']}")
-        elif not assertion.get("forbidden", False) and count < assertion.get("min_matches", 1):
-            errors.append(f"required output pattern missing: {assertion['regex']}")
-    reports = []
-    for definition, path in report_paths:
-        try:
-            if definition["format"] == "junit":
-                root = ET.parse(path).getroot()
-                cases = list(root.iter("testcase"))
-                names = [f"{case.get('classname', '')}::{case.get('name', '')}" for case in cases]
-                passed_names = [name for name, case in zip(names, cases) if all(case.find(tag) is None for tag in ("skipped", "failure", "error"))]
-                skipped = sum(case.find("skipped") is not None for case in cases)
-                failed = sum(case.find("failure") is not None or case.find("error") is not None for case in cases)
-                report = {"format": "junit", "cases": names, "tests": len(cases), "skipped": skipped, "failed": failed}
-                if len(cases) < definition.get("min_tests", 1):
-                    errors.append("test report collected too few cases")
-                if skipped > definition.get("max_skipped", 0):
-                    errors.append("test report skipped mandatory cases")
-                if failed:
-                    errors.append("test report contains failures")
-                for expected in definition.get("required_cases", []):
-                    if not any(re.search(expected, name) for name in names):
-                        errors.append(f"mandatory case missing: {expected}")
-                    elif not any(re.search(expected, name) for name in passed_names):
-                        errors.append(f"mandatory case did not pass: {expected}")
-                reports.append(report)
-            elif definition["format"] == "json":
-                value = read_json(path)
-                for key, expected in definition.get("equals", {}).items():
-                    cursor = value
-                    for segment in key.split("."):
-                        if not isinstance(cursor, dict):
-                            raise ValueError(f"JSON report path crosses a non-object: {key}")
-                        cursor = cursor[segment]
-                    if cursor != expected:
-                        errors.append(f"report field mismatch: {key}")
-                reports.append({"format": "json", "verified_equals": definition.get("equals", {})})
-            else:
-                errors.append("unsupported report format")
-        except (OSError, ValueError, KeyError, TypeError, AttributeError, IndexError, ET.ParseError, re.error) as error:
-            errors.append(f"invalid test report: {type(error).__name__}")
-    return errors, reports
+def _validate_evidence(check, stdout_path, stderr_path, report_paths, *, timeout, on_start=None, cancel_file=None):
+    """Bound parsing separately from command execution, with no pipe buffering.
+
+    The standalone worker can only parse data. Literal-only output assertions
+    avoid process startup, but use the same input/output caps and semantics.
+    """
+    from . import validation
+
+    started = time.monotonic()
+    deadline = started + timeout
+    mode = "literal" if not check.get("reports") and validation.literal_assertions(check.get("assertions", [])) else "worker"
+    info = {"mode": mode, "timeout": timeout}
+
+    def failure(status, message):
+        return {"schema_version": 1, "status": status, "errors": [message], "reports": []}
+
+    def cancelled():
+        return bool(cancel_file and Path(cancel_file).exists())
+
+    response = failure("failed", "evidence validation did not complete")
+    try:
+        request = {"schema_version": 1, "assertions": check.get("assertions", []),
+                   "stdout_path": str(stdout_path), "stderr_path": str(stderr_path),
+                   "reports": [{"definition": definition, "path": str(path)} for definition, path in report_paths]}
+        payload = validation.encode_request(request)
+        if cancelled():
+            response = failure("cancelled", "evidence validation cancelled")
+        elif time.monotonic() >= deadline:
+            response = failure("validation_timeout", "evidence validation timed out")
+        elif mode == "literal":
+            response = json.loads(validation.encode_response(validation.validate(request, literals=True, timeout=deadline - time.monotonic())))
+            if cancelled():
+                response = failure("cancelled", "evidence validation cancelled")
+        else:
+            # Real file handles avoid PIPE deadlocks and communicate() retaining
+            # an unbounded worker response in the runner's memory.
+            with tempfile.TemporaryFile(dir=stdout_path.parent) as input_file, tempfile.TemporaryFile(dir=stdout_path.parent) as output_file, tempfile.TemporaryFile(dir=stdout_path.parent) as error_file:
+                input_file.write(payload)
+                input_file.seek(0)
+                process = None
+                try:
+                    process = subprocess.Popen([sys.executable, "-I", "-B", str(Path(__file__).with_name("validation.py").resolve())],
+                                               stdin=input_file, stdout=output_file, stderr=error_file, shell=False)
+                    identity = process_identity(process.pid)
+                    info["process"] = {"identity": identity}
+                    if on_start is not None:
+                        on_start(identity)
+                    while True:
+                        if cancelled():
+                            response = failure("cancelled", "evidence validation cancelled")
+                            break
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            response = failure("validation_timeout", "evidence validation timed out")
+                            break
+                        try:
+                            process.wait(timeout=min(0.05, remaining) if cancel_file else remaining)
+                            break
+                        except subprocess.TimeoutExpired:
+                            if not cancel_file:
+                                response = failure("validation_timeout", "evidence validation timed out")
+                                break
+                    if process.poll() is not None and response["status"] not in {"cancelled", "validation_timeout"}:
+                        output_file.seek(0)
+                        raw = output_file.read(validation.MAX_RESPONSE_BYTES + 1)
+                        if len(raw) > validation.MAX_RESPONSE_BYTES:
+                            response = failure("failed", "validation worker response exceeds byte limit")
+                        elif process.returncode:
+                            response = failure("failed", f"validation worker exited with code {process.returncode}")
+                        else:
+                            response = json.loads(raw)
+                finally:
+                    if process is not None:
+                        if process.poll() is None:
+                            process.kill()
+                        process.wait()  # Reap even when interrupted during callback/wait/decoding.
+        if not isinstance(response, dict) or response.get("schema_version") != 1 or response.get("status") not in {"passed", "failed", "cancelled", "validation_timeout"} or not isinstance(response.get("errors"), list) or any(not isinstance(error, str) for error in response["errors"]) or not isinstance(response.get("reports"), list):
+            response = failure("failed", "invalid validation worker response")
+        if response["status"] == "passed" and response["errors"]:
+            response["status"] = "failed"
+    except KeyboardInterrupt:
+        response = failure("cancelled", "evidence validation cancelled")
+    except Exception as error:
+        detail = str(error) if isinstance(error, validation.InputLimit) else type(error).__name__
+        response = failure("failed", "evidence validation failed: " + detail)
+    info.update(status=response["status"], elapsed_seconds=round(time.monotonic() - started, 6))
+    if "input_bytes" in response:
+        info["input_bytes"] = response["input_bytes"]
+    return info, response["errors"], response["reports"]
 
 
 def _executable(command, cwd):
@@ -331,13 +370,14 @@ def _executable_hash(executable, cache):
 
 
 def _versions(check, *, cwd=None, probe_cache=None, fingerprint_cache=None):
+    probes = _tool_version_probes(check)
     cwd = str(Path(check.get("cwd") or cwd or Path.cwd()).resolve())
     result = {}
     fingerprints = {} if fingerprint_cache is None else fingerprint_cache
     executable = _executable(check["argv"][0], cwd)
     result["executable"] = {"requested": check["argv"][0], "resolved": executable, "version": "unknown", "sha256": _executable_hash(executable, fingerprints)}
     cache = {} if probe_cache is None else probe_cache
-    for name, argv in check.get("tool_versions", {}).items():
+    for name, argv in probes.items():
         if not isinstance(argv, list) or not argv or any(not isinstance(arg, str) or "\x00" in arg for arg in argv):
             raise HarnessError("tool_versions entries must be argv arrays")
         probe_executable = _executable(argv[0], cwd)
@@ -469,6 +509,7 @@ def run_check(run: Run, check_id, *, cancel_file=None):
                 record.update({"status": "failed", "error": "; ".join(reader_errors)})
             record["finished_at"] = now()
             record["elapsed_seconds"] = round(time.monotonic() - started, 6)
+            record["validation"] = {"status": "not_run", "mode": "none"}
             if process:
                 record.setdefault("exit_code", process.poll())
             try:
@@ -507,10 +548,31 @@ def run_check(run: Run, check_id, *, cancel_file=None):
                             record.setdefault("assertion_errors", []).append(f"report changed during capture: {report['path']}")
                     except (OSError, ValueError, TypeError) as error:
                         record.setdefault("assertion_errors", []).append(redact(f"report capture failed: {report['path']}: {type(error).__name__}: {error}"))
-                errors, reports = _verify_assertions(check, stdout_path.read_text(encoding="utf-8"), stderr_path.read_text(encoding="utf-8"), report_paths)
-                record.setdefault("assertion_errors", []).extend(errors)
-                record["reports"] = reports
-                if record["assertion_errors"] and record["status"] == "passed":
+                record.setdefault("assertion_errors", [])
+                if not check.get("assertions") and not check.get("reports"):
+                    record["validation"] = {"status": "not_required", "mode": "none"}
+                elif record["status"] != "cancelled":
+                    def validation_started(identity):
+                        with run.edit() as current:
+                            if current["current_attempt"] != contract["attempt_id"]:
+                                raise HarnessError("Attempt changed before evidence validation")
+                            current.setdefault("processes", {})[check_id] = {"identity": identity, "status": "running", "phase": "validation", "started_at": now(), "attempt_id": contract["attempt_id"]}
+
+                    timeout = min(5.0, check["timeout"])
+                    remaining = remaining_budget_seconds(contract)
+                    if remaining is not None:
+                        timeout = min(timeout, max(0, remaining))
+                    validation_info, errors, reports = _validate_evidence(check, stdout_path, stderr_path, report_paths, timeout=timeout, on_start=validation_started, cancel_file=cancel_file)
+                    record["validation"] = validation_info
+                    record.setdefault("assertion_errors", []).extend(errors)
+                    record["reports"] = reports
+                    if validation_info["status"] in {"cancelled", "validation_timeout"} and record["status"] == "passed":
+                        record["status"] = validation_info["status"]
+                    elif validation_info["status"] != "passed" and record["status"] == "passed":
+                        record["status"] = "failed"
+                if record.get("assertion_errors") and record["validation"]["status"] == "passed":
+                    record["validation"]["status"] = "failed"
+                if record.get("assertion_errors") and record["status"] == "passed":
                     record["status"] = "failed"
             except Exception as error:
                 record.update({"status": "failed", "error": redact(f"Evidence finalization failed: {type(error).__name__}: {error}")})

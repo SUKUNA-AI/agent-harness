@@ -7,8 +7,6 @@ from pathlib import Path
 import sys
 
 from . import __version__
-from .core import HarnessError, Run, read_json
-from .runner import gate, record_evidence, run_check
 
 INSTALL_COMMANDS = {"doctor", "install", "verify", "rollback", "uninstall"}
 
@@ -43,6 +41,12 @@ def main(argv=None):
         p.add_argument("--run-dir", required=True)
         if name == "status":
             p.add_argument("--verify-evidence", action="store_true", help="Read-only source, verdict and artifact validation")
+            p.add_argument("--summary", action="store_true", help="Bounded context view; full state remains the default")
+            p.add_argument("--max-output-bytes", type=int, default=8192)
+    p = commands.add_parser("handoff", help="Read-only checkpoint decisions and current run summary")
+    p.add_argument("--run-dir", required=True)
+    p.add_argument("--verify-evidence", action="store_true")
+    p.add_argument("--max-output-bytes", type=int, default=8192)
     p = commands.add_parser("check")
     p.add_argument("--run-dir", required=True)
     p.add_argument("--check", required=True)
@@ -66,6 +70,11 @@ def main(argv=None):
     p = commands.add_parser("runs")
     p.add_argument("--store", required=True)
     args = parser.parse_args(argv)
+    if args.command == "status" and not args.summary and args.max_output_bytes != 8192:
+        parser.error("--max-output-bytes requires --summary")
+    # Version/help and unrelated dispatchers do not need process containment,
+    # XML report parsing or runner imports. Preserve the same command behavior.
+    from .core import HarnessError, Run, read_json
     try:
         if args.command == "runs":
             result = []
@@ -81,8 +90,10 @@ def main(argv=None):
             elif args.command == "freeze":
                 result = run.freeze()
             elif args.command == "check":
+                from .runner import run_check
                 result = run_check(run, args.check, cancel_file=args.cancel_file)
             elif args.command == "evidence":
+                from .runner import record_evidence
                 result = record_evidence(run, args.check, read_json(args.record))
             elif args.command == "result":
                 result = run.submit_result(read_json(args.record))
@@ -94,11 +105,15 @@ def main(argv=None):
                 result = run.resume()
             elif args.command == "status":
                 result = run.status(verify_evidence=args.verify_evidence)
+            elif args.command == "handoff":
+                from .presentation import handoff
+                result = handoff(run, verify=args.verify_evidence, max_bytes=args.max_output_bytes)
             elif args.command == "capacity":
                 result = run.capacity()
             elif args.command == "operation":
                 result = run.record_operation(args.id, args.action, args.status, args.proof)
             else:
+                from .runner import gate
                 result = gate(run)
         # Do not dump complete candidate manifests or transcript-sized logs into chat.
         if args.command == "freeze":
@@ -106,15 +121,21 @@ def main(argv=None):
         elif args.command == "checkpoint":
             result = {"checkpoint_version": result["version"], "digest": result["digest"], "next_safe_step": result["next_safe_step"]}
         elif args.command == "check":
-            result = {k: result.get(k) for k in ("check_id", "status", "exit_code", "elapsed_seconds", "candidate_digest", "digest", "artifacts", "assertion_errors", "error")}
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+            result = {k: result.get(k) for k in ("check_id", "status", "exit_code", "elapsed_seconds", "validation", "candidate_digest", "digest", "artifacts", "assertion_errors", "error")}
+        elif args.command == "status" and args.summary:
+            from .presentation import status_summary
+            result = status_summary(run, result, max_bytes=args.max_output_bytes)
+        if args.command == "handoff" or (args.command == "status" and args.summary):
+            print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+        else:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
         if args.command == "check":
             return 0 if result.get("status") == "passed" else 1
         if args.command == "gate":
             return 0 if result.get("verdict") == "accepted" else 1
         if args.command == "resume":
             return 0 if result.get("safe_to_start_new_owner") else 1
-        if args.command == "status" and args.verify_evidence:
+        if args.command in {"status", "handoff"} and args.verify_evidence:
             return 0 if result.get("evidence_current") is True else 1
         return 0
     except (HarnessError, ValueError, OSError, KeyError) as error:

@@ -139,7 +139,7 @@ class SourcePacketTests(unittest.TestCase):
 
         def changed_domain(fd):
             value = original(fd)
-            fields = {name: getattr(value, name) for name in ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")}
+            fields = {name: getattr(value, name) for name in ("st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns")}
             fields["st_ctime_ns"] += 10000000
             return SimpleNamespace(**fields)
 
