@@ -10,6 +10,7 @@ from pathlib import Path
 import stat
 
 DEFAULT_MAX_BYTES = 16 * 1024 * 1024
+_VERIFY_CONTENT = os.name == "nt"
 
 
 class FileReadError(ValueError):
@@ -32,12 +33,25 @@ def _stamp(info, *, cross_api=False):
     return value if cross_api else (*value, info.st_ctime_ns)
 
 
+def _read_bounded(fd, limit):
+    chunks, total = [], 0
+    while total <= limit:
+        chunk = os.read(fd, min(65536, limit + 1 - total))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+    return b"".join(chunks)
+
+
 def read_regular_file(path, max_bytes=DEFAULT_MAX_BYTES, missing_ok=False) -> bytes | None:
     """Read at most max_bytes; only a missing path may produce None.
 
     O_NONBLOCK prevents a raced FIFO from blocking before fstat rejects it.
     Both the opened descriptor and the final directory entry must retain the
     original identity and remain ordinary files throughout the bounded read.
+    Windows may defer timestamp updates while handles remain open, so compare
+    a second bounded read from the same descriptor before the final checks.
     """
     if type(max_bytes) is not int or max_bytes < 0:
         raise ValueError("max_bytes must be a nonnegative integer")
@@ -59,20 +73,22 @@ def read_regular_file(path, max_bytes=DEFAULT_MAX_BYTES, missing_ok=False) -> by
         _regular(opened, path)
         if _stamp(before, cross_api=True) != _stamp(opened, cross_api=True):
             raise FileReadError(f"File input changed before reading: {path}")
-        chunks, total = [], 0
-        while total <= max_bytes:
-            chunk = os.read(fd, min(65536, max_bytes + 1 - total))
-            if not chunk:
-                break
-            chunks.append(chunk)
-            total += len(chunk)
+        data = _read_bounded(fd, max_bytes)
         after = os.fstat(fd)
+        if len(data) > max_bytes:
+            raise FileReadError(f"File input changed while reading or exceeds its byte limit: {path}")
+        verified = after
+        if _VERIFY_CONTENT:
+            os.lseek(fd, 0, os.SEEK_SET)
+            if _read_bounded(fd, max_bytes) != data:
+                raise FileReadError(f"File input changed during content verification: {path}")
+            verified = os.fstat(fd)
         last = path.lstat()
         _regular(last, path)
-        if (total > max_bytes or _stamp(opened) != _stamp(after)
+        if (_stamp(opened) != _stamp(after) or _stamp(after) != _stamp(verified)
                 or _stamp(before) != _stamp(last)
-                or _stamp(after, cross_api=True) != _stamp(last, cross_api=True)):
+                or _stamp(verified, cross_api=True) != _stamp(last, cross_api=True)):
             raise FileReadError(f"File input changed while reading or exceeds its byte limit: {path}")
-        return b"".join(chunks)
+        return data
     finally:
         os.close(fd)

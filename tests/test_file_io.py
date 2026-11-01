@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
+from agent_harness import file_io
 from agent_harness.file_io import FileReadError, read_regular_file
 
 
@@ -93,6 +94,91 @@ class RegularFileReadTests(unittest.TestCase):
 
         with patch("agent_harness.file_io.os.fstat", side_effect=different_ctime):
             self.assertEqual(read_regular_file(self.path), b"data")
+
+    def test_content_verification_rejects_same_size_edit_with_unchanged_observations(self):
+        self.path.write_bytes(b'{"a":1}')
+        observed = self.path.lstat()
+        native_read = os.read
+        changed = False
+
+        def editing(fd, size):
+            nonlocal changed
+            value = native_read(fd, size)
+            if not changed:
+                changed = True
+                self.path.write_bytes(b'{"a":2}')
+            return value
+
+        # Model Windows delayed timestamps explicitly: every identity/timestamp
+        # observation stays unchanged; only a real content comparison can fail.
+        with patch.object(file_io, "_VERIFY_CONTENT", True), \
+                patch.object(Path, "lstat", return_value=observed), \
+                patch.object(os, "fstat", return_value=observed), \
+                patch.object(os, "read", side_effect=editing), \
+                self.assertRaisesRegex(FileReadError, "content verification"):
+            read_regular_file(self.path)
+        self.assertTrue(changed)
+
+    def test_verification_pass_accepts_empty_and_exact_bounds_and_stays_bounded(self):
+        native_read = os.read
+        for data in (b"", b"x", b"x" * 65536):
+            with self.subTest(size=len(data)):
+                self.path.write_bytes(data)
+                reads = []
+
+                def reading(fd, size):
+                    value = native_read(fd, size)
+                    reads.append(len(value))
+                    return value
+
+                with patch.object(file_io, "_VERIFY_CONTENT", True), patch.object(os, "read", side_effect=reading):
+                    self.assertEqual(read_regular_file(self.path, len(data)), data)
+                self.assertEqual(sum(reads), 2 * len(data))
+
+    def test_growth_during_verification_is_rejected_with_unchanged_observations(self):
+        self.path.write_bytes(b"old")
+        observed = self.path.lstat()
+        native_seek = os.lseek
+
+        def growing(fd, position, whence):
+            self.path.write_bytes(b"longer")
+            return native_seek(fd, position, whence)
+
+        with patch.object(file_io, "_VERIFY_CONTENT", True), \
+                patch.object(Path, "lstat", return_value=observed), \
+                patch.object(os, "fstat", return_value=observed), \
+                patch.object(os, "lseek", side_effect=growing), \
+                self.assertRaisesRegex(FileReadError, "content verification"):
+            read_regular_file(self.path, 3)
+
+    def test_path_identity_is_checked_after_content_verification(self):
+        self.path.write_bytes(b"old")
+        native_lstat = Path.lstat
+        native_seek = os.lseek
+        verification_started = False
+
+        def verifying(fd, position, whence):
+            nonlocal verification_started
+            verification_started = True
+            return native_seek(fd, position, whence)
+
+        def changed_entry(path, *args, **kwargs):
+            value = native_lstat(path, *args, **kwargs)
+            if verification_started:
+                # Windows can deny replacement of the open file. Model the
+                # changed directory entry without relying on delete sharing.
+                fields = {name: getattr(value, name) for name in (
+                    "st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_nlink",
+                    "st_uid", "st_gid", "st_ctime_ns")}
+                fields["st_ino"] += 1
+                return SimpleNamespace(**fields)
+            return value
+
+        with patch.object(file_io, "_VERIFY_CONTENT", True), \
+                patch.object(os, "lseek", side_effect=verifying), \
+                patch.object(Path, "lstat", new=changed_entry), \
+                self.assertRaisesRegex(FileReadError, "changed"):
+            read_regular_file(self.path)
 
 
 if __name__ == "__main__":

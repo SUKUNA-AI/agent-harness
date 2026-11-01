@@ -19,6 +19,8 @@
   проверяется до записи исходников.
 - Чтение context packets и установочных файлов ограничено по размеру,
   использует nonblocking open и проверяет тип/идентичность открытого файла.
+  На Windows второе bounded чтение выявляет изменение содержимого даже при
+  задержке обновления file timestamps; scanner/snapshot не меняет свой путь I/O.
 - Rust scanner: исправлена совместимость character classes с Python fnmatch;
   оба backend сохраняют пробельные символы в имени Git-root.
 - Native build явно выбирает host target, связывает source fingerprint с
