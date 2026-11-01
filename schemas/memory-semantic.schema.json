@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "memory-semantic v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "repository_identity": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "document": {
+      "enum": [
+        "architecture",
+        "decisions",
+        "conventions"
+      ]
+    },
+    "claim": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "source": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "actor": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "confidence": {
+      "enum": [
+        "verified",
+        "hypothesis"
+      ]
+    },
+    "last_checked": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository_identity": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "revision": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "snapshot_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "files": {
+          "type": "object",
+          "maxProperties": 4096,
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)(?!.*:).+$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "toolchain_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "branch": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "file_inventory_complete": {
+          "type": "boolean"
+        },
+        "omitted_file_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "repository_identity",
+        "revision",
+        "snapshot_id",
+        "files"
+      ]
+    },
+    "validity_status": {
+      "enum": [
+        "valid",
+        "needs_revalidation",
+        "superseded",
+        "rejected",
+        "expired"
+      ]
+    },
+    "relations": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "to": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "kind": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "kind"
+        ]
+      }
+    },
+    "supersedes": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    }
+  },
+  "required": [
+    "schema_version",
+    "id",
+    "repository_identity",
+    "document",
+    "claim",
+    "source",
+    "actor",
+    "confidence",
+    "last_checked",
+    "provenance",
+    "validity_status",
+    "relations",
+    "supersedes"
+  ]
+}

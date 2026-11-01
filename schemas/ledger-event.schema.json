@@ -1,0 +1,514 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ledger-event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "event_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "task_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "kind": {
+      "enum": [
+        "file_read",
+        "symbol_examined",
+        "command",
+        "check",
+        "failure",
+        "repair_hypothesis",
+        "decision",
+        "state_transition"
+      ]
+    },
+    "actor": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "session_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    },
+    "causal_parent": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "validity_status": {
+      "enum": [
+        "valid",
+        "needs_revalidation",
+        "superseded",
+        "rejected",
+        "expired"
+      ]
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository_identity": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "revision": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "snapshot_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "files": {
+          "type": "object",
+          "maxProperties": 4096,
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)(?!.*:).+$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "toolchain_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "branch": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "file_inventory_complete": {
+          "type": "boolean"
+        },
+        "omitted_file_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "repository_identity",
+        "revision",
+        "snapshot_id",
+        "files"
+      ]
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "start_line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "end_line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "purpose": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "symbol": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "language": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "definition_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        "reference_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        "confidence": {
+          "enum": [
+            "exact",
+            "syntactic",
+            "heuristic",
+            "unknown"
+          ]
+        },
+        "argv": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        "cwd": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "toolchain_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "env_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "config_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "effect": {
+          "enum": [
+            "read_only",
+            "pure",
+            "local_test",
+            "write",
+            "external",
+            "unknown"
+          ]
+        },
+        "input_closure_complete": {
+          "type": "boolean"
+        },
+        "exit_code": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "timed_out": {
+          "type": "boolean"
+        },
+        "stdout_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "evidence_id": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "evidence_path": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "evidence_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "check_id": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "status": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "fact": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "category": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "signature": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "first_seen": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "last_seen": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "hypothesis": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "affected_files": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        "outcome": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "context": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "alternative": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "constraints": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "authorization": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "from_status": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "to_status": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "operation_fingerprint": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "result_pointer": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "decision": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "supersedes": {
+          "type": "string",
+          "maxLength": 512
+        }
+      },
+      "required": []
+    }
+  },
+  "required": [
+    "schema_version",
+    "event_id",
+    "run_id",
+    "task_id",
+    "kind",
+    "actor",
+    "session_id",
+    "causal_parent",
+    "timestamp",
+    "validity_status",
+    "provenance",
+    "payload"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "file_read"
+          }
+        },
+        "additionalProperties": true
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": [
+              "path",
+              "digest",
+              "purpose"
+            ]
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "symbol_examined"
+          }
+        },
+        "additionalProperties": true
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": [
+              "path",
+              "symbol",
+              "digest",
+              "confidence"
+            ]
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "command"
+          }
+        },
+        "additionalProperties": true
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": [
+              "argv",
+              "cwd",
+              "effect",
+              "status"
+            ]
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "check"
+          }
+        },
+        "additionalProperties": true
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": [
+              "check_id",
+              "status",
+              "evidence_id"
+            ]
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "failure"
+          }
+        },
+        "additionalProperties": true
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": [
+              "category",
+              "signature",
+              "status"
+            ]
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "repair_hypothesis"
+          }
+        },
+        "additionalProperties": true
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": [
+              "hypothesis",
+              "outcome"
+            ]
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "decision"
+          }
+        },
+        "additionalProperties": true
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": [
+              "reason"
+            ]
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "state_transition"
+          }
+        },
+        "additionalProperties": true
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": [
+              "from_status",
+              "to_status",
+              "reason"
+            ]
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  ]
+}

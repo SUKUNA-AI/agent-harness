@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "memory-short-term v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "repository_identity": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "goal": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "constraints": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "string",
+        "maxLength": 512
+      }
+    },
+    "checkpoint": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "active_task": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "failures": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "string",
+        "maxLength": 512
+      }
+    },
+    "important_files": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "string",
+        "maxLength": 512
+      }
+    },
+    "next_step": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "evidence_ids": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "string",
+        "maxLength": 512
+      }
+    },
+    "session_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    },
+    "attempts_used": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "tokens_reported": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository_identity": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "revision": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "snapshot_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "files": {
+          "type": "object",
+          "maxProperties": 4096,
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)(?!.*:).+$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "toolchain_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "branch": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "file_inventory_complete": {
+          "type": "boolean"
+        },
+        "omitted_file_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "repository_identity",
+        "revision",
+        "snapshot_id",
+        "files"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "id",
+    "repository_identity",
+    "goal",
+    "constraints",
+    "checkpoint",
+    "active_task",
+    "failures",
+    "important_files",
+    "next_step",
+    "evidence_ids",
+    "session_id",
+    "attempts_used",
+    "tokens_reported",
+    "updated_at",
+    "provenance"
+  ]
+}

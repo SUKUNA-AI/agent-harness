@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "knowledge-provenance v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "repository_identity": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "revision": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "snapshot_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "files": {
+      "type": "object",
+      "maxProperties": 4096,
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)(?!.*:).+$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[a-f0-9]{64}$"
+      }
+    },
+    "toolchain_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "branch": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "file_inventory_complete": {
+      "type": "boolean"
+    },
+    "omitted_file_count": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "repository_identity",
+    "revision",
+    "snapshot_id",
+    "files"
+  ]
+}

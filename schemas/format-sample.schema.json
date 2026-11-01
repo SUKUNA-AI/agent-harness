@@ -1,0 +1,63 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "format": {
+      "enum": [
+        "json",
+        "markdown",
+        "toon"
+      ]
+    },
+    "stdout_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "raw_path": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "thread_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    },
+    "input_tokens": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "correct": {
+      "type": "boolean"
+    },
+    "expected_answer": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "actual_answer": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 512
+    }
+  },
+  "required": [
+    "schema_version",
+    "format",
+    "stdout_digest",
+    "raw_path",
+    "thread_id",
+    "input_tokens",
+    "correct",
+    "expected_answer",
+    "actual_answer"
+  ]
+}

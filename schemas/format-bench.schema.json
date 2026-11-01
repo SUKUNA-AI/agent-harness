@@ -1,0 +1,282 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "status": {
+      "enum": [
+        "unsuitable_data",
+        "insufficient_data",
+        "quality_regression",
+        "measured_positive",
+        "measured_negative"
+      ]
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "selected_format": {
+      "enum": [
+        "json",
+        "toon"
+      ]
+    },
+    "reason": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "model": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "shape": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "keys": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        "types": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        "row_count": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "keys",
+        "types",
+        "row_count"
+      ]
+    },
+    "output_type": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "environment_fingerprint": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 512
+    },
+    "data_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "payload_bytes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "json": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "markdown": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "toon": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "json",
+        "markdown",
+        "toon"
+      ]
+    },
+    "samples": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repeat": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "formats": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "json": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "input_tokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1
+                  },
+                  "correct": {
+                    "type": "boolean"
+                  },
+                  "model": {
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  "wall_seconds": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "source": {
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  "evidence": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 512
+                  }
+                },
+                "required": [
+                  "input_tokens",
+                  "correct",
+                  "model",
+                  "wall_seconds",
+                  "source",
+                  "evidence"
+                ]
+              },
+              "markdown": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "input_tokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1
+                  },
+                  "correct": {
+                    "type": "boolean"
+                  },
+                  "model": {
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  "wall_seconds": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "source": {
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  "evidence": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 512
+                  }
+                },
+                "required": [
+                  "input_tokens",
+                  "correct",
+                  "model",
+                  "wall_seconds",
+                  "source",
+                  "evidence"
+                ]
+              },
+              "toon": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "input_tokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1
+                  },
+                  "correct": {
+                    "type": "boolean"
+                  },
+                  "model": {
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  "wall_seconds": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "source": {
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  "evidence": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 512
+                  }
+                },
+                "required": [
+                  "input_tokens",
+                  "correct",
+                  "model",
+                  "wall_seconds",
+                  "source",
+                  "evidence"
+                ]
+              }
+            },
+            "required": [
+              "json",
+              "markdown",
+              "toon"
+            ]
+          }
+        },
+        "required": [
+          "repeat",
+          "formats"
+        ]
+      }
+    },
+    "input_token_saving_fraction": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "sign_test_p": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1
+    }
+  },
+  "required": [
+    "schema_version",
+    "status",
+    "enabled",
+    "selected_format",
+    "reason",
+    "model"
+  ]
+}

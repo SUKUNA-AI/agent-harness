@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "memory-relations v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "repository_identity": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "record_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+          },
+          "from": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "to": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "kind": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "provenance": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "repository_identity": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "revision": {
+                "type": "string",
+                "maxLength": 512
+              },
+              "snapshot_id": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "files": {
+                "type": "object",
+                "maxProperties": 4096,
+                "propertyNames": {
+                  "type": "string",
+                  "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)(?!.*:).+$"
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              },
+              "toolchain_digest": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "branch": {
+                "type": "string",
+                "maxLength": 512
+              },
+              "file_inventory_complete": {
+                "type": "boolean"
+              },
+              "omitted_file_count": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "repository_identity",
+              "revision",
+              "snapshot_id",
+              "files"
+            ]
+          }
+        },
+        "required": [
+          "record_id",
+          "from",
+          "to",
+          "kind",
+          "provenance"
+        ]
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "repository_identity",
+    "records"
+  ]
+}

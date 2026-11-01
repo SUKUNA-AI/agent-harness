@@ -1,0 +1,222 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "memory-episode v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "repository_identity": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "problem_signature": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "category": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "context": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "hypothesis": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "attempted_fix": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "root_cause": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "outcome": {
+      "enum": [
+        "verified",
+        "failed",
+        "unknown"
+      ]
+    },
+    "evidence_ids": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "string",
+        "maxLength": 512
+      }
+    },
+    "evidence_refs": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "path": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "id",
+          "path",
+          "sha256"
+        ]
+      }
+    },
+    "affected_symbols": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "string",
+        "maxLength": 512
+      }
+    },
+    "tool_version": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "trust_level": {
+      "enum": [
+        "verified",
+        "historical_hypothesis"
+      ]
+    },
+    "tags": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "string",
+        "maxLength": 512
+      }
+    },
+    "notes": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "actor": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expires_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 64,
+      "format": "date-time"
+    },
+    "validity_status": {
+      "enum": [
+        "valid",
+        "needs_revalidation",
+        "superseded",
+        "rejected",
+        "expired"
+      ]
+    },
+    "supersedes": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository_identity": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "revision": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "snapshot_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "files": {
+          "type": "object",
+          "maxProperties": 4096,
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)(?!.*:).+$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "toolchain_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "branch": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "file_inventory_complete": {
+          "type": "boolean"
+        },
+        "omitted_file_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "repository_identity",
+        "revision",
+        "snapshot_id",
+        "files"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "id",
+    "repository_identity",
+    "problem_signature",
+    "category",
+    "context",
+    "hypothesis",
+    "attempted_fix",
+    "root_cause",
+    "outcome",
+    "evidence_ids",
+    "affected_symbols",
+    "tool_version",
+    "trust_level",
+    "tags",
+    "notes",
+    "actor",
+    "created_at",
+    "expires_at",
+    "validity_status",
+    "supersedes",
+    "provenance"
+  ]
+}

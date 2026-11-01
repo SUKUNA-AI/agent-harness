@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "check-cache v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "key": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "first_run_id": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "original_timestamp": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "proof": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "snapshot_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "repository_identity": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "toolchain_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "binary_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "argv": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        "cwd": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "env_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "config_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "platform": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "input_closure_complete": {
+          "const": true
+        },
+        "isolated_environment": {
+          "const": true
+        },
+        "no_external_dependencies": {
+          "const": true
+        }
+      },
+      "required": [
+        "schema_version",
+        "snapshot_id",
+        "repository_identity",
+        "toolchain_digest",
+        "binary_digest",
+        "argv",
+        "cwd",
+        "env_digest",
+        "config_digest",
+        "platform",
+        "input_closure_complete",
+        "isolated_environment",
+        "no_external_dependencies"
+      ]
+    },
+    "evidence_id": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "evidence_path": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "evidence_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "status": {
+      "const": "passed"
+    }
+  },
+  "required": [
+    "schema_version",
+    "key",
+    "first_run_id",
+    "original_timestamp",
+    "proof",
+    "evidence_id",
+    "evidence_path",
+    "evidence_digest",
+    "status"
+  ]
+}
