@@ -7,6 +7,13 @@ Ledger хранит проверяемые наблюдения о выполн�
 пакет, который возвращается модели. Их состояние остаётся локальными файлами;
 vector DB, embeddings, listener и обязательный JS runtime отсутствуют.
 
+![Память, provenance и адресный retrieval](diagrams/memory-provenance.svg)
+
+[Редактировать в draw.io](diagrams/memory-provenance.drawio) · [Все схемы](diagrams/README.md)
+
+<details>
+<summary>Mermaid source той же схемы</summary>
+
 ```mermaid
 flowchart TD
     C["Codex / checks: наблюдаемые события"] --> L["Immutable YAML Ledger events"]
@@ -23,6 +30,8 @@ flowchart TD
     D --> Q["Адресный retrieval по ID и offset"]
     Q --> R
 ```
+
+</details>
 
 ## Provenance и свежесть
 
@@ -83,6 +92,16 @@ alternate `._pth`/`pyvenv.cfg`. Обычные global/venv/POSIX interpreters н
 полного доказательства и не кэшируются. Ничего устанавливать для acceptance
 не требуется: unsupported случай выполняется заново. Эта граница покрыта
 реальным positive bundle и изменениями startup config, DLL и ZIP.
+
+| Proof | Текущие конечные bounds | При превышении |
+| --- | --- | --- |
+| Physical input closure | 256 files, 128 directories, 1 MiB/file, 8 MiB total, 2 s | `requires_revalidation` / cache miss |
+| Optional Windows runtime closure | 16 files, 16 MiB/file, 32 MiB total, 5 s | Cache proof отклоняется |
+
+Physical inventory проверяет bytes и перечень entries, включая hidden/ignored
+и Git administration; новый файл также инвалидирует прежнее отсутствие match.
+Это намеренно узкая возможность для маленьких контролируемых probes. Она не
+обещает cache arbitrary repository, test suite или runtime, установленного извне.
 
 Для контролируемого `rg` reuse нужны явные `--no-config --no-ignore-parent
 --no-ignore-global --no-ignore-vcs`, разрешённые search flags и относительные

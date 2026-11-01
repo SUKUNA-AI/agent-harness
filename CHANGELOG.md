@@ -18,6 +18,12 @@
 Детали, migration, наблюдаемые ограничения и pilot results:
 [release notes](docs/RELEASE_NOTES_1.5.0.md).
 
+Документация 1.5.0 дополнена редактируемыми draw.io схемами и SVG-экспортами.
+Уточнены declared inputs, сохранение token budgets при recovery и передача
+accepted managed candidate из staging. Cache v3 требует доказанного конечного
+Windows runtime; ordinary global/venv/POSIX Python и unsupported checks дают
+miss, v1/v2 records остаются историей. Это не меняет fresh final runner/gate.
+
 ## 1.4.2 — 2026-11-01
 
 Полная актуализация документации и релизной поставки поверх исправлений R01–R14.

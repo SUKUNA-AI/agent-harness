@@ -27,13 +27,17 @@
 
 | Документ | Содержание |
 | --- | --- |
-| [Архитектура](ARCHITECTURE_RU.md) | Слои, границы Python/Rust/Codex, поток контекста и восстановление; диаграммы |
+| [Архитектура](ARCHITECTURE_RU.md) | Слои, границы Python/Rust/Codex, поток контекста и восстановление |
+| [Галерея draw.io](diagrams/README.md) | Редактируемые XML, реально экспортированные SVG, связи с Mermaid source и кодом |
 | [CLI reference](CLI_REFERENCE_RU.md) | Все маршруты, аргументы, defaults, единицы лимитов и exit codes |
 | [Эксплуатация](OPERATIONS.md) | Полный локальный пример managed run, status, attempt, checkpoint и resume |
 | [Приёмка](ACCEPTANCE.md) | Evidence, receipts, freshness, gate и независимый evaluator |
 | [Координация](ORCHESTRATION_RU.md) | Делегация, DAG, slots, ownership, review и repair |
 | [Контекст и Rust](CONTEXT_AND_NATIVE_RU.md) | RepoMap, packets, excerpts, budgets, long-running tasks и производительность |
 | [LSP](LSP_RU.md) | Symbols/definition/references, Unicode positions, rename preview/apply и recovery |
+| [Безопасность](SECURITY_RU.md) | Недоверенные данные, permissions, narrow cache и ограничения изоляции |
+| [Разработка](DEVELOPMENT_RU.md) | Границы модулей, tests, docs/diagram workflow и подготовка релиза |
+| [Карта документации](DOCUMENTATION_MAP_RU.md) | Текущие guides, архивы и устанавливаемые instructions; связь с кодом |
 
 ## Интеграции и инструкции модели
 
@@ -55,12 +59,13 @@
 
 ## Релизы, проверки и архив исследования
 
-Текущий candidate: [1.5.0](RELEASE_NOTES_1.5.0.md). Исходная опубликованная
+Текущая линия: [1.5.0](RELEASE_NOTES_1.5.0.md). Исходная опубликованная
 база: [1.4.2](RELEASE_1_4_2.md). Полная история:
 [CHANGELOG](../CHANGELOG.md).
 
 | Снимок | Что зафиксировано |
 | --- | --- |
+| [Baseline перед 1.5.0](BASELINE_1_5_0.md) | Фактически проверенная исходная main 1.4.2; не финальная приёмка 1.5.0 |
 | [Аудит 1.4.1](REVIEW_1_4_1.md) | Исправления R01–R14, metadata, гонки, LSP recovery и native build |
 | [Проверка 1.4.0](REVIEW_1_4_0.md) | Перенос scanner/snapshot в Rust, RepoMap, LSP и измерения |
 | [Проверка 1.3.0](REVIEW_1_3_0.md) | Bounded output, handoff, reader races и CLI overhead |

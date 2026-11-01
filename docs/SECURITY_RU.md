@@ -22,6 +22,17 @@ model/provider или дать право на публикацию.
   dependencies не подавляются по старому success. Gate проверяет current source.
 - Memory opt-in и repository-scoped, instruction-like text остаётся данными.
 
+Optional cache v3 не доверяет заявлению `pure`/`complete`: fresh physical
+inventory и runtime startup dependencies проверяются при put/get. Для Python
+admission разрешён только narrow self-contained Windows bundle; ordinary
+global/venv/POSIX runtime, imports, external reads и opaque commands дают miss.
+Govern `rg` не переписывает argv; unsafe flags/outside scopes требуют fresh
+execution. Required acceptance checks всегда выполняются заново.
+
+Managed recovery проверяет worktree ownership до model resume. Неизвестная
+creation identity, чужой сохранённый cwd или orphan child не освобождают slot.
+При token budget неизвестный interrupted usage блокирует продолжение.
+
 ## Остаточные ограничения
 
 Worktree и cooperating locks не являются OS sandbox против другого процесса

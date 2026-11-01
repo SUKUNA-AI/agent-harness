@@ -1,6 +1,6 @@
 # Установка и перенос Agent Harness
 
-Документация релиза **1.5.0**, сверена с реализацией **2026-11-01**.
+Документация релиза **1.5.0**, сверена с реализацией **2026-11-02**.
 Установка подключает общие инструкции, три native-роли и семь skills к локальному
 профилю Codex. Операции выполняются явно; синхронизация GitHub сама профиль не
 обновляет. Настройки модели, provider, reasoning основного чата и безопасности
@@ -123,6 +123,12 @@ py -3 tools/harness.py install --codex-home "$HarnessHome" --skills-home "$Harne
 отсутствующий override оставляет активным `AGENTS.md`. Чужие инструкции вокруг
 managed block сохраняются. Существующий чужой owned-файл либо ручное изменение
 установленного role/skill не перезаписываются автоматически.
+
+`harness-doc-author` ведёт документацию по фактическому коду/CLI, а
+`harness-doc-review` задаёт независимую content/visual проверку. Их наличие
+не создаёт новый model process автоматически. Исходники схем и готовые SVG
+находятся в [docs/diagrams](docs/diagrams/README.md); draw.io нужен только автору
+для редактирования/экспорта, а не для установки и выполнения harness.
 
 ## Структурная и native-проверка
 
@@ -266,6 +272,13 @@ machine pointer. Если discovery блокируется, сначала со�
 overlay и state с сохранёнными данными. Не придумывайте manifest или hashes.
 Подробный операционный порядок — [OPERATIONS](docs/OPERATIONS.md).
 
+![Установка, проверка и откат](docs/diagrams/installation-recovery.svg)
+
+[Редактировать в draw.io](docs/diagrams/installation-recovery.drawio) · [Все схемы](docs/diagrams/README.md)
+
+<details>
+<summary>Mermaid source той же схемы</summary>
+
 ```mermaid
 flowchart TD
     A["Doctor: профиль и источники"] --> B["Dry-run: пути и адресный diff"]
@@ -278,6 +291,8 @@ flowchart TD
     G -->|"Нет"| I["Rollback plan или recovery journal"]
     I --> D
 ```
+
+</details>
 
 ## Границы безопасности установки с 1.4.1
 

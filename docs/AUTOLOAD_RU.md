@@ -1,6 +1,6 @@
 # Автоподключение в новых чатах и проектах
 
-Текущий контракт релиза **1.5.0**, сверено **2026-11-01**. После установки в
+Текущий контракт релиза **1.5.0**, сверено **2026-11-02**. После установки в
 конкретный локальный профиль Codex managed bootstrap обнаруживается клиентом
 в новых сессиях. Команда «включи harness» для каждого проекта не требуется.
 Подробные workflows/skills агент читает, когда задача требует соответствующей
@@ -21,6 +21,13 @@
 Актуальные детали discovery — в
 [официальной документации AGENTS.md](https://learn.chatgpt.com/docs/agent-configuration/agents-md).
 
+![Инструкции нового процесса Codex](diagrams/instruction-discovery.svg)
+
+[Редактировать в draw.io](diagrams/instruction-discovery.drawio) · [Все схемы](diagrams/README.md)
+
+<details>
+<summary>Mermaid source той же схемы</summary>
+
 ```mermaid
 flowchart TD
     A["Новая сессия: выбранный Codex home"] --> B{"Глобальный override непустой?"}
@@ -35,11 +42,18 @@ flowchart TD
     H --> J["Агент читает нужный workflow и evidence"]
 ```
 
+</details>
+
 Bootstrap содержит version marker (`HARNESS_POLICY_VERSION`) и ссылки на
 постоянный package root. Native-роли лежат в Codex home, пользовательские skills
 по умолчанию — в `~/.agents/skills`. Это два разных механизма discovery:
 роль задаёт native contract и effort, skill предоставляет повторяемую процедуру.
 Их наличие не означает обязательный spawn на короткой задаче.
+
+В 1.5.0 каталог включает `harness-doc-author` и `harness-doc-review`.
+Skill выбирается по задаче; он не заменяет native-role TOML и не подтверждает
+переключение уже открытого чата на новую политику. Документация и draw.io assets
+читаются по ссылкам, а не вставляются в каждый model input.
 
 ## Как подтвердить автоподключение
 

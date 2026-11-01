@@ -8,7 +8,8 @@
 [Memory/context](docs/MEMORY_AND_CONTEXT_RU.md) ·
 [Managed agents](docs/DYNAMIC_AGENTS_RU.md) ·
 [Migration](docs/STATE_FORMATS_AND_MIGRATION_RU.md) ·
-[Релиз 1.5.0](docs/RELEASE_NOTES_1.5.0.md)
+[Релиз 1.5.0](docs/RELEASE_NOTES_1.5.0.md) ·
+[Редактируемые схемы draw.io](docs/diagrams/README.md)
 
 ## Новое в 1.5.0
 
@@ -84,6 +85,13 @@ python tools/build_release.py --output-dir /absolute/release-output
 reproducible ZIP + manifest/SHA256SUMS, проверяет распаковку и isolated install,
 reinstall/verify/rollback. Настоящие user config/state/logs в поставку не входят.
 Source-only artifact выбирается явно и не называется готовым native bundle.
+
+**Повторное использование.** Ledger govern даёт advisory decision для явно
+контролируемого read; он не перехватывает встроенные tools Codex. Optional
+CheckCache v3 допускает только literal probes с `-I -S` в доказанном закрытом
+Windows Python bundle. Обычные global/venv/POSIX interpreters и arbitrary tests
+выполняются fresh. Финальные required checks всегда запускает runner заново.
+Подробные границы и bounds — [Memory/context](docs/MEMORY_AND_CONTEXT_RU.md).
 
 ## Существующие инструменты и native workflow
 
@@ -250,6 +258,13 @@ python "$HARNESS_PACKAGE/tools/harness.py" verify \
 
 ## Как задача проходит через harness
 
+![Задача, исполнители и приёмка](docs/diagrams/task-delivery.svg)
+
+[Редактировать в draw.io](docs/diagrams/task-delivery.drawio) · [Все схемы](docs/diagrams/README.md)
+
+<details>
+<summary>Mermaid source той же схемы</summary>
+
 ```mermaid
 flowchart TD
     Request["Цель и ограничения пользователя"] --> Scope["Основной агент: scope и критерии"]
@@ -267,6 +282,8 @@ flowchart TD
     Repair --> Integrate
     Findings -->|"Нет"| Accept["Актуальные evidence и итоговая приёмка"]
 ```
+
+</details>
 
 В native mode основной агент управляет spawn/follow-up средствами Codex, а `plan` готовит read-only briefs. В managed mode namespace `work` запускает штатный `codex exec`, сохраняет точный session ID и управляет конечным циклом edit/freeze/check/gate/repair. Один writer работает в одном checkout. Обычно полезны два владельца;
 третий назначается при независимой работе и свободной ёмкости.
@@ -506,7 +523,8 @@ Claude-Mem, TokenEconomizer, Promptfoo, NVIDIA SkillEvaluator и Harbor не
 | `src/agent_harness/` | Детерминированный Python control plane, CLI, LSP и installer |
 | `native/` | Rust scanner, snapshot, RepoMap, locked зависимости и notices |
 | `bin/` | В Git — инструкция; в релизном ZIP — проверенные native bundles |
-| `schemas/` | JSON contracts и records |
+| `schemas/` | Закрытые schemas для Strict YAML work state и совместимых JSON contracts/records |
+| `docs/diagrams/` | Редактируемые draw.io XML и SVG-экспорты; Mermaid source остаётся в руководствах |
 | `tools/`, `tests/`, `.github/workflows/` | Сборка, проверки и CI |
 | `integrations/`, `plugins/` | Опциональные adapters и standalone plugin |
 | `profiles/` | Примеры настроек, которые не заменяют пользовательский config |
@@ -558,8 +576,9 @@ Optional MCP smoke выполняется после отдельной уста
 [CI workflow](.github/workflows/check.yml). Проверяйте Actions конкретного commit:
 наличие workflow не подтверждает его успешное выполнение.
 
-Документация 1.5.0 включает проверяемые CLI-примеры и Mermaid-диаграммы.
-Состав ZIP, порядок применения и материалы проверки описаны в
-[релизной заметке](docs/RELEASE_1_4_2.md). Старые отчёты оставлены с исходными
+Документация 1.5.0 включает проверяемые CLI-примеры, Mermaid source и
+[редактируемые draw.io схемы со SVG](docs/diagrams/README.md).
+Состав ZIP, порядок применения и границы проверки описаны в
+[релизной заметке 1.5.0](docs/RELEASE_NOTES_1.5.0.md). Старые отчёты оставлены с исходными
 версиями и измерениями. Новые проценты ускорения, экономии токенов, полнота
 всех LSP-языков и бесконечная работа одного чата не заявляются без измерений.

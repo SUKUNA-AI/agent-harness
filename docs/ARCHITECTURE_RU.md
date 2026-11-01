@@ -3,8 +3,8 @@
 [Индекс](INDEX.md) · [README](../README.md) · [CLI](CLI_REFERENCE_RU.md)
 
 Harness сочетает штатное исполнение Codex с локальными инструментами для
-поиска, проверок и восстановления состояния. Разделение сокращает повторное
-чтение и локальную обработку, сохраняя проверяемую связь результата с входами.
+поиска, проверок и восстановления состояния. Разделение позволяет адресно
+читать код и проверять связь результата с входами; ускорение требует измерения.
 Файловое состояние находится в явно выбранном private store; общая служба
 и БД отсутствуют.
 
@@ -17,6 +17,13 @@ Harness сочетает штатное исполнение Codex с локал
 [Execution Supervisor](EXECUTION_SUPERVISOR_RU.md). Ledger/memory/context:
 [Memory](MEMORY_AND_CONTEXT_RU.md); DAG/worktrees: [Dynamic](DYNAMIC_AGENTS_RU.md).
 
+![Слои исполнения 1.5.0](diagrams/runtime-architecture.svg)
+
+[Редактировать в draw.io](diagrams/runtime-architecture.drawio) · [Все схемы](diagrams/README.md)
+
+<details>
+<summary>Mermaid source той же схемы</summary>
+
 ```mermaid
 flowchart TD
     User["Пользователь: цель и действующие разрешения"] --> Codex["Codex: модель и основной агент"]
@@ -25,6 +32,10 @@ flowchart TD
     NativeTools --> Owners["Исполнители: отдельные scopes и worktrees"]
     Owners --> Candidate["Общий candidate и проверяемые результаты"]
     Codex --> CLI["Python CLI: contracts, checks, gate, installer"]
+    CLI --> Work["work: foreground supervisor и managed slots"]
+    Work --> Exec["Штатный Codex exec / exact resume"]
+    Exec --> Managed["Owned worktrees → staging candidate"]
+    Managed --> Candidate
     CLI --> State["Private files: manifests, records, receipts, backups"]
     CLI --> Rust["Rust process: scanner, snapshot, RepoMap"]
     CLI --> LSP["Локальный language server на время команды"]
@@ -33,6 +44,8 @@ flowchart TD
     Candidate --> CLI
     State --> Codex
 ```
+
+</details>
 
 | Слой | Ответственность | Что он не подтверждает сам по себе |
 | --- | --- | --- |
@@ -51,7 +64,13 @@ CLI не содержит дополнительного LLM API client. `plan n
 | --- | --- |
 | Запуск CLI | `tools/harness.py`, `src/agent_harness/cli.py` |
 | Контракт, state, snapshot, gate | `core.py`, `validation.py`, `runner.py` |
-| Планы и briefs | `orchestration.py` |
+| Совместимые native plans и briefs | `orchestration.py` |
+| Foreground edit/repair и managed DAG | `supervisor.py`, `work_contract.py`, `scheduling.py`, `managed_execution.py` |
+| Exact sessions и owned processes/worktrees | `codex_execution.py`, `agent_lifecycle.py` |
+| Strict YAML, journal и replay | `strict_yaml.py`, `supervisor_store.py` |
+| Provenance, память и reducer | `execution_ledger.py`, `memory.py`, `context_reducer.py` |
+| Optional conservative reuse | `input_closure.py`, `check_cache.py`, `python_runtime.py` |
+| Engineering queries и measured serialization | `repomap_queries.py`, `format_bench.py` |
 | Ограниченная выдача | `context.py`, `presentation.py`, `repo_map.py` |
 | Выбор native backend | `native.py`, `native_cli.py` |
 | Rust helper | `native/src/`, `native/Cargo.lock` |
@@ -61,6 +80,13 @@ CLI не содержит дополнительного LLM API client. `plan n
 Пути без префикса в таблице относятся к `src/agent_harness/`.
 
 ## 2. Как данные попадают в контекст
+
+![Выбор источника контекста](diagrams/context-routing.svg)
+
+[Редактировать в draw.io](diagrams/context-routing.drawio) · [Все схемы](diagrams/README.md)
+
+<details>
+<summary>Mermaid source той же схемы</summary>
 
 ```mermaid
 flowchart TD
@@ -80,6 +106,8 @@ flowchart TD
     Verify -->|"Актуален"| Work
     Verify -->|"Изменился"| Choose
 ```
+
+</details>
 
 RepoMap строит граф в памяти отдельного процесса. Синтаксические definitions и
 references связывают файлы; ranking учитывает запрос и focus files. Пределы
@@ -110,6 +138,13 @@ Source packet — файл с выбранными исходниками и man
 
 ## 3. Где работает Rust и что сохраняет Python
 
+![Выбор snapshot backend](diagrams/snapshot-backends.svg)
+
+[Редактировать в draw.io](diagrams/snapshot-backends.drawio) · [Все схемы](diagrams/README.md)
+
+<details>
+<summary>Mermaid source той же схемы</summary>
+
 ```mermaid
 flowchart TD
     Call["Запрос snapshot"] --> Mode{"AGENT_HARNESS_BACKEND"}
@@ -127,6 +162,8 @@ flowchart TD
     Required -->|"Ошибка helper"| Error["Явная ошибка"]
     Native -->|"Ошибка выполнения или протокола"| Error
 ```
+
+</details>
 
 Наличие bundle проверяется по metadata/версии/протоколу и hash бинарника.
 Повреждённый найденный helper не считается отсутствующим. Native timeouts и
@@ -146,6 +183,13 @@ LSP transport и recovery. Переход scanner в Rust не переноси�
 
 ## 4. Долгая задача и восстановление после compaction
 
+![Checkpoint, handoff и свежесть](diagrams/context-recovery.svg)
+
+[Редактировать в draw.io](diagrams/context-recovery.drawio) · [Все схемы](diagrams/README.md)
+
+<details>
+<summary>Mermaid source той же схемы</summary>
+
 ```mermaid
 flowchart TD
     Active["Активная задача: contract, attempt и candidate"] --> Records["Receipts, results и ledger вне чата"]
@@ -163,6 +207,8 @@ flowchart TD
     Attempt --> Active
     Continue --> Active
 ```
+
+</details>
 
 Источниками истины служат текущие файлы и проверяемые records. Handoff помогает
 вспомнить состояние, но не выдаёт старую заметку за новое доказательство.
@@ -227,6 +273,8 @@ secret patterns помогает отсеять известные формы, �
 | Когда evidence достаточно для acceptance | [ACCEPTANCE](ACCEPTANCE.md) |
 | Как проверяется и применяется rename | [LSP_RU](LSP_RU.md) |
 
-Mermaid-блоки являются редактируемыми исходниками схем и отображаются в GitHub.
-Поставка содержит Markdown-исходники схем. PNG renders сохраняются как evidence
-при визуальной проверке; отдельная HTML/SVG gallery в ZIP не заявляется.
+Все схемы доступны в [галерее draw.io](diagrams/README.md): `.drawio` содержит
+редактируемые узлы/связи, `.svg` — экспорт draw.io для просмотра. Mermaid source
+сохранён рядом с объяснением в Markdown. Галерея связывает эти представления с
+модулями реализации. Private PNG для визуального review не входят в поставку.
+Редактирование диаграмм не требует изменений model/provider или runtime harness.

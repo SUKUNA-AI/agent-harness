@@ -26,6 +26,13 @@ Supervisor проверяет уникальные task IDs, известные 
 исходные budgets и пересечения одновременно editable scopes. JSON syntax и
 schema validity не заменяют эту semantic validation.
 
+![DAG, worktrees и единая приёмка](diagrams/managed-worktrees.svg)
+
+[Редактировать в draw.io](diagrams/managed-worktrees.drawio) · [Все схемы](diagrams/README.md)
+
+<details>
+<summary>Mermaid source той же схемы</summary>
+
 ```mermaid
 flowchart TD
     P["Schema + semantic validation"] --> Q["Ready set / critical-path heuristic"]
@@ -41,6 +48,8 @@ flowchart TD
     F --> V["Accepted staging candidate / actual cwd в report"]
     I -->|"conflict / scope violation"| C["BLOCKED_AMBIGUOUS: bounded conflict task"]
 ```
+
+</details>
 
 Scheduler ранжирует ready nodes по оставшемуся критическому пути и impact.
 Observed durations уточняют estimates. Spawn cost может исключить лишний
@@ -96,6 +105,12 @@ Worktree разделяет файловые writers, но не создаёт O
 наследует разрешения Codex и получает task scope. Reviewer запускается
 read-only; обнаруженный patch reviewer отклоняется. Worktrees и evidence
 сохраняются для inspection/recovery; автоматического удаления чужих paths нет.
+
+Recovery сначала проверяет принадлежность staging/worker cwd текущему run:
+base revision, role, task, repository common dir и ownership record. Проверка
+предшествует resume модели и чтению patch из назначенного worktree. Подмена
+сохранённого path внешним checkout не разрешает работать в нём. Потерянный
+registry/checkpoint либо ещё живой orphan child сохраняет blocker и слот.
 
 ## Lifecycle и сбои
 

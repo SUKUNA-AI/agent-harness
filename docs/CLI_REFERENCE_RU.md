@@ -36,8 +36,6 @@ code. Полный managed JSON обычно форматирован;
 всех optional executables или проверенную runtime capability. Смотрите поля ответа.
 У установочного `verify` exit 1 означает неуспешную verification.
 
-## Managed run
-
 ## Foreground work supervisor
 
 `work` — отдельный namespace; legacy `init/check/gate` ниже сохраняется.
@@ -65,6 +63,24 @@ turn_timeout_seconds1800, mode native, memory false, ledger inform. Global cap
 managed sessions5; contract может понизить до1. Max tokens проверяется по native
 reported usage на границах turns, не внутри скрытого model runtime.
 
+`inputs` — до 128 объектов `{path, sha256?}`; `path` абсолютный ordinary file,
+`sha256`, если указан, — lowercase SHA-256. Внешний/ignored input не включается
+автоматически только из-за упоминания в argv. В managed mode явный acceptance
+cwd должен находиться внутри source checkout; внутренние абсолютные paths
+переносятся в staging. Встроенный исходный checkout path внутри строки Python
+или shell-фрагмента отклоняется: сделайте проверку staging-safe.
+
+| Work budget | Default | Допустимые значения |
+| --- | --- | --- |
+| `max_attempts` | 3 | 1–100; initial edit включён |
+| `max_concurrent_managed_agents` | 1 | 1–5; native mode требует 1 |
+| `max_wall_seconds` | 7200 s | 1–604800; исходный deadline не сбрасывается |
+| `turn_timeout_seconds` | 1800 s | 1–86400; ограничен оставшимся deadline |
+| `max_tokens` | Отсутствует | 1–100000000; проверяется по reported usage между turns |
+
+После interruption неизвестный usage при заданном token cap блокирует
+продолжение/приёмку; восстановление не делает расход нулевым.
+
 ```text
 python tools/harness.py work ledger --help
 python tools/harness.py work memory --help
@@ -84,6 +100,15 @@ insufficient_data с diagnostics, а не утверждение о model qualit
 гарантируют полноту. Полные recipes и ограничения:
 [execution](EXECUTION_SUPERVISOR_RU.md), [memory](MEMORY_AND_CONTEXT_RU.md),
 [dynamic](DYNAMIC_AGENTS_RU.md), [eval](PERFORMANCE_EVAL_RU.md).
+
+`work ledger` поддерживает `show` и `rebuild`; `show` требует event ID и принимает
+`--offset 0 --limit 4096` (default limit8192). `work memory` также поддерживает
+`show` и `rebuild`; memory store и repository identity задаются явно.
+Inform/govern и recall доступны через Python API и supervisor integration,
+а не отдельные CLI actions.
+Используйте возвращённый `next_offset` на UTF-8 boundary. RepoMap `--offset`
+является индексом строки результата, не byte offset; `--max-bytes` по умолчанию
+8192 учитывает serialized UTF-8 output. Неполный inventory указан отдельно.
 
 ## Совместимый Run API
 
@@ -246,5 +271,9 @@ Optional MCP — отдельный read-only интерфейс metadata, см.
 [context.py](../src/agent_harness/context.py), [repo_map.py](../src/agent_harness/repo_map.py),
 [lsp.py](../src/agent_harness/lsp.py), [native_cli.py](../src/agent_harness/native_cli.py),
 [orchestration.py](../src/agent_harness/orchestration.py),
-[installation.py](../src/agent_harness/installation.py). При расхождении установленного
+[installation.py](../src/agent_harness/installation.py),
+[work_cli.py](../src/agent_harness/work_cli.py),
+[work_contract.py](../src/agent_harness/work_contract.py),
+[repomap_queries.py](../src/agent_harness/repomap_queries.py),
+[format_bench.py](../src/agent_harness/format_bench.py). При расхождении установленного
 `--help` с этой страницей сначала сверяйте версию/путь запускаемого пакета.

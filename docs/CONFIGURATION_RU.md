@@ -1,6 +1,6 @@
 # Конфигурация Codex и контракт установщика
 
-Справочник релиза **1.5.0**, актуальность **2026-11-01**. Изменения harness
+Справочник релиза **1.5.0**, актуальность **2026-11-02**. Изменения harness
 определяет [installation.py](../src/agent_harness/installation.py), инвентаризацию
 источников — [diagnostics.py](../src/agent_harness/diagnostics.py).
 Синтаксис и runtime-приоритеты клиента сверяются с
@@ -93,6 +93,19 @@ Provider, approvals, sandbox и MCP наследуются от parent; указ
 settings в custom role file не создаёт отдельную конфигурацию среды. Service tier
 также следует предпочтению root. Ограниченный scope исполнителя и отдельный Git
 worktree — правила координации; они не являются OS sandbox.
+
+## Отдельные параметры work supervisor
+
+`work` наследует установленный model/provider/reasoning. При разрешённой edit
+phase adapter выбирает per-invocation workspace-write; explicit installed
+read-only сохраняется. Managed workers получают локальное отключение native
+children, reviewer — read-only. Эти argv overrides не переписывают TOML.
+
+Contract `budgets` задаёт конечные attempts, wall deadline, turn timeout,
+managed concurrency и optional `max_tokens`. Они не меняют Codex compaction
+или native child cap. Reported usage проверяется между turns; unknown usage
+при заданном token cap блокирует продолжение. Полные limits —
+[CLI](CLI_REFERENCE_RU.md#foreground-work-supervisor).
 
 ## Compaction, окно модели и вывод tools
 

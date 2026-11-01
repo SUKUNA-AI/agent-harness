@@ -1,0 +1,126 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mxfile host="app.diagrams.net" agent="Native Agent Harness documentation" version="32.6.1">
+  <diagram id="task-delivery" name="Задача, исполнители и приёмка">
+    <mxGraphModel dx="1400" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="926" pageHeight="1926" math="0" shadow="0" background="#FFFFFF">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" value="Задача, исполнители и приёмка" style="text;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=24;fontStyle=1;fontColor=#18324F;whiteSpace=nowrap;" parent="1" vertex="1">
+          <mxGeometry x="30" y="12" width="866" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="Request" value="Цель и ограничения пользователя" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="519.33" y="110" width="280" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Scope" value="Основной агент: scope и критерии" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="519.33" y="281" width="280" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Split" value="Есть независимые части и slots?" style="rhombus;perimeter=rhombusPerimeter;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#FFF2CC;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="509.33" y="452" width="300" height="112" as="geometry" />
+        </mxCell>
+        <mxCell id="Direct" value="Прямое выполнение" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="130" y="754" width="280" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Briefs" value="План, общий контекст и отдельные&#10;scopes" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="569.33" y="754" width="280" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="OwnerA" value="Владелец A: отдельный worktree" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="616" y="925" width="280" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="OwnerB" value="Владелец B: отдельный worktree" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="281.0" y="925" width="280" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Integrate" value="Интеграция общего candidate" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="546" y="1096" width="280" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Review" value="Проверка; независимое ревью по&#10;необходимости" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="546" y="1267" width="280" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Findings" value="Остались подтверждённые&#10;дефекты?" style="rhombus;perimeter=rhombusPerimeter;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#FFF2CC;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="536" y="1438" width="300" height="112" as="geometry" />
+        </mxCell>
+        <mxCell id="Repair" value="Одна сводка исправлений владельцам" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="261.0" y="1740" width="280" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Accept" value="Актуальные evidence и итоговая&#10;приёмка" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="596" y="1740" width="280" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="e0" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Request" target="Scope">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=1;" parent="1" edge="1" source="Scope" target="Split">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="Нет" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.3333333333333333;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=1;entryPerimeter=0;" parent="1" edge="1" source="Split" target="Direct">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="609.33" y="574" />
+              <mxPoint x="270" y="574" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e3" value="Да" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.6666666666666666;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=1;entryPerimeter=0;" parent="1" edge="1" source="Split" target="Briefs">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.6666666666666665;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Briefs" target="OwnerA">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.3333333333333335;exitY=1.0;entryX=0.4999999999999999;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Briefs" target="OwnerB">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="662.67" y="850" />
+              <mxPoint x="421" y="850" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e6" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.75;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="OwnerA" target="Integrate">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.4999999999999999;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="OwnerB" target="Integrate">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="421" y="1021" />
+              <mxPoint x="686" y="1021" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e8" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.25;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Direct" target="Integrate">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="270" y="1031" />
+              <mxPoint x="616" y="1031" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e9" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Integrate" target="Review">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=1;" parent="1" edge="1" source="Review" target="Findings">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" value="Да" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.3333333333333333;exitY=1.0;entryX=0.4999999999999999;entryY=0.0;exitPerimeter=1;entryPerimeter=0;" parent="1" edge="1" source="Findings" target="Repair">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="636" y="1560" />
+              <mxPoint x="401" y="1560" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e13" value="Нет" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.6666666666666666;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=1;entryPerimeter=0;" parent="1" edge="1" source="Findings" target="Accept">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" value="" style="edgeStyle=orthogonalEdgeStyle;exitX=0.5;exitY=1;entryX=0;entryY=0.5;rounded=0;html=0;endArrow=block;strokeColor=#54718E;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;" parent="1" edge="1" source="Repair" target="Integrate">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="401.0" y="1851" />
+              <mxPoint x="25" y="1851" />
+              <mxPoint x="25" y="1139.0" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="footer" value="1.5.0 • обзор; точные переходы и ограничения — в руководстве" style="text;html=0;align=left;fontFamily=Arial;fontSize=13;fontColor=#526A82;" parent="1" vertex="1">
+          <mxGeometry x="30" y="1886" width="866" height="30" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

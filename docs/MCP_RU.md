@@ -1,11 +1,16 @@
 # Необязательный локальный MCP: статус запусков
 
-Контракт релиза **1.5.0**, сверено **2026-11-01** по
+Контракт релиза **1.5.0**, сверено **2026-11-02** по
 [mcp_server.py](../src/agent_harness/mcp_server.py) и
 [SDK smoke](../tools/check_mcp.py). Это read-only stdio server для **одного явно
 выбранного private run store**. Основные install, snapshots, RepoMap и code/LSP
 команды не требуют этого MCP. Сам server не вызывает модель/LLM API и не требует
 аккаунта, сети, БД или постоянно работающего daemon.
+
+Текущий MCP reader ожидает совместимые runs с `state.json`. Новое `work`
+состояние `state.yaml` напрямую этим интерфейсом не обслуживается; используйте
+`work status/report` для supervisor. Read-only MCP не продолжает модель,
+не запускает checks и не подтверждает freshness по recorded status.
 
 ## Установка optional extra
 

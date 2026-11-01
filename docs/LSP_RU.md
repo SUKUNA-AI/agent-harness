@@ -10,6 +10,11 @@
 [контекст](CONTEXT_AND_NATIVE_RU.md#что-выбрать). Результат language server не
 обещает полноту проекта без корректных dependencies/configuration.
 
+В `repomap symbol-context --use-lsp` этот adapter является optional refinement.
+Unavailable/stale server даёт явно heuristic fallback; такие results не
+являются semantic proof для rename. Прямой `code rename/apply` сохраняет
+описанные ниже capture/requery и digest checks.
+
 ## Команды
 
 ```sh
@@ -118,6 +123,13 @@ digest. Он не содержит полных копий исходников.
 Если полный план помещается в stdout, он также присутствует в поле `plan`;
 внешняя оболочка ответа не является форматом plan-файла.
 
+![LSP rename: preview, apply и recovery](diagrams/lsp-rename.svg)
+
+[Редактировать в draw.io](diagrams/lsp-rename.drawio) · [Все схемы](diagrams/README.md)
+
+<details>
+<summary>Mermaid source той же схемы</summary>
+
 ```mermaid
 sequenceDiagram
     participant U as "Вызывающий"
@@ -146,6 +158,8 @@ sequenceDiagram
         H-->>U: "applied и counts"
     end
 ```
+
+</details>
 
 Loop выполняется только для обнаруженных неоткрытых targets; при нестабильном
 наборе клиент отклоняет preview. После выдачи плана сессия LSP закрывается;

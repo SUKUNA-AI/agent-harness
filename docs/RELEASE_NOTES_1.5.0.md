@@ -1,6 +1,6 @@
 # Native Agent Harness 1.5.0
 
-Дата candidate: 2026-11-01. База: `5f06a2fdebe48859189f285ad107a8c2c360579e`
+Линия релиза: 2026-11-02. База: `5f06a2fdebe48859189f285ad107a8c2c360579e`
 (1.4.2). Фактические hashes, команды, результаты и публикация приводятся в
 implementation/verification report; этот документ описывает поставляемый интерфейс.
 
@@ -17,7 +17,7 @@ implementation/verification report; этот документ описывает
 - Structured plan, semantic DAG/scope validators, critical path, global cap5,
   изолированные worktrees и последовательная интеграция в staging candidate.
 - Два documentation skills, внутренний style50, самостоятельные guides и
-  реально проверяемые Mermaid diagrams.
+  редактируемые [draw.io diagrams со SVG](diagrams/README.md); Mermaid source сохранён.
 - Детерминированный ZIP_STORED, canonical Git blobs, source/binary hashes,
   extracted install/verify/reinstall/rollback smoke.
 

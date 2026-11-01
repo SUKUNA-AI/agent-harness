@@ -1,10 +1,14 @@
 # Необязательный Harness Assistant plugin
 
-Документация harness **1.5.0**, plugin **1.3.1**, сверено **2026-11-01**.
+Документация harness **1.5.0**, plugin **1.3.1**, сверено **2026-11-02**.
 Пакет находится в
 [`plugins/harness-assistant/`](../plugins/harness-assistant/). Он распространяет
 две процедуры как skills; основной local installer, глобальный policy bootstrap
 и metadata MCP остаются отдельными механизмами.
+
+Documentation Author/Reviewer входят в основные семь installed skills,
+а не в этот независимый plugin из двух skills. Для `work` runtime используйте
+основной CLI; plugin сам не создаёт supervisor и не расширяет permissions.
 
 ## Состав и границы
 

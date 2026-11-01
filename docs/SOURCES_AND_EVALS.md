@@ -44,6 +44,12 @@ GEPA/Deep Agents и другие перечисленные в design матер
 inference backend не заменяют Codex structured output или semantic/security
 validation; отдельный LLM backend в этом пакете не введён.
 
+Документационные `.drawio`/SVG созданы в этом проекте. Для экспорта используется
+[официальный draw.io Desktop](https://github.com/jgraph/drawio-desktop),
+version 32.6.1; его runtime не включён в harness. Публичная галерея содержит
+только собственные editable diagrams и их static exports. Author tooling не
+становится обязательной dependency CLI или Codex profile.
+
 ## Наши проверки
 
 [BASELINE_1_5_0](BASELINE_1_5_0.md) фиксирует исходный Git SHA, installer,

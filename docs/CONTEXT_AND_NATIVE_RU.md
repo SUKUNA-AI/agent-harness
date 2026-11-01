@@ -13,6 +13,7 @@
 | Прочитать участок большого файла | `context read` | Ограниченный UTF-8 excerpt с SHA всего прочитанного файла |
 | Передать несколько явно выбранных файлов | `context pack`, затем `context verify` | Content-bound packet; complete относится только к выбранным файлам |
 | Выбрать важные файлы/определения по задаче | `context map` | Task-ranked **синтаксическая эвристика**, partial/limits отражены явно |
+| Найти tests/impact/trace/symbol context | `repomap related-tests/trace-to-code/change-impact/symbol-context` | Bounded engineering query, version-bound paths и paging; heuristic fallback указан явно |
 | Разрешить definition/references или rename | `code ...` | Ответ локального language server, зависящий от его semantic analysis |
 | Проверить candidate для приёмки | `freeze` / `status --verify-evidence` / `gate` | Полный snapshot контракта и отдельная проверка evidence |
 | Восстановить решения и следующий шаг | `handoff` | Metadata/checkpoint view; по умолчанию без workspace scan |
@@ -20,6 +21,13 @@
 RepoMap помогает выбрать, что читать. LSP разрешает символ с учётом языка,
 типов и workspace. Совпадение имени в RepoMap не доказывает semantic reference;
 ни map, ни source packet, ни excerpt не подменяют acceptance snapshot.
+
+В `work` reducer ограничивает model packet, а Ledger и opt-in memory возвращают
+только актуальные наблюдения. Это отдельный слой над excerpts и RepoMap;
+он не изменяет скрытую историю Codex. Optional cache имеет собственную строгую
+physical/runtime closure и не переиспользует acceptance checks. Snapshot scope,
+cache closure и полнота query inventory — разные гарантии. Подробности:
+[Memory/context](MEMORY_AND_CONTEXT_RU.md).
 
 ## Адресное чтение и продолжение
 

@@ -1,0 +1,134 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mxfile host="app.diagrams.net" agent="Native Agent Harness documentation" version="32.6.1">
+  <diagram id="snapshot-backends" name="Выбор snapshot backend">
+    <mxGraphModel dx="1400" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1031" pageHeight="1781" math="0" shadow="0" background="#FFFFFF">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" value="Выбор snapshot backend" style="text;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=24;fontStyle=1;fontColor=#18324F;whiteSpace=nowrap;" parent="1" vertex="1">
+          <mxGeometry x="30" y="12" width="971.3333333333333" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="Call" value="Запрос snapshot" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="631.33" y="110" width="280" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Mode" value="AGENT_HARNESS_BACKEND" style="rhombus;perimeter=rhombusPerimeter;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#FFF2CC;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="621.33" y="281" width="300" height="112" as="geometry" />
+        </mxCell>
+        <mxCell id="Python" value="Python snapshot" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="721.33" y="1253" width="280" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Required" value="Обязательный native helper" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="30" y="1082" width="280" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Available" value="Helper доступен?" style="rhombus;perimeter=rhombusPerimeter;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#FFF2CC;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="621.33" y="583" width="300" height="112" as="geometry" />
+        </mxCell>
+        <mxCell id="Size" value="Дерево меньше 512 наблюдаемых&#10;файлов?" style="rhombus;perimeter=rhombusPerimeter;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#FFF2CC;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="404.33" y="885" width="300" height="112" as="geometry" />
+        </mxCell>
+        <mxCell id="Native" value="Rust snapshot" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="306.33" y="1253" width="280" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Manifest" value="Полный content rehash и canonical&#10;manifest" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="674.67" y="1424" width="280" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Binding" value="Digest входов для checks, evidence&#10;и gate" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="674.67" y="1595" width="280" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Error" value="Явная ошибка" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="213" y="1595" width="280" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="e0" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=1;" parent="1" edge="1" source="Call" target="Mode">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" value="python" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.75;exitY=1.0;entryX=0.75;entryY=0.0;exitPerimeter=1;entryPerimeter=0;" parent="1" edge="1" source="Mode" target="Python">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="846.33" y="403" />
+              <mxPoint x="931.33" y="403" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e2" value="native" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.25;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=1;entryPerimeter=0;" parent="1" edge="1" source="Mode" target="Required">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="696.33" y="403" />
+              <mxPoint x="170" y="403" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e3" value="auto" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=1;entryPerimeter=1;" parent="1" edge="1" source="Mode" target="Available">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="Нет" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.6666666666666666;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=1;entryPerimeter=0;" parent="1" edge="1" source="Available" target="Python">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="821.33" y="1178" />
+              <mxPoint x="861.33" y="1178" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e5" value="Да" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.3333333333333333;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=1;entryPerimeter=1;" parent="1" edge="1" source="Available" target="Size">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="721.33" y="705" />
+              <mxPoint x="554.33" y="705" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e6" value="Да" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.6666666666666666;exitY=1.0;entryX=0.25;entryY=0.0;exitPerimeter=1;entryPerimeter=0;" parent="1" edge="1" source="Size" target="Python">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="604.33" y="1178" />
+              <mxPoint x="791.33" y="1178" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e7" value="Нет или неизвестно" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.3333333333333333;exitY=1.0;entryX=0.6666666666666667;entryY=0.0;exitPerimeter=1;entryPerimeter=0;" parent="1" edge="1" source="Size" target="Native">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="504.33" y="1007" />
+              <mxPoint x="493" y="1007" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e8" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.6666666666666666;exitY=1.0;entryX=0.33333333333333326;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Required" target="Native">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="216.67" y="1178" />
+              <mxPoint x="399.67" y="1178" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e9" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.6666666666666665;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Python" target="Manifest">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.6666666666666667;exitY=1.0;entryX=0.3333333333333335;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Native" target="Manifest">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="493" y="1349" />
+              <mxPoint x="768" y="1349" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e11" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Manifest" target="Binding">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" value="Ошибка helper" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.3333333333333333;exitY=1.0;entryX=0.33333333333333326;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Required" target="Error">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="123.33" y="1520" />
+              <mxPoint x="306.33" y="1520" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e13" value="Ошибка выполнения или протокола" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.33333333333333326;exitY=1.0;entryX=0.6666666666666665;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Native" target="Error">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="footer" value="1.5.0 • обзор; точные переходы и ограничения — в руководстве" style="text;html=0;align=left;fontFamily=Arial;fontSize=13;fontColor=#526A82;" parent="1" vertex="1">
+          <mxGeometry x="30" y="1741" width="971.3333333333333" height="30" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

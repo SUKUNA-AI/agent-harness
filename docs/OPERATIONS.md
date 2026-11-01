@@ -1,15 +1,20 @@
-# Эксплуатация managed runs — 1.5.0
+# Эксплуатация совместимого Run API — 1.5.0
 
 Для foreground исполнения Codex используйте новый
 [Execution Supervisor](EXECUTION_SUPERVISOR_RU.md): `work start/status/watch/resume/stop/report`.
 Этот документ сохраняет совместимый ручной API `init/freeze/check/gate`.
 Его JSON receipts не заменяются произвольной YAML-конвертацией.
 
-Короткую самостоятельную задачу выполняйте напрямую. Managed run нужен для
+Короткую самостоятельную задачу выполняйте напрямую. Сохраняемый Run полезен для
 длительной, делегированной или возобновляемой работы с разрешённым сохранением.
 CLI сохраняет контракт, inputs и evidence; native agents и внешние операции
 остаются под управлением основного чата. Полный каталог флагов —
 [CLI_REFERENCE_RU](CLI_REFERENCE_RU.md), условия принятия — [ACCEPTANCE](ACCEPTANCE.md).
+
+В этом руководстве `Run` означает ручной JSON API. Автоматические managed
+model sessions, Strict YAML state и staging worktrees принадлежат namespace
+`work`; не подставляйте его `state.yaml` в legacy `Run`/MCP reader. Для обоих
+путей required checks выполняются заново на принятом candidate.
 
 ## Последовательность работы
 
@@ -24,6 +29,13 @@ CLI сохраняет контракт, inputs и evidence; native agents и в
    evidence является основанием для инженерной приёмки.
 6. `status --verify-evidence` сверяет сохранённую приёмку. Для продолжения
    сохраните checkpoint; после прерывания выполните reconciliation через resume.
+
+![Совместимый ручной Run API](diagrams/legacy-run.svg)
+
+[Редактировать в draw.io](diagrams/legacy-run.drawio) · [Все схемы](diagrams/README.md)
+
+<details>
+<summary>Mermaid source той же схемы</summary>
 
 ```mermaid
 flowchart TD
@@ -40,6 +52,8 @@ flowchart TD
     G --> J["status --verify-evidence"]
     J -->|"stale"| H
 ```
+
+</details>
 
 Это схема основного пути, не формальный конечный автомат всех полей state.
 Например, evidence отдельно не повышает state до ready_for_review, а gate может

@@ -8,6 +8,13 @@ Supervisor выполняет локальный цикл «редактиров
 
 ## Путь выполнения
 
+![Supervisor: edit, verify, repair](diagrams/supervisor-repair.svg)
+
+[Редактировать в draw.io](diagrams/supervisor-repair.drawio) · [Все схемы](diagrams/README.md)
+
+<details>
+<summary>Mermaid source той же схемы</summary>
+
 ```mermaid
 flowchart TD
     N["NEW: contract и baseline"] --> P["PREFLIGHT: schema, scope, budgets"]
@@ -24,6 +31,8 @@ flowchart TD
     V -->|"permissions / environment / ambiguity"| B["BLOCKED: причина и безопасный следующий шаг"]
     R -->|"исчерпан budget / нет прогресса"| T["FAILED_TERMINAL / NO_PROGRESS"]
 ```
+
+</details>
 
 Это обзор основного пути. Допустимые переходы проверяет
 [`supervisor.py`](../src/agent_harness/supervisor.py). Cancellation и timeout
@@ -123,6 +132,20 @@ append: архив сохраняется, complete corrupt record не отбр
 Terminal task не переоткрывается автоматически. Явная новая попытка использует
 `work resume --new-attempt "причина"` и сохраняет прежние пределы. Accepted
 candidate повторно проверьте через `work status --verify-evidence`.
+
+### Входы и бюджеты при восстановлении
+
+`inputs` допускает до 128 typed ordinary-file refs. Если check зависит от
+ignored config или внешнего fixture, объявите его явно; снимок Git не выводит
+такие зависимости из argv. Optional SHA-256 проверяется вместе с текущими bytes.
+Явный check cwd должен быть внутри source checkout. В managed mode внутренние
+абсолютные argv/report paths привязываются к staging; embedded исходный path
+в строке кода отклоняется вместо проверки другого дерева.
+
+`--new-attempt` не увеличивает max attempts, не переносит исходный deadline и
+не обнуляет reported tokens. Для terminal task с исчерпанным budget нужен новый
+явно разрешённый контракт. При неизвестном usage после controller interruption
+и заданном `max_tokens` supervisor требует reconciliation и не продолжает вслепую.
 
 ## Что видно пользователю
 

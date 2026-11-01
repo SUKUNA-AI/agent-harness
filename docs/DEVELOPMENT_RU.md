@@ -13,12 +13,26 @@ criteria. Семантический source review не заменяет runtime
 | `codex_execution.py`, `agent_lifecycle.py` | argv, exact session, process containment, global leases, worktrees |
 | `strict_yaml.py`, `supervisor_store.py` | Bounded parser, schemas, atomic files, journal/replay |
 | `execution_ledger.py`, `memory.py` | Provenance, validity, typed recall, rebuildable indexes |
+| `input_closure.py`, `check_cache.py`, `python_runtime.py` | Bounded physical proof и narrow Windows startup/runtime closure; unsupported → miss |
 | `context_reducer.py`, `format_bench.py` | Model packets и measured optional serialization |
 | `core.py`, `runner.py` | Существующий snapshot/check/evidence/gate остаётся authoritative |
 
 Имена модулей относятся к `src/agent_harness/`. Схемы в корневом `schemas/`
 authoritative; wheel build копирует их в package resources. Vendored parser
 имеет immutable manifest/license и проверяется без site packages.
+
+## Документация и диаграммы
+
+Author использует `harness-doc-author`, независимый assessor —
+`harness-doc-review`; `technical_writing_level: 50` является внутренней шкалой,
+не ASD-STE100 compliance. Сверяйте CLI с `--help`, примеры — с schema/normalizer,
+а ограничения — с фактическими отрицательными сценариями.
+
+Диаграммы находятся в [docs/diagrams](diagrams/README.md). При изменении flow
+обновите editable `.drawio`, его SVG через draw.io Desktop и соответствующий
+Mermaid block. Просмотрите экспорт и сохраните version/command/hashes в private
+evidence. Наличие XML или exit0 экспортера не заменяет visual review. Для чтения
+документации Node/draw.io не требуются; renderer — optional author tool.
 
 ## Проверки
 

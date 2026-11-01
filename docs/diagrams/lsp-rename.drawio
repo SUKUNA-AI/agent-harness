@@ -1,0 +1,155 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mxfile host="app.diagrams.net" agent="Native Agent Harness documentation" version="32.6.1">
+  <diagram id="lsp-rename" name="LSP rename: preview, apply и recovery">
+    <mxGraphModel dx="1400" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1230" pageHeight="1430" math="0" shadow="0" background="#FFFFFF">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" value="LSP rename: preview, apply и recovery" style="text;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=24;fontStyle=1;fontColor=#18324F;whiteSpace=nowrap;" parent="1" vertex="1">
+          <mxGeometry x="30" y="12" width="1170" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="U" value="Вызывающий" style="rounded=1;whiteSpace=nowrap;html=0;fontFamily=Arial;fontSize=16;fillColor=#EDF3FA;strokeColor=#54718E;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="15" y="85" width="190" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Uline" value="" style="endArrow=none;dashed=1;strokeColor=#A8B8C8;" parent="1" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="110" y="145" as="sourcePoint" />
+            <mxPoint x="110" y="1350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="H" value="Harness" style="rounded=1;whiteSpace=nowrap;html=0;fontFamily=Arial;fontSize=16;fillColor=#EDF3FA;strokeColor=#54718E;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="345" y="85" width="190" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Hline" value="" style="endArrow=none;dashed=1;strokeColor=#A8B8C8;" parent="1" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="440" y="145" as="sourcePoint" />
+            <mxPoint x="440" y="1350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="L" value="Локальный LSP" style="rounded=1;whiteSpace=nowrap;html=0;fontFamily=Arial;fontSize=16;fillColor=#EDF3FA;strokeColor=#54718E;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="675" y="85" width="190" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Lline" value="" style="endArrow=none;dashed=1;strokeColor=#A8B8C8;" parent="1" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="770" y="145" as="sourcePoint" />
+            <mxPoint x="770" y="1350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="F" value="Workspace и recovery&#10;files" style="rounded=1;whiteSpace=nowrap;html=0;fontFamily=Arial;fontSize=16;fillColor=#EDF3FA;strokeColor=#54718E;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="1005" y="85" width="190" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Fline" value="" style="endArrow=none;dashed=1;strokeColor=#A8B8C8;" parent="1" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1100" y="145" as="sourcePoint" />
+            <mxPoint x="1100" y="1350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="message0" value="rename: позиция и новое имя" style="endArrow=block;html=0;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=14;fontColor=#18324F;labelBackgroundColor=#FFFFFF;" parent="1" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="110" y="185" as="sourcePoint" />
+            <mxPoint x="440" y="185" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="message1" value="Capture source bytes и identity" style="endArrow=block;html=0;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=14;fontColor=#18324F;labelBackgroundColor=#FFFFFF;" parent="1" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="440" y="255" as="sourcePoint" />
+            <mxPoint x="1100" y="255" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="message2" value="didOpen и rename request" style="endArrow=block;html=0;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=14;fontColor=#18324F;labelBackgroundColor=#FFFFFF;" parent="1" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="440" y="325" as="sourcePoint" />
+            <mxPoint x="770" y="325" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="message3" value="Edits и target documents" style="endArrow=block;html=0;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=14;fontColor=#18324F;labelBackgroundColor=#FFFFFF;" parent="1" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="770" y="395" as="sourcePoint" />
+            <mxPoint x="440" y="395" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="message4" value="Capture ранее закрытых targets" style="endArrow=block;html=0;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=14;fontColor=#18324F;labelBackgroundColor=#FFFFFF;" parent="1" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="440" y="465" as="sourcePoint" />
+            <mxPoint x="1100" y="465" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="message5" value="didOpen snapshots, повтор rename" style="endArrow=block;html=0;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=14;fontColor=#18324F;labelBackgroundColor=#FFFFFF;" parent="1" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="440" y="535" as="sourcePoint" />
+            <mxPoint x="770" y="535" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="message6" value="Edits по открытым snapshots" style="endArrow=block;html=0;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=14;fontColor=#18324F;labelBackgroundColor=#FFFFFF;" parent="1" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="770" y="605" as="sourcePoint" />
+            <mxPoint x="440" y="605" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="message7" value="Проверить неизменность всех inputs" style="endArrow=block;html=0;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=14;fontColor=#18324F;labelBackgroundColor=#FFFFFF;" parent="1" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="440" y="675" as="sourcePoint" />
+            <mxPoint x="1100" y="675" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="message8" value="Preview и digest-bound plan" style="endArrow=block;html=0;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=14;fontColor=#18324F;labelBackgroundColor=#FFFFFF;" parent="1" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="440" y="745" as="sourcePoint" />
+            <mxPoint x="110" y="745" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="message9" value="apply: конкретный reviewed plan" style="endArrow=block;html=0;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=14;fontColor=#18324F;labelBackgroundColor=#FFFFFF;" parent="1" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="110" y="815" as="sourcePoint" />
+            <mxPoint x="440" y="815" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="message10" value="Guards, output budget, staging и receipt" style="endArrow=block;html=0;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=14;fontColor=#18324F;labelBackgroundColor=#FFFFFF;" parent="1" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="440" y="885" as="sourcePoint" />
+            <mxPoint x="1100" y="885" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="message11" value="Повторные guards и замены файлов" style="endArrow=block;html=0;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=14;fontColor=#18324F;labelBackgroundColor=#FFFFFF;" parent="1" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="440" y="955" as="sourcePoint" />
+            <mxPoint x="1100" y="955" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="message12" value="При ошибке: допустимая компенсация" style="endArrow=block;html=0;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=14;fontColor=#18324F;labelBackgroundColor=#FFFFFF;" parent="1" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="440" y="1025" as="sourcePoint" />
+            <mxPoint x="1100" y="1025" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="message13" value="Readback восстановленного результата" style="endArrow=block;html=0;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=14;fontColor=#18324F;labelBackgroundColor=#FFFFFF;" parent="1" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="440" y="1095" as="sourcePoint" />
+            <mxPoint x="1100" y="1095" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="message14" value="failed_compensated / recovery_required + receipt" style="endArrow=block;html=0;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=14;fontColor=#18324F;labelBackgroundColor=#FFFFFF;" parent="1" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="440" y="1165" as="sourcePoint" />
+            <mxPoint x="110" y="1165" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="message15" value="Иначе: applied и counts" style="endArrow=block;html=0;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=14;fontColor=#18324F;labelBackgroundColor=#FFFFFF;" parent="1" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="440" y="1235" as="sourcePoint" />
+            <mxPoint x="110" y="1235" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="loop" value="До трёх дополнительных проходов: только новые targets" style="rounded=0;html=0;fillColor=none;dashed=1;strokeColor=#A48A33;align=left;verticalAlign=top;spacing=8;fontFamily=Arial;fontSize=13;fontColor=#7C651D;" parent="1" vertex="1">
+          <mxGeometry x="360" y="415" width="830" height="245" as="geometry" />
+        </mxCell>
+        <mxCell id="failure" value="Условие: ошибка либо конкурентная правка" style="rounded=0;html=0;fillColor=none;dashed=1;strokeColor=#A48A33;align=left;verticalAlign=top;spacing=8;fontFamily=Arial;fontSize=13;fontColor=#7C651D;" parent="1" vertex="1">
+          <mxGeometry x="25" y="970" width="1165" height="240" as="geometry" />
+        </mxCell>
+        <mxCell id="footer" value="1.5.0 • LSP закрывается после preview; apply сверяет сохранённый plan" style="text;html=0;align=left;fontFamily=Arial;fontSize=13;fontColor=#526A82;" parent="1" vertex="1">
+          <mxGeometry x="30" y="1380" width="1170" height="30" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

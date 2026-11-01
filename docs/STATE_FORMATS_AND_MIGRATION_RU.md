@@ -43,6 +43,13 @@ Check cache/proof используют `schema_version: 3`; legacy v1/v2 даё�
 `python-runtime-closure` v1 отдельно связывает finite startup/DLL/stdlib inputs
 и отсутствие альтернативной startup configuration.
 
+Typed work `inputs` состоит из absolute ordinary-file paths и optional SHA-256;
+оно передаётся в совместимый frozen contract. Не заменяйте file ref каталогом
+или boolean `complete`: это не доказывает полный набор dependencies. Cache v3
+проверяет отдельные `input-closure` и `python-runtime-closure` bounds; runtime
+policy поддерживает только проверяемый self-contained Windows literal bundle.
+Обычный interpreter не становится пригодным для reuse от явного `pure: true`.
+
 ## Private layout
 
 Выбирайте private state вне source checkout. Не помещайте реальные runs,

@@ -27,6 +27,12 @@ report оставляет cost `unavailable`. Встроенные hidden tools 
 как наблюдённые. Нулевой счётчик означает отсутствие зарегистрированных
 событий этого типа, а не доказательство отсутствия любых hidden operations.
 
+`spawn_seconds` интерпретируется вместе с `spawn_measurements` и
+`spawn_overhead_status`. Без measurements прежний ноль не означает мгновенный
+spawn. Worktree setup и integration имеют отдельные counters; slot wait входит
+в общий wall-clock и отдельно сейчас не измеряется. Partial
+usage не является полным расходом; отсутствие цены оставляет cost unavailable.
+
 ## Сопоставимый A/B
 
 1. Зафиксируйте actual base SHA, candidate SHA, source fixture, OS/hardware,
@@ -88,6 +94,20 @@ sanitized JSONL и typed YAML samples. Missing usage не превращаетс
 data digest, shape, model label, output type и environment fingerprint.
 Negative benchmark, quality regression, missing usage или новая структура
 выбирают JSON. Ни один произвольный `enabled: true` без samples не достаточен.
+
+## Наблюдённый pilot 1.5.0
+
+На frozen pilot candidate `5cdf3d3` проведены 5 repeats для каждой из трёх
+форм: 15/15 exact answers correct. Median paired input saving TOON около 0.71%,
+one-sided sign-test p=0.1875; результат `measured_negative`, выбран JSON.
+Это одна lookup-таблица и диагностический эксперимент, не общее сравнение моделей.
+Receipt без matching environment fingerprint не включает TOON задним числом.
+
+Контрольный scheduler cap1/2/3/5 на contained fake processes проверяет overlap,
+изоляцию, интеграцию и acceptance mechanics. Он не измеряет LLM quality,
+model latency или token throughput. Repetitive/error packet byte reductions
+и cache counters — локальные proxy. Causal end-to-end performance остаётся
+`insufficient_data`, пока нет сопоставимого real baseline/candidate A/B.
 
 ## Как читать результаты релиза
 

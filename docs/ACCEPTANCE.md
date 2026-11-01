@@ -9,7 +9,9 @@ recovery marker блокирует актуальную приёмку до яв
 
 Универсальный пакет, его подключение к клиенту и результат конкретной задачи
 принимаются отдельно. Этот документ задаёт критерии; фактические результаты
-находятся в [RELEASE_REVIEW](RELEASE_REVIEW.md) и разрешённом private evidence.
+связываются с текущим commit и разрешённым private evidence.
+[RELEASE_REVIEW](RELEASE_REVIEW.md) — исторический отчёт 1.1.0;
+[release notes 1.5.0](RELEASE_NOTES_1.5.0.md) описывают текущий интерфейс.
 `not_run`, `unknown`, `unavailable`, `skipped` и `unverified` не означают passed.
 Полный работающий fixture с JSON contract/evidence —
 [эксплуатация](OPERATIONS.md#полный-локальный-пример).
@@ -43,6 +45,17 @@ version probes и declared implementation files проверяются до/по
 нельзя заменить candidate.json вручную или ослабить required в worker result.
 Python и native snapshots должны совпадать по manifest/digest; adaptive выбор
 backend не освобождает от повторного хеширования файлов.
+
+Для `work` внешние и ignored ordinary files, от которых зависит check,
+объявляйте в typed `inputs` с абсолютным path и optional SHA-256. Они попадают
+в frozen contract и evidence. Это не автоматическое вычисление всех зависимостей
+произвольного теста. Optional Ledger/CheckCache reuse использует отдельное
+доказательство closure; его PASS не заменяет fresh required runner/gate.
+
+Managed acceptance проверяет staging cwd. Восстановленные worker/staging paths
+сначала сверяются с ownership metadata и назначенным run; чужой path не даёт
+основания запустить модель или перенести patch. Отчёт указывает actual candidate
+и original source cwd; accepted staging не является публикацией в user checkout.
 
 ## Виды evidence
 
@@ -95,6 +108,13 @@ required results, artifacts/log hashes/sizes, отсутствие неизве�
 accepted dependencies. Затем снова сверяет inputs и публикует verdict в state
 transaction только после сравнения всего актуального state с проверенным.
 
+![Gate и повторная проверка evidence](diagrams/acceptance-gate.svg)
+
+[Редактировать в draw.io](diagrams/acceptance-gate.drawio) · [Все схемы](diagrams/README.md)
+
+<details>
+<summary>Mermaid source той же схемы</summary>
+
 ```mermaid
 flowchart TD
     A["Workspace lease: state S0 и frozen candidate"] --> B["Scope, toolchains, results, artifacts и dependencies"]
@@ -106,6 +126,8 @@ flowchart TD
     F --> H["Позднее: read-only evidence revalidation"]
     H -->|"Изменение inputs или receipts"| I["Приёмка stale; повторить применимые проверки"]
 ```
+
+</details>
 
 Новая unknown operation во время финального snapshot не должна совместиться с
 accepted. Concurrent state change приводит к rejected с указанием повторить

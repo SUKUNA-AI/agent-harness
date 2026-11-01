@@ -32,6 +32,11 @@ Native Codex исполняет задачу. Python stdlib хранит фай�
 лицензии на копирование; используются идеи, а не их source/prompt. Pinned основания
 и даты находятся в [реестре](../provenance/selected-patterns.json).
 
+Новые механизмы 1.5.0 дополнены [реестром первичных источников](SOURCES_AND_EVALS.md):
+Ledger, state-consistent memory, reducer и программный retrieval реализованы
+самостоятельно. Govern для Codex tools advisory; runtime cache intentionally
+narrow и final checks fresh. Схемы flow — [draw.io gallery](diagrams/README.md).
+
 ## Пример передачи на ревью
 
 Root выбирает цель и точные файлы через поиск, формирует private source packet,
