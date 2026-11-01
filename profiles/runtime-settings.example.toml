@@ -11,7 +11,7 @@ model_auto_compact_token_limit = 500000
 default_subagent_reasoning_effort = "medium"
 # Это opt-in default для ролей без собственного effort; installer его не задаёт.
 enabled = true
-max_concurrent_threads_per_session = 4
+max_concurrent_threads_per_session = 5
 interrupt_message = true
 
 # cap в файле не гарантирует runtime slots. Installer по умолчанию сохраняет

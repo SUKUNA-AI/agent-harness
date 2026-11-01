@@ -3,7 +3,10 @@
 [README](../README.md) · [Индекс](INDEX.md) · [Changelog](../CHANGELOG.md)
 
 Версия 1.4.2 включает исправления R01–R14 из 1.4.1 и обновляет документацию
-всего комплекта. Публичный CLI и алгоритмы Python/Rust не изменены. Version
+всего комплекта. Публичный CLI и алгоритмы Python/Rust не изменены. Переносимый
+default child cap повышен с 4 до **5**; существующий более строгий cap и saved
+overlay preference сохраняются. Для осознанного перехода установленного профиля
+используйте `install --max-child-threads 5` сначала без `--apply`, затем с ним. Version
 metadata согласованы между Python package, installer и native helper;
 standalone Harness Assistant plugin имеет отдельную версию **1.3.1**.
 Модели, provider, reasoning, permissions и compaction 500000 сохраняются.

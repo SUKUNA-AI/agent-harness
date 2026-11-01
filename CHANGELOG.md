@@ -3,7 +3,11 @@
 ## 1.4.2 — 2026-11-01
 
 Полная актуализация документации и релизной поставки поверх исправлений R01–R14.
-Алгоритмы runtime, schemas, dependencies и пользовательские настройки сохранены.
+Алгоритмы runtime, schemas и dependencies сохранены. Переносимый default
+`agents.max_concurrent_threads_per_session` повышен с 4 до **5**. Более строгий
+пользовательский cap и сохранённое preference overlay не повышаются автоматически;
+для установленного профиля есть явный `install --max-child-threads 5`.
+Model/provider/reasoning, permissions и compaction 500000 не меняются.
 
 - Подробный README: состав, установка, настройки моделей, Rust/RepoMap/LSP,
   экономия контекста, долгие задачи, приёмка, обновление и диагностика.

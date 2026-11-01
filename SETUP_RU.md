@@ -179,8 +179,27 @@ verify с прежними Codex home, skills home и private state. `--package-
 Примеры apply для обеих оболочек приведены выше; шаги обновления используют те
 же команды и явно выбранные каталоги. Для намеренного изменения child cap есть
 только install-флаг `--max-child-threads N`, где N — положительное целое.
-Без него сохраняется более строгий имеющийся cap, а предпочтение хранится в
-machine overlay. Сам cap не доказывает доступные runtime slots.
+Для новой установки без сохранённого предпочтения default — **5 дочерних потоков**,
+без primary/root. Без explicit flag сохраняются более строгий имеющийся cap
+и сохранённое предпочтение machine overlay: старое значение 4 или 2 не повышается
+автоматически. Сам cap не доказывает доступные runtime slots.
+
+Чтобы перевести уже установленный профиль именно на 5, проверьте отдельный
+explicit dry-run и затем примените его с теми же каталогами:
+
+```bash
+python3 tools/harness.py install --codex-home "$HARNESS_HOME" --skills-home "$HARNESS_SKILLS" --state-dir "$HARNESS_STATE" --max-child-threads 5
+python3 tools/harness.py install --codex-home "$HARNESS_HOME" --skills-home "$HARNESS_SKILLS" --state-dir "$HARNESS_STATE" --max-child-threads 5 --apply
+```
+
+```powershell
+py -3 tools/harness.py install --codex-home "$HarnessHome" --skills-home "$HarnessSkills" --state-dir "$HarnessState" --max-child-threads 5
+py -3 tools/harness.py install --codex-home "$HarnessHome" --skills-home "$HarnessSkills" --state-dir "$HarnessState" --max-child-threads 5 --apply
+```
+
+Это явное разрешение изменить текущий меньший cap; обычный install без флага
+не делает такого повышения. После применения выполните `verify` и откройте
+новую сессию Codex.
 
 ## Rollback, uninstall и recovery
 

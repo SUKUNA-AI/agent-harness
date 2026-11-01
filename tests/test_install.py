@@ -97,7 +97,7 @@ class ConfigPatchTests(unittest.TestCase):
     def test_cap_reduced_without_changing_unknown_fields(self):
         text = '[agents]\nmax_concurrent_threads_per_session = 9 # count\nfuture = "preserve"\n'
         changed, meta = install.patch_config(text)
-        self.assertIn("= 4 # count", changed)
+        self.assertIn("= 5 # count", changed)
         self.assertEqual(tomllib.loads(changed)["agents"]["future"], "preserve")
         edited = changed + '\n[unrelated]\nvalue = 99\n'
         restored = install.revert_config(text, changed, edited, meta)
@@ -118,15 +118,15 @@ class ConfigPatchTests(unittest.TestCase):
             changed, _ = install.patch_config(text)
             data = tomllib.loads(changed)
             self.assertTrue(data["agents"]["enabled"])
-            self.assertEqual(data["agents"]["max_concurrent_threads_per_session"], 2 if "max_threads" in text else 4)
+            self.assertEqual(data["agents"]["max_concurrent_threads_per_session"], 2 if "max_threads" in text else 5)
             self.assertNotIn("max_threads", data["agents"])
             self.assertEqual(data["other"], {"x": 1})
 
     def test_agents_rollback_rejects_multiline_text_instead_of_changing_it(self):
         before = 'model="mine"\n'
         installed, meta = install.patch_config(before)
-        current = installed.replace('max_concurrent_threads_per_session = 4', '"max_concurrent_threads_per_session" = 4')
-        current = current.replace('model="mine"\n', 'model="mine"\nnotes="""\n[agents]\nmax_concurrent_threads_per_session = 4\n"""\n')
+        current = installed.replace('max_concurrent_threads_per_session = 5', '"max_concurrent_threads_per_session" = 5')
+        current = current.replace('model="mine"\n', 'model="mine"\nnotes="""\n[agents]\nmax_concurrent_threads_per_session = 5\n"""\n')
         with self.assertRaisesRegex(install.InstallError, "unrelated settings preserved"):
             install.revert_config(before, installed, current, meta)
 
@@ -144,7 +144,7 @@ class ConfigPatchTests(unittest.TestCase):
                     installed, meta = install.patch_config(before)
                     data = tomllib.loads(installed)
                     original_agents = tomllib.loads(before)["agents"]
-                    expected_cap = min(4, *(original_agents[k] for k in ("max_threads", "max_concurrent_threads_per_session") if k in original_agents))
+                    expected_cap = min(5, *(original_agents[k] for k in ("max_threads", "max_concurrent_threads_per_session") if k in original_agents))
                     self.assertEqual(data["agents"]["max_concurrent_threads_per_session"], expected_cap)
                     self.assertNotIn("max_threads", data["agents"])
                     self.assertEqual(install.patch_config(installed)[0], installed)
@@ -556,7 +556,8 @@ class InstallerTests(unittest.TestCase):
         self.assertFalse(self.skills.exists())
 
     def test_explicit_five_persists_plain_reinstall_and_rolls_back(self):
-        self.apply()
+        install.apply_plan(install.plan(self.package, self.home, self.skills, self.state,
+                                       self.overlay, max_child_threads=4), self.state, self.package)
         original_cap = tomllib.loads((self.home / "config.toml").read_text(encoding="utf-8"))["agents"]["max_concurrent_threads_per_session"]
         self.assertEqual(original_cap, 4)
         planned = install.plan(self.package, self.home, self.skills, self.state, self.overlay, max_child_threads=5)
@@ -576,7 +577,7 @@ class InstallerTests(unittest.TestCase):
         obj["preferred_native_child_cap"] = 5
         self.overlay.write_bytes(install.canonical(obj))
         config = self.home / "config.toml"
-        config.write_text(config.read_text(encoding="utf-8").replace("max_concurrent_threads_per_session = 4", "max_concurrent_threads_per_session = 2"), encoding="utf-8")
+        config.write_text(config.read_text(encoding="utf-8").replace("max_concurrent_threads_per_session = 5", "max_concurrent_threads_per_session = 2"), encoding="utf-8")
         planned = self.make_plan()
         self.assertFalse(any(p["path"] == config for p in planned))
         self.assertEqual(tomllib.loads(config.read_text(encoding="utf-8"))["agents"]["max_concurrent_threads_per_session"], 2)
@@ -586,13 +587,13 @@ class InstallerTests(unittest.TestCase):
         machine = json.loads(self.overlay.read_text(encoding="utf-8"))
         machine["user_capability"] = {"keep": "yes"}
         self.overlay.write_bytes(install.canonical(machine))
-        install.apply_plan(install.plan(self.package, self.home, self.skills, self.state, self.overlay, max_child_threads=5), self.state, self.package)
+        install.apply_plan(install.plan(self.package, self.home, self.skills, self.state, self.overlay, max_child_threads=6), self.state, self.package)
         machine = json.loads(self.overlay.read_text(encoding="utf-8"))
         machine["user_added_after"] = 12
         self.overlay.write_bytes(install.canonical(machine))
         planned = install.rollback_plan(install.active_manifest(self.state))
         restored = json.loads(next(p["after"] for p in planned if p["path"] == self.overlay))
-        self.assertEqual(restored["preferred_native_child_cap"], 4)
+        self.assertEqual(restored["preferred_native_child_cap"], 5)
         self.assertEqual(restored["user_capability"], {"keep": "yes"})
         self.assertEqual(restored["user_added_after"], 12)
 

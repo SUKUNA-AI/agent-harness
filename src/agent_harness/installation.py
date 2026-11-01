@@ -27,7 +27,8 @@ START = "<!-- agent-harness:begin -->"
 END = "<!-- agent-harness:end -->"
 AUTO_COMPACT_TOKEN_LIMIT = 500000
 CAP_KEY = "max_concurrent_threads_per_session"
-MANAGED = {"enabled": True, "max_concurrent_threads_per_session": 4, "interrupt_message": True}
+DEFAULT_CHILD_CAP = 5
+MANAGED = {"enabled": True, "max_concurrent_threads_per_session": DEFAULT_CHILD_CAP, "interrupt_message": True}
 SENSITIVE = re.compile(r"(?i)(token|secret|password|credential|authorization|api[_-]?key|headers)")
 _RESTORE_METADATA = contextvars.ContextVar("installation_restore_metadata", default=None)
 _PUBLICATION = contextvars.ContextVar("installation_publication", default=None)
@@ -436,7 +437,7 @@ def normalize_cap_alias(text: str, agents: dict) -> tuple[str, list[dict]]:
     return result, [{"kind": kind, "before": old, "after": new}]
 
 
-def patch_config(text: str, preferred_cap: int = 4, explicit_cap: bool = False) -> tuple[str, dict]:
+def patch_config(text: str, preferred_cap: int = DEFAULT_CHILD_CAP, explicit_cap: bool = False) -> tuple[str, dict]:
     preferred_cap = positive_cap(preferred_cap)
     try:
         data = tomllib.loads(text)
@@ -688,7 +689,7 @@ def plan(package: Path, home: Path, skills: Path, state: Path, overlay: Path, ma
     existing_machine = json.loads(decode(required_read(overlay))) if overlay.exists() else None
     if existing_machine is not None and existing_machine.get("schema_version") != 1:
         raise InstallError("Unsupported machine overlay schema")
-    preferred_cap = positive_cap(max_child_threads if max_child_threads is not None else (existing_machine or {}).get("preferred_native_child_cap", 4))
+    preferred_cap = positive_cap(max_child_threads if max_child_threads is not None else (existing_machine or {}).get("preferred_native_child_cap", DEFAULT_CHILD_CAP))
     plans = []
     desired = set()
     def add(path: Path, new: bytes, kind: str, meta: dict | None = None):
@@ -1061,10 +1062,10 @@ def verify(package: Path, home: Path, skills: Path, state: Path, native: bool = 
             errors.append("agents.enabled is not true")
         cap = agents.get("max_concurrent_threads_per_session")
         try:
-            expected_cap = json.loads(decode(required_read(Path(data["machine_overlay"])))).get("preferred_native_child_cap", 4)
+            expected_cap = json.loads(decode(required_read(Path(data["machine_overlay"])))).get("preferred_native_child_cap", DEFAULT_CHILD_CAP)
             positive_cap(expected_cap)
         except (OSError, KeyError, ValueError, UnboundLocalError):
-            expected_cap = 4
+            expected_cap = DEFAULT_CHILD_CAP
         if not isinstance(cap, int) or isinstance(cap, bool) or not 1 <= cap <= expected_cap:
             errors.append("agent cap missing or invalid")
         limit = parsed.get("project_doc_max_bytes", 32768)
@@ -1184,7 +1185,7 @@ def dispatch(command: str, argv: list[str]) -> int:
     parser.add_argument("--native", action="store_true")
     parser.add_argument("--cwd", type=Path)
     parser.add_argument("--manifest", type=Path)
-    parser.add_argument("--max-child-threads", type=int, help="Explicitly authorize a positive native child cap, persisted in machine overlay; unrelated to four logical lanes")
+    parser.add_argument("--max-child-threads", type=int, help="Explicitly authorize a positive native child cap, persisted in machine overlay; independent of the number of logical lanes")
     args = parser.parse_args(argv)
     package, home, skills = args.package_root.resolve(), args.codex_home.resolve(), args.skills_home.resolve()
     try:

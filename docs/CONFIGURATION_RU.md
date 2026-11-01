@@ -36,7 +36,7 @@ Malformed/duplicate/неподдерживаемая форма управляе
 |---|---|---|
 | Корневой `model_auto_compact_token_limit` | Добавить `500000` | Сохранить явное значение |
 | `agents.enabled` | Добавить `true` | `true` сохранить; `false` — явный конфликт |
-| `agents.max_concurrent_threads_per_session` | Предпочтение по умолчанию `4` | Без explicit flag выбрать более строгий положительный cap |
+| `agents.max_concurrent_threads_per_session` | Предпочтение по умолчанию `5` | Без explicit flag выбрать более строгий положительный cap |
 | Legacy `agents.max_threads` | Не создавать | Нормализовать alias в текущий ключ; сохранить данные для rollback |
 | `agents.interrupt_message` | Добавить `true` | Сохранить пользовательский `false`/`true` |
 | `agents.default_subagent_model` | Не задавать | Сохранить |
@@ -53,10 +53,18 @@ Malformed/duplicate/неподдерживаемая форма управляе
 сохраняет предпочтение в machine overlay. Это адресное изменение лимита,
 а не изменение model/provider или разрешений.
 
+Новый default **5** применяется при отсутствии сохранённого предпочтения overlay.
+Старый overlay с `preferred_native_child_cap=4` либо другой явной настройкой
+не мигрирует автоматически на 5. Меньший пользовательский cap (например, 2)
+тоже сохраняется. Чтобы осознанно установить 5 в действующем профиле, выполните
+`install --max-child-threads 5` с теми же путями: сначала dry-run, затем `--apply`.
+Этот флаг обновит canonical key и saved preference; обычная следующая установка
+не сбросит их на другой default.
+
 Текущий ключ `max_concurrent_threads_per_session` ограничивает одновременно
 открытые spawned-agent threads **без primary/root**. Клиентские возможности,
 workspace requirements и runtime availability могут дополнительно ограничивать
-spawn. Четыре configured child slots не означают обязательные четыре агента
+spawn. Пять configured child slots не означают обязательные пять агентов
 на каждой задаче и не совпадают с числом логических направлений плана.
 
 ## Model и effort дочерних ролей

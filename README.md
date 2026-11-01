@@ -15,6 +15,10 @@
 Исправления всех R01–R14 из аудита включены в [1.4.1](docs/REVIEW_1_4_1.md).
 Алгоритмы исполнения в этом обновлении сохранены; параметры моделей,
 provider, reasoning, permissions и порог compaction `500000` не меняются.
+Переносимый child cap по умолчанию теперь **5**; существующий более строгий cap
+и сохранённое preference overlay остаются без автоматического повышения.
+Для намеренного перехода установленного профиля используйте
+`install --max-child-threads 5` сначала как dry-run, затем с `--apply`.
 
 [Установка и обновление](SETUP_RU.md) · [Вся документация](docs/INDEX.md) ·
 [Архитектура с диаграммами](docs/ARCHITECTURE_RU.md) ·
@@ -199,7 +203,7 @@ keys, comments и чужие роли.
 | --- | --- |
 | `model_auto_compact_token_limit` | Добавляет `500000`, только если корневое значение отсутствует; явное значение сохраняет |
 | `agents.enabled` | Добавляет `true` при отсутствии; существующий `false` возвращает как конфликт |
-| `agents.max_concurrent_threads_per_session` | Portable default — 4 children; существующий более строгий cap сохраняет |
+| `agents.max_concurrent_threads_per_session` | Portable default — 5 children; существующий более строгий cap сохраняет |
 | `--max-child-threads N` | Явно выбирает иной положительный cap для этой установки |
 | Legacy `agents.max_threads` | Обратимо переносится в canonical key; при конфликте старых значений выбирается более строгий предел без явного override |
 | `agents.interrupt_message` | Добавляет default при отсутствии |
