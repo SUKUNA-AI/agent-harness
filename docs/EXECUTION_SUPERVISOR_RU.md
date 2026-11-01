@@ -1,0 +1,134 @@
+# Execution Supervisor — 1.5.0
+
+[Индекс](INDEX.md) · [CLI](CLI_REFERENCE_RU.md) · [Форматы состояния](STATE_FORMATS_AND_MIGRATION_RU.md)
+
+Supervisor выполняет локальный цикл «редактирование → снимок → независимая
+проверка → исправление». Модель запускает установленный Codex CLI. Harness
+не содержит дополнительный LLM API client, сервер или базу данных.
+
+## Путь выполнения
+
+```mermaid
+flowchart TD
+    N["NEW: contract и baseline"] --> P["PREFLIGHT: schema, scope, budgets"]
+    P --> E["EXECUTING: codex exec --json"]
+    E --> F["FREEZING: source и toolchain"]
+    F --> V["VERIFYING: существующие runner и gate"]
+    V -->|"все required evidence актуальны"| A["PASS → ACCEPTED"]
+    V -->|"repairable failure"| R["FAILED_REPAIRABLE → REPAIRING"]
+    R --> X["exact session resume + failure packet"]
+    X --> E
+    E -->|"обрыв / неизвестная запись"| U["UNKNOWN_OUTCOME"]
+    U --> C["RECOVERY_REQUIRED: process и source reconcile"]
+    C --> F
+    V -->|"permissions / environment / ambiguity"| B["BLOCKED: причина и безопасный следующий шаг"]
+    R -->|"исчерпан budget / нет прогресса"| T["FAILED_TERMINAL / NO_PROGRESS"]
+```
+
+Это обзор основного пути. Допустимые переходы проверяет
+[`supervisor.py`](../src/agent_harness/supervisor.py). Cancellation и timeout
+могут прервать несколько фаз. Код выхода модели `0` и `turn.completed`
+разрешают начать verification; они не означают accepted.
+
+После model edit существующий `Run.freeze` фиксирует фактический candidate и
+toolchain. `run_check` выполняет frozen argv, сохраняет receipts и logs.
+`gate` проверяет scope, contract/attempt binding, актуальность source и evidence.
+Во время frozen checks модельный writer не запускается на том же checkout.
+
+## Контракт и запуск
+
+Запускайте команды из package root. На Windows вместо `python` можно
+использовать проверенный `py -3`; остальные аргументы одинаковы.
+`TASK.yaml` и private run храните за пределами исходного проекта.
+
+```yaml
+schema_version: 1
+task:
+  id: fix-add
+  objective: Исправить calc.add так, чтобы она складывала два числа.
+  allowed_write_scopes:
+    - calc.py
+acceptance:
+  - id: add-check
+    kind: command
+    required: true
+    argv:
+      - python
+      - -c
+      - "import calc; assert calc.add(2, 3) == 5"
+    timeout: 30
+budgets:
+  max_attempts: 3
+  max_concurrent_managed_agents: 1
+  max_wall_seconds: 7200
+  turn_timeout_seconds: 600
+model:
+  inherit_installed_codex_config: true
+mode: native
+memory: false
+ledger: inform
+```
+
+Пример предполагает существующий Git checkout с `calc.py` и доступным Python.
+Относительные argv исполняются из рабочего `cwd`. Для изолированного примера
+выберите новую тестовую копию проекта. Не используйте production-файлы для smoke.
+
+```text
+python tools/harness.py work start --contract TASK.yaml --cwd /absolute/repo --run-dir /absolute/private/run --state-dir /absolute/private/state
+python tools/harness.py work status --run-dir /absolute/private/run --summary
+python tools/harness.py work report --run-dir /absolute/private/run --format yaml
+```
+
+`work start` работает в переднем плане (foreground). Он не возвращает обещание
+фонового выполнения и не создаёт daemon. Во втором терминале можно вызвать
+read-only `work status` или `work watch`. `watch` по умолчанию проверяет локальное
+состояние раз в 2 секунды, имеет timeout 3600 секунд и печатает новые generations.
+Он не делает модельных запросов.
+
+Все команды поддерживают `--help`. Для start/resume статус `ACCEPTED` даёт exit 0,
+неуспешный результат — 1, обработанная ошибка — 2. Status/report требуют оценки
+полей ответа: успешное чтение состояния не подтверждает его приёмку.
+
+## Repair и восстановление
+
+Initial edit учитывается как первая model attempt. Default — максимум три
+попытки; повтор или restart не повышает исходные лимиты и не переносит deadline.
+Failure classifier различает code/test, environment, permission, ambiguity,
+stale evidence и unknown outcome. Одинаковая ошибка при неизменном snapshot в
+последовательных попытках завершает цикл как `NO_PROGRESS`.
+
+Repair передаёт compact failure packet в `codex exec resume <exact-id>`.
+`resume --last` не используется. Thread ID сохраняется при `thread.started`,
+process identity включает PID и creation identity. На Windows используется
+существующее process-tree containment; на POSIX — process group.
+
+```text
+python tools/harness.py work stop --run-dir /absolute/private/run --reason "owner requested stop"
+python tools/harness.py work resume --run-dir /absolute/private/run
+python tools/harness.py work resume --run-dir /absolute/private/run --repair-journal
+```
+
+`stop` записывает cancel request. Foreground owner завершает свой точный процесс
+с grace period и контролируемым terminate; неизвестные записи требуют reconcile.
+`resume` сверяет locks, process/session и фактическое дерево, затем проверяет его
+до следующего model edit. Два конкурирующих resume не получают двух writers.
+`--repair-journal` предназначен только для доказанно оборванного последнего
+append: архив сохраняется, complete corrupt record не отбрасывается молча.
+
+Terminal task не переоткрывается автоматически. Явная новая попытка использует
+`work resume --new-attempt "причина"` и сохраняет прежние пределы. Accepted
+candidate повторно проверьте через `work status --verify-evidence`.
+
+## Что видно пользователю
+
+Status показывает phase, attempt/max, число подтверждённых required criteria,
+reason, точный session ID, actual candidate cwd и `evidence_current`.
+Это число критериев, не процент усилий и не ETA. Report дополняет его локальными
+счётчиками wall-clock, turns, reported token usage, repairs и integration.
+Отсутствующий usage остаётся `unavailable`/`null`; скрытые инструменты Codex
+не превращаются в наблюдённые tool calls.
+
+Полные результаты находятся в private `verification/`, `codex/`, `journal/`;
+человеческая сводка — `reports/summary.md`, handoff — `context/handoff.yaml`.
+Дополнительные ограничения режима managed описаны в
+[Dynamic Agents](DYNAMIC_AGENTS_RU.md).
