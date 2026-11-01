@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import json
@@ -45,6 +46,9 @@ class CoreIntegrationTests(unittest.TestCase):
     def owner(self, owner_id="one", **overrides):
         return {"owner_id": owner_id, "lane_id": "lane-" + owner_id, "native_ref": "fixture-" + owner_id, "status": "running", "observation": "fixture backend observation", **overrides}
 
+    def write_report_command(self, report, contents):
+        self.contract["checks"][0]["argv"] = [sys.executable, "-I", "-B", "-c", "from pathlib import Path; import sys; Path(sys.argv[1]).write_text(sys.argv[2], encoding='utf-8'); print('one real case')", str(report), contents]
+
     def test_real_command_and_evidence_gate(self):
         self.contract["checks"][0]["tool_versions"] = {"python": [sys.executable, "--version"]}
         run, evidence = self.passing()
@@ -86,14 +90,42 @@ class CoreIntegrationTests(unittest.TestCase):
     def test_cancel_signal_has_distinct_status(self):
         cancel = self.base / "cancel"
         self.contract["checks"][0].update({"argv": [sys.executable, "-I", "-B", "-c", "import time; time.sleep(30)"], "timeout": 5, "assertions": []})
+        # The old fixed 150 ms delay cancelled before spawn on a slow CI runner.
+        self.contract["checks"][0]["tool_versions"] = {"slow-probe": [sys.executable, "-I", "-B", "-c", "import time; time.sleep(0.2); print('fixture version')"]}
         run = self.run_fixture()
         run.freeze()
-        thread = threading.Thread(target=lambda: (time.sleep(0.15), cancel.touch()))
-        thread.start()
-        result = run_check(run, "unit", cancel_file=cancel)
-        thread.join()
+        finished = threading.Event()
+
+        def cancel_after_start():
+            deadline = time.monotonic() + 10
+            while not finished.is_set() and time.monotonic() < deadline:
+                if run.state().get("processes", {}).get("unit", {}).get("status") == "running":
+                    cancel.touch()
+                    return True
+                finished.wait(0.01)
+            return False
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            cancellation = executor.submit(cancel_after_start)
+            try:
+                result = run_check(run, "unit", cancel_file=cancel)
+            finally:
+                finished.set()
+            self.assertTrue(cancellation.result(), "Check never entered the running state")
         self.assertEqual("cancelled", result["status"], result)
+        self.assertIn("process", result)
         self.assertFalse(identity_alive(result["process"]["identity"]))
+
+    def test_cancel_before_start_does_not_spawn(self):
+        cancel = self.base / "cancel-before-start"
+        cancel.touch()
+        run = self.run_fixture()
+        run.freeze()
+        with patch("agent_harness.runner._start_contained") as start:
+            result = run_check(run, "unit", cancel_file=cancel)
+        start.assert_not_called()
+        self.assertEqual("cancelled", result["status"])
+        self.assertNotIn("process", result)
 
     def test_mandatory_check_missing_cannot_accept(self):
         run = self.run_fixture()
@@ -104,7 +136,7 @@ class CoreIntegrationTests(unittest.TestCase):
 
     def test_zero_test_report_rejected_despite_exit_zero(self):
         report = self.base / "report.xml"
-        report.write_text('<testsuites><testsuite tests="0"/></testsuites>')
+        self.write_report_command(report, '<testsuites><testsuite tests="0"/></testsuites>')
         self.contract["checks"][0]["reports"] = [{"path": str(report), "format": "junit", "min_tests": 1}]
         run = self.run_fixture()
         run.freeze()
@@ -114,7 +146,7 @@ class CoreIntegrationTests(unittest.TestCase):
 
     def test_skipped_required_case_rejected(self):
         report = self.base / "report.xml"
-        report.write_text('<testsuite><testcase name="must_run"><skipped/></testcase></testsuite>')
+        self.write_report_command(report, '<testsuite><testcase name="must_run"><skipped/></testcase></testsuite>')
         self.contract["checks"][0]["reports"] = [{"path": str(report), "format": "junit", "required_cases": ["must_run"]}]
         run = self.run_fixture()
         run.freeze()
@@ -125,6 +157,80 @@ class CoreIntegrationTests(unittest.TestCase):
         run = self.run_fixture()
         run.freeze()
         self.assertEqual("failed", run_check(run, "unit")["status"])
+
+    def test_stale_success_report_cannot_accept_a_noop(self):
+        report = self.base / "stale.xml"
+        report.write_text('<testsuite><testcase name="old-pass"/></testsuite>', encoding="utf-8")
+        self.contract["checks"][0]["reports"] = [{"path": str(report), "format": "junit", "required_cases": ["old-pass"]}]
+        run = self.run_fixture()
+        run.freeze()
+        result = run_check(run, "unit")
+        self.assertEqual("failed", result["status"])
+        self.assertFalse(result["report_observations"][0]["fresh"])
+        self.assertTrue(any("not produced by this check" in error for error in result["assertion_errors"]))
+        self.assertEqual("rejected", gate(run)["verdict"])
+        self.assertTrue(report.is_file(), "The runner must not remove a user's old report")
+
+    def test_identical_report_rewritten_by_current_check_is_fresh(self):
+        report = self.base / "rewritten.xml"
+        contents = '<testsuite><testcase name="still-passes"/></testsuite>'
+        report.write_text(contents, encoding="utf-8")
+        original_hash = file_hash(report)
+        os.utime(report, (946684800, 946684800))
+        self.write_report_command(report, contents)
+        self.contract["checks"][0]["reports"] = [{"path": str(report), "format": "junit", "required_cases": ["still-passes"]}]
+        run, result = self.passing()
+        self.assertEqual(original_hash, file_hash(report))
+        self.assertTrue(result["report_observations"][0]["fresh"])
+        self.assertEqual("accepted", gate(run)["verdict"])
+
+    def test_json_report_shape_errors_persist_failed_evidence(self):
+        for index, contents in enumerate(('{"summary":null}', '{"summary":[]}', '{"summary":7}', '{}')):
+            with self.subTest(contents=contents):
+                report = self.base / f"bad-{index}.json"
+                self.write_report_command(report, contents)
+                self.contract["checks"][0]["reports"] = [{"path": str(report), "format": "json", "equals": {"summary.tests": 1}}]
+                run = self.run_fixture(name=f"bad-run-{index}")
+                run.freeze()
+                result = run_check(run, "unit")
+                persisted = read_json(run.attempt_dir() / "checks/unit/result.json")
+                self.assertEqual("failed", result["status"])
+                self.assertEqual(result["digest"], persisted["digest"])
+                self.assertTrue(any("invalid test report" in error for error in result["assertion_errors"]))
+                self.assertEqual("failed", run.state()["processes"]["unit"]["status"])
+                self.assertFalse(identity_alive(result["process"]["identity"]))
+                self.assertEqual("rejected", gate(run)["verdict"])
+
+    def test_fresh_json_report_accepts_matching_fields(self):
+        report = self.base / "current.json"
+        self.write_report_command(report, '{"summary":{"tests":1}}')
+        self.contract["checks"][0]["reports"] = [{"path": str(report), "format": "json", "equals": {"summary.tests": 1}}]
+        run, result = self.passing()
+        self.assertTrue(result["report_observations"][0]["fresh"])
+        self.assertEqual("accepted", gate(run)["verdict"])
+
+    def test_report_capture_failure_closes_check_and_keeps_logs(self):
+        report = self.base / "capture-error.json"
+        self.write_report_command(report, '{"tests":1}')
+        self.contract["checks"][0]["reports"] = [{"path": str(report), "format": "json", "equals": {"tests": 1}}]
+        run = self.run_fixture()
+        run.freeze()
+        with patch("agent_harness.runner.shutil.copyfile", side_effect=OSError("fixture report copy failed")):
+            result = run_check(run, "unit")
+        self.assertEqual("failed", result["status"])
+        self.assertTrue((run.attempt_dir() / "checks/unit/result.json").is_file())
+        self.assertEqual("failed", run.state()["processes"]["unit"]["status"])
+        self.assertEqual({"stdout.log", "stderr.log"}, {Path(item["path"]).name for item in result["artifacts"]})
+
+    def test_final_snapshot_failure_still_persists_failed_result(self):
+        run = self.run_fixture()
+        run.freeze()
+        with patch("agent_harness.runner.snapshot", side_effect=HarnessError("fixture input disappeared")):
+            result = run_check(run, "unit")
+        self.assertEqual("failed", result["status"])
+        self.assertIn("Evidence finalization failed", result["error"])
+        self.assertEqual("failed", read_json(run.attempt_dir() / "checks/unit/result.json")["status"])
+        self.assertEqual("failed", run.state()["processes"]["unit"]["status"])
 
     def test_source_change_makes_result_stale(self):
         run, _ = self.passing()
@@ -283,6 +389,45 @@ class CoreIntegrationTests(unittest.TestCase):
         run.record_owner(self.owner("three"))
         self.assertEqual(3, run.state()["max_observed_counted_threads"])
 
+    def test_native_apis_require_explicit_root_counting(self):
+        self.contract["budget"].pop("root_counts")
+        run = self.run_fixture()
+        before = run.state_path.read_bytes()
+        with self.assertRaisesRegex(HarnessError, "root_counts"):
+            run.capacity()
+        with self.assertRaisesRegex(HarnessError, "root_counts"):
+            run.record_owner(self.owner())
+        self.assertEqual(before, run.state_path.read_bytes())
+
+    def test_non_native_work_does_not_require_a_native_budget(self):
+        self.contract.pop("budget")
+        run, result = self.passing()
+        self.assertEqual("passed", result["status"])
+        self.assertEqual("accepted", gate(run)["verdict"])
+        with self.assertRaisesRegex(HarnessError, "capacity is unknown"):
+            run.capacity()
+        with self.assertRaisesRegex(HarnessError, "native cap"):
+            run.record_owner(self.owner())
+
+    def test_native_ledger_counts_root_only_for_total_limit(self):
+        for root_counts in (False, True):
+            with self.subTest(root_counts=root_counts):
+                contract = deepcopy(self.contract)
+                contract["budget"].update(native_cap=2, root_counts=root_counts)
+                run = self.run_fixture(contract, name=f"capacity-{root_counts}")
+                self.assertEqual(int(root_counts), run.capacity()["counted"])
+                self.assertEqual(root_counts, run.capacity()["root_counts"])
+                for index in range(2 - int(root_counts)):
+                    run.record_owner(self.owner(f"owner-{index}", status="idle"))
+                self.assertEqual(2, run.capacity()["counted"])
+                self.assertEqual(0, run.capacity()["remaining"])
+                self.assertFalse(run.capacity()["spawn_allowed"])
+                with self.assertRaisesRegex(HarnessError, "cap exceeded"):
+                    run.record_owner(self.owner("over-cap"))
+                run.record_owner(self.owner("owner-0", status="closed", closed_confirmed=True, closure_evidence="fixture backend close receipt"))
+                self.assertEqual(1, run.capacity()["remaining"])
+                self.assertEqual(2, run.state()["max_observed_counted_threads"])
+
     def test_two_writers_cannot_share_checkout(self):
         run = self.run_fixture()
         run.record_owner(self.owner(write_cwd=str(self.cwd)))
@@ -319,6 +464,56 @@ class CoreIntegrationTests(unittest.TestCase):
         fresh["attempt_id"] = "a3"
         with self.assertRaisesRegex(HarnessError, "budget exhausted"):
             run.new_attempt(fresh, reason="Try another agent")
+
+    def test_new_attempt_cannot_increase_or_remove_attempt_limit(self):
+        self.contract["budget"]["max_attempts"] = 2
+        run = self.run_fixture()
+        for budget in ({"max_attempts": 100}, {}):
+            fresh = deepcopy(self.contract)
+            fresh.update(attempt_id="a2", budget=budget)
+            with self.subTest(budget=budget), self.assertRaisesRegex(HarnessError, "cannot increase"):
+                run.new_attempt(fresh, reason="Retry with changed hypothesis")
+        self.assertEqual(["a1"], run.state()["attempts"])
+
+    def test_new_attempt_cannot_extend_or_remove_deadline(self):
+        self.contract["budget"]["deadline"] = "2000-01-01T00:00:00Z"
+        run = self.run_fixture()
+        for value in (None, "2100-01-01T00:00:00Z"):
+            fresh = deepcopy(self.contract)
+            fresh["attempt_id"] = "a2"
+            if value is None:
+                fresh["budget"].pop("deadline")
+            else:
+                fresh["budget"]["deadline"] = value
+            with self.subTest(deadline=value), self.assertRaisesRegex(HarnessError, "cannot extend or remove"):
+                run.new_attempt(fresh, reason="Retry with changed hypothesis")
+        self.assertEqual(["a1"], run.state()["attempts"])
+
+    def test_new_attempt_can_tighten_budget_and_preserve_equivalent_deadline(self):
+        self.contract["budget"]["deadline"] = "2100-01-01T00:00:00Z"
+        run = self.run_fixture()
+        fresh = deepcopy(self.contract)
+        fresh["attempt_id"] = "a2"
+        fresh["budget"].update(max_attempts=2, deadline="2100-01-01T03:00:00+03:00")
+        run.new_attempt(fresh, reason="Smaller retry budget")
+        self.assertEqual(["a1", "a2"], run.state()["attempts"])
+        fresh["attempt_id"] = "a3"
+        with self.assertRaisesRegex(HarnessError, "budget exhausted"):
+            run.new_attempt(fresh, reason="Budget remains exhausted")
+
+    def test_budget_rejects_ambiguous_types_without_requiring_native_settings(self):
+        for key, value in (("max_attempts", True), ("native_cap", True), ("native_cap", 0), ("native_cap", 1.5), ("root_counts", 1), ("root_counts", "false")):
+            contract = deepcopy(self.contract)
+            contract["budget"][key] = value
+            with self.subTest(key=key, value=value), self.assertRaises(HarnessError):
+                validate_contract(contract)
+        contract = deepcopy(self.contract)
+        contract.pop("budget")
+        validate_contract(contract)
+        contract["budget"] = {"max_attempts": 3}
+        validate_contract(contract)
+        contract["budget"] = {"native_cap": 3, "root_counts": False}
+        validate_contract(contract)
 
     def test_live_state_lock_prevents_second_writer(self):
         run = self.run_fixture()
@@ -502,6 +697,32 @@ class CoreIntegrationTests(unittest.TestCase):
         self.assertFalse(resumed["safe_to_start_new_owner"])
         self.assertTrue(any("integrity" in message for message in resumed["resume"]["problems"]))
 
+    def test_resume_revalidates_accepted_dependency_source_and_evidence(self):
+        for mutation in ("source", "artifact"):
+            with self.subTest(mutation=mutation):
+                upstream = self.run_fixture(name=f"upstream-{mutation}")
+                upstream.freeze()
+                upstream_result = run_check(upstream, "unit")
+                upstream_verdict = gate(upstream)
+                downstream_cwd = self.base / f"downstream-source-{mutation}"
+                downstream_cwd.mkdir()
+                (downstream_cwd / "main.py").write_text("independent downstream candidate\n")
+                child = deepcopy(self.contract)
+                child.update(run_id=f"downstream-{mutation}", cwd=str(downstream_cwd), dependencies=[{"run_dir": str(upstream.path), "verdict_digest": upstream_verdict["digest"]}])
+                downstream = self.run_fixture(child, name=f"downstream-run-{mutation}")
+                downstream.freeze()
+                run_check(downstream, "unit")
+                self.assertEqual("accepted", gate(downstream)["verdict"])
+                if mutation == "source":
+                    (self.cwd / "main.py").write_text("changed upstream\n")
+                else:
+                    (upstream.path / upstream_result["artifacts"][0]["path"]).unlink()
+                resumed = downstream.resume()
+                self.assertFalse(resumed["safe_to_start_new_owner"])
+                self.assertTrue(any("accepted result" in problem for problem in resumed["resume"]["problems"]))
+                self.assertEqual("blocked", downstream.state()["status"])
+                self.assertIsNone(downstream.state()["accepted"])
+
     def test_capacity_preflight_requires_native_reconciliation(self):
         run = self.run_fixture()
         self.assertTrue(run.capacity()["spawn_allowed"])
@@ -522,6 +743,21 @@ class CoreIntegrationTests(unittest.TestCase):
         finally:
             process.terminate()
             process.wait(timeout=5)
+
+    @unittest.skipIf(os.name == "nt", "POSIX process namespace observation")
+    def test_process_identity_rejects_stale_proc_entry_after_esrch(self):
+        # A /proc mount can expose a different namespace than kill(2). A stale
+        # entry must never keep a completed check alive in the run ledger.
+        with patch("agent_harness.core.os.kill", side_effect=ProcessLookupError()), patch("agent_harness.core.Path.read_text") as read_stat:
+            self.assertIsNone(process_identity(12345))
+        read_stat.assert_not_called()
+
+    @unittest.skipIf(os.name == "nt", "POSIX process namespace observation")
+    def test_process_identity_does_not_treat_permission_denied_as_dead(self):
+        with patch("agent_harness.core.os.kill", side_effect=PermissionError()), patch("agent_harness.core.Path.exists", return_value=False):
+            self.assertEqual({"pid": 12345, "created": "unknown"}, process_identity(12345))
+        with patch("agent_harness.core.os.kill", side_effect=PermissionError()), patch("agent_harness.core.Path.exists", return_value=True), patch("agent_harness.core.Path.read_text", side_effect=PermissionError()):
+            self.assertTrue(identity_alive({"pid": 12345, "created": "previously-observed"}))
 
     def test_expired_deadline_does_not_start_checks_or_new_owner(self):
         self.contract["budget"]["deadline"] = "2000-01-01T00:00:00Z"

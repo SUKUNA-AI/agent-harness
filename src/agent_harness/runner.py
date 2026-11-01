@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import threading
 import time
@@ -117,12 +118,16 @@ def redact(value):
     return value
 
 
-def _drain(source, path):
-    with Path(path).open("x", encoding="utf-8", newline="\n") as output:
-        for line in iter(source.readline, b""):
-            output.write(redact(line.decode("utf-8", errors="replace")))
-            output.flush()
-    source.close()
+def _drain(source, path, errors):
+    try:
+        with Path(path).open("x", encoding="utf-8", newline="\n") as output:
+            for line in iter(source.readline, b""):
+                output.write(redact(line.decode("utf-8", errors="replace")))
+                output.flush()
+    except Exception as error:
+        errors.append(redact(f"Log capture failed: {type(error).__name__}: {error}"))
+    finally:
+        source.close()
 
 
 def _terminate(process, job):
@@ -227,6 +232,22 @@ def _unknown_artifacts(run, state, check_id, result):
     return [f"unknown artifact: {path.relative_to(run.path).as_posix()}" for path in folder.rglob("*") if path.is_file() and path.resolve() not in declared]
 
 
+def _report_stamp(path):
+    """Observe production of a report, including an identical-byte rewrite.
+
+    Access time is deliberately excluded: reading an old report is not a new
+    test run. If the filesystem cannot distinguish writes, use a new output path
+    for each check rather than treating an unchanged file as fresh evidence.
+    """
+    try:
+        observed = path.stat()
+    except FileNotFoundError:
+        return None
+    if not stat.S_ISREG(observed.st_mode):
+        return None
+    return {key: getattr(observed, "st_" + key) for key in ("dev", "ino", "size", "mtime_ns", "ctime_ns")}
+
+
 def _verify_assertions(check, stdout, stderr, report_paths):
     errors = []
     for assertion in check.get("assertions", []):
@@ -264,13 +285,15 @@ def _verify_assertions(check, stdout, stderr, report_paths):
                 for key, expected in definition.get("equals", {}).items():
                     cursor = value
                     for segment in key.split("."):
+                        if not isinstance(cursor, dict):
+                            raise ValueError(f"JSON report path crosses a non-object: {key}")
                         cursor = cursor[segment]
                     if cursor != expected:
                         errors.append(f"report field mismatch: {key}")
                 reports.append({"format": "json", "verified_equals": definition.get("equals", {})})
             else:
                 errors.append("unsupported report format")
-        except (OSError, ValueError, KeyError, ET.ParseError) as error:
+        except (OSError, ValueError, KeyError, TypeError, AttributeError, IndexError, ET.ParseError, re.error) as error:
             errors.append(f"invalid test report: {type(error).__name__}")
     return errors, reports
 
@@ -324,6 +347,9 @@ def run_check(run: Run, check_id, *, cancel_file=None):
         process = None
         job = None
         readers = []
+        reader_errors = []
+        report_before = {}
+        captured_paths = [stdout_path, stderr_path]
         started = time.monotonic()
         try:
             if record["effective_timeout"] <= 0:
@@ -335,6 +361,11 @@ def run_check(run: Run, check_id, *, cancel_file=None):
                 stdout_path.write_text("", encoding="utf-8")
                 stderr_path.write_text("Cancelled before execution\n", encoding="utf-8")
             else:
+                for index, report in enumerate(check.get("reports", [])):
+                    source = Path(report["path"])
+                    if not source.is_absolute():
+                        source = Path(record["cwd"]) / source
+                    report_before[index] = _report_stamp(source)
                 process, job = _start_contained(check["argv"], record["cwd"])
                 identity = process_identity(process.pid)
                 record["process"] = {"identity": identity, "tree_control": "windows_suspended_job_kill_on_close" if os.name == "nt" else "private_process_group"}
@@ -342,7 +373,7 @@ def run_check(run: Run, check_id, *, cancel_file=None):
                     current.setdefault("processes", {})[check_id] = {"identity": identity, "status": "running", "started_at": now(), "attempt_id": contract["attempt_id"], "argv_digest": digest(check["argv"])}
                     current["status"] = "verifying"
                 for source, path in ((process.stdout, stdout_path), (process.stderr, stderr_path)):
-                    thread = threading.Thread(target=_drain, args=(source, path), daemon=True)
+                    thread = threading.Thread(target=_drain, args=(source, path, reader_errors), daemon=True)
                     thread.start()
                     readers.append(thread)
                 while process.poll() is None:
@@ -384,44 +415,75 @@ def run_check(run: Run, check_id, *, cancel_file=None):
                 reader.join(timeout=10)
             if any(reader.is_alive() for reader in readers):
                 record.update({"status": "failed", "error": "Log reader did not terminate; evidence incomplete"})
-            for path in (stdout_path, stderr_path):
-                if not path.exists():
-                    path.write_text("", encoding="utf-8")
+            if reader_errors:
+                record.update({"status": "failed", "error": "; ".join(reader_errors)})
             record["finished_at"] = now()
             record["elapsed_seconds"] = round(time.monotonic() - started, 6)
-            after = snapshot(contract)
-            record["input_after"] = after["digest"]
-            record["tools_after"] = _versions(check)
-            if record["tools_after"] != record["tools"]:
-                record["status"] = "toolchain_changed"
-            if before["digest"] != after["digest"]:
-                record["status"] = "inputs_changed"
-                record["changed_paths"] = changed_paths(before, after)
-            report_paths = []
-            for index, report in enumerate(check.get("reports", [])):
-                source = Path(report["path"])
-                if not source.is_absolute():
-                    source = Path(record["cwd"]) / source
-                if source.is_file():
-                    target = run_dir / (f"report-{index}" + source.suffix)
-                    shutil.copyfile(source, target)
-                    report_paths.append((report, target))
-                else:
-                    record.setdefault("assertion_errors", []).append(f"required report missing: {report['path']}")
-            errors, reports = _verify_assertions(check, stdout_path.read_text(encoding="utf-8"), stderr_path.read_text(encoding="utf-8"), report_paths)
-            record.setdefault("assertion_errors", []).extend(errors)
-            record["reports"] = reports
-            if record["assertion_errors"] and record["status"] == "passed":
-                record["status"] = "failed"
-            record["artifacts"] = [_proof(p, run.path) for p in (stdout_path, stderr_path, *(p for _, p in report_paths))]
+            if process:
+                record.setdefault("exit_code", process.poll())
+            try:
+                for path in (stdout_path, stderr_path):
+                    if not path.exists():
+                        path.write_text("", encoding="utf-8")
+                after = snapshot(contract)
+                record["input_after"] = after["digest"]
+                record["tools_after"] = _versions(check)
+                if record["tools_after"] != record["tools"]:
+                    record["status"] = "toolchain_changed"
+                if before["digest"] != after["digest"]:
+                    record["status"] = "inputs_changed"
+                    record["changed_paths"] = changed_paths(before, after)
+                report_paths = []
+                record["report_observations"] = []
+                for index, report in enumerate(check.get("reports", [])):
+                    source = Path(report["path"])
+                    if not source.is_absolute():
+                        source = Path(record["cwd"]) / source
+                    try:
+                        observed = _report_stamp(source)
+                        fresh = process is not None and observed is not None and observed != report_before.get(index)
+                        record["report_observations"].append({"path": str(source), "before": report_before.get(index), "after": observed, "fresh": fresh})
+                        if observed is None:
+                            record.setdefault("assertion_errors", []).append(f"required report missing: {report['path']}")
+                            continue
+                        if not fresh:
+                            record.setdefault("assertion_errors", []).append(f"report not produced by this check: {report['path']}")
+                        target = run_dir / (f"report-{index}" + source.suffix)
+                        # Retain even a stale or malformed report for diagnosis.
+                        captured_paths.append(target)
+                        shutil.copyfile(source, target)
+                        report_paths.append((report, target))
+                        if _report_stamp(source) != observed:
+                            record.setdefault("assertion_errors", []).append(f"report changed during capture: {report['path']}")
+                    except (OSError, ValueError, TypeError) as error:
+                        record.setdefault("assertion_errors", []).append(redact(f"report capture failed: {report['path']}: {type(error).__name__}: {error}"))
+                errors, reports = _verify_assertions(check, stdout_path.read_text(encoding="utf-8"), stderr_path.read_text(encoding="utf-8"), report_paths)
+                record.setdefault("assertion_errors", []).extend(errors)
+                record["reports"] = reports
+                if record["assertion_errors"] and record["status"] == "passed":
+                    record["status"] = "failed"
+            except Exception as error:
+                record.update({"status": "failed", "error": redact(f"Evidence finalization failed: {type(error).__name__}: {error}")})
+            # Partial evidence is useful on a capture failure. A missing artifact
+            # still fails the check; it must not prevent its result/ledger closure.
+            for path in captured_paths:
+                try:
+                    record["artifacts"].append(_proof(path, run.path))
+                except (OSError, ValueError, HarnessError) as error:
+                    record.update({"status": "failed", "error": redact(f"Evidence artifact capture failed: {type(error).__name__}: {error}")})
             record["digest"] = digest(record)
-            atomic_json(_result_path(run, state, check_id), record, exclusive=True)
-            with run.edit() as current:
-                if current["current_attempt"] == contract["attempt_id"]:
-                    if check_id in current.get("processes", {}):
-                        current["processes"][check_id]["status"] = record["status"]
-                    if record["status"] != "passed":
-                        current["status"] = "failed" if record["status"] != "cancelled" else "cancelled"
+            try:
+                atomic_json(_result_path(run, state, check_id), record, exclusive=True)
+            except BaseException:
+                record["status"] = "failed"
+                raise
+            finally:
+                with run.edit() as current:
+                    if current["current_attempt"] == contract["attempt_id"]:
+                        if check_id in current.get("processes", {}):
+                            current["processes"][check_id]["status"] = record["status"]
+                        if record["status"] != "passed":
+                            current["status"] = "failed" if record["status"] != "cancelled" else "cancelled"
         return record
 
 
@@ -539,14 +601,17 @@ def _shared_scope_errors(run, state, contract):
 
 
 
-def _check_evidence_errors(run, state, contract, candidate, toolchains):
+def _check_evidence_errors(run, state, contract, candidate, toolchains, *, details=None):
     """Shared read-only validation; never starts a command or changes run state."""
     errors, receipts = [], []
     for check in contract["checks"]:
+        first_error = len(errors)
         path = _result_path(run, state, check["id"])
         if not path.is_file():
             if check["required"]:
                 errors.append(f"required check missing: {check['id']}")
+                if details is not None:
+                    details.append({"check_id": check["id"], "errors": errors[first_error:]})
             continue
         result = read_json(path)
         sha = result.pop("digest", None)
@@ -575,9 +640,11 @@ def _check_evidence_errors(run, state, contract, candidate, toolchains):
         elif set(result.get("criteria", {})) != set(check["criteria"]) or not result.get("assessor") or not result.get("method") or not result.get("assessment"):
             errors.append(f"typed assessment incomplete: {check['id']}")
         receipts.append({"check_id": check["id"], "result_digest": sha, "status": result.get("status")})
+        if details is not None:
+            details.append({"check_id": check["id"], "errors": errors[first_error:]})
     return errors, receipts
 
-def accepted_evidence_errors(run: Run, verdict_digest, *, _ancestors=()):
+def accepted_evidence_errors(run: Run, verdict_digest, *, _ancestors=(), _evidence_validation=None):
     """Revalidate existing evidence without running checks, a new gate or run mutations."""
     if str(run.path) in _ancestors:
         return ["accepted dependency cycle"]
@@ -602,7 +669,7 @@ def accepted_evidence_errors(run: Run, verdict_digest, *, _ancestors=()):
         toolchains = read_json(run.attempt_dir(state) / "toolchains.json")
         if digest(toolchains) != state.get("toolchain_digest"):
             errors.append("frozen toolchain integrity failed")
-        check_errors, receipts = _check_evidence_errors(run, state, contract, candidate, toolchains)
+        check_errors, receipts = _check_evidence_errors(run, state, contract, candidate, toolchains, details=_evidence_validation)
         errors.extend(check_errors)
         # Receipts bind result metadata to the accepted gate, even if a result was rehashed.
         for receipt in receipts:

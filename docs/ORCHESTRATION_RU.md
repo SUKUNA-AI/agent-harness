@@ -1,6 +1,6 @@
 # Автоматическая координация native Codex
 
-Для содержательной задачи root по умолчанию назначает двух полезных независимых owners; третьего — при независимой части и ёмкости. Простая задача выполняется напрямую. Неделимая работа, меньшая ёмкость или недоступный native tool дают честный последовательный путь без повторного согласования уже разрешённой работы.
+Ограниченную самостоятельную задачу root выполняет напрямую. Полезные независимые части автоматически делегируются, обычно двум owners; третий нужен при независимой части и ёмкости. Последовательный план может иметь одного owner. Неделимая работа, меньшая ёмкость или недоступный native tool дают честный последовательный путь без повторного согласования уже разрешённой работы.
 
 Пользователь не заполняет JSON. Root готовит контракт и добавочный план по [схеме](../schemas/orchestration.schema.json), выбирает workflows/skills и сам управляет native tools. Python только проверяет план и печатает рекомендации. Он не запускает LLM, agents, Git mutation, install, внешние запросы или acceptance gate.
 
@@ -39,7 +39,7 @@ plan repair-brief --plan <plan.json> --contract <contract.json> --node <id> --re
 }
 ```
 
-Это шаблон, не валидный готовый контракт: root подставляет реальные paths/digests/check IDs. `target_owners` — 2 или 3. Ноды упорядочиваются по id. Root является единственным интегратором. Нет двух writers на checkout: сравниваются физические абсолютные targets, вложенные cwd и общий Git checkout (также соседние подкаталоги одного checkout). Та же канонизация применяется к native inventory и неизвестным writers. Windows case/slash aliases сравниваются консервативно; исходный spelling сохраняется при проверке filesystem symlinks/junctions. Claims допускают только точный путь, `**` или `directory/**`; symlink writes отклоняются. Project protected paths сохраняются, включая node cwd внутри parent cwd. Проверки кооперативны и не являются OS sandbox.
+Это шаблон, не валидный готовый контракт: root подставляет реальные paths/digests/check IDs. `target_owners` — от 1 до 3, default 2; это верхняя граница полезной текущей волны, а не требование заполнить все слоты. Ноды упорядочиваются по id. Root является единственным интегратором. Нет двух writers на checkout: сравниваются физические абсолютные targets, вложенные cwd и общий Git checkout (также соседние подкаталоги одного checkout). Та же канонизация применяется к native inventory и неизвестным writers. Windows case/slash aliases сравниваются консервативно; исходный spelling сохраняется при проверке filesystem symlinks/junctions. Claims допускают только точный путь, `**` или `directory/**`; symlink writes отклоняются. Project protected paths сохраняются, включая node cwd внутри parent cwd. Проверки кооперативны и не являются OS sandbox.
 
 У node есть `state` (по умолчанию planned), `native_ref` для follow-up, `depends_on` и `checks` из текущего контракта. Права — подмножество контракта. Review/diagnostics/plan/research/answer и reviewer не получают product write claims; разрешённые отчёты оформляются отдельным artifact contract.
 
@@ -64,7 +64,7 @@ Root сохраняет адаптированный **реально наблю
 }
 ```
 
-Снимок годен максимум 120 секунд и требует `budget.root_counts=true`, cap/source в контракте. Кап не превышает текущий наблюдаемый/разрешённый cap контракта. Root указан ровно один раз. Любой открытый потомок, даже неизвестный плану, считается; idle/done/stopped/unavailable занимают слот. Closed требует `closed_confirmed=true` и `closure_evidence` реального backend. Duplicate native_ref, over-cap и concurrent writer checkout конфликт отклоняются.
+Снимок годен максимум 120 секунд и требует явного boolean `budget.root_counts`, cap/source в контракте. `true` означает общий лимит с root; `false` — лимит только потомков. Текущий `agents.max_concurrent_threads_per_session` Codex исключает основной поток, поэтому для него используется `false`. Кап не превышает текущий наблюдаемый/разрешённый cap контракта. Root указан ровно один раз для идентификации, но считается в cap только при `root_counts=true`. Любой открытый потомок, даже неизвестный плану, считается; idle/done/stopped/unavailable занимают слот. Closed требует `closed_confirmed=true` и `closure_evidence` реального backend. Duplicate native_ref, over-cap и concurrent writer checkout конфликт отклоняются.
 
 У `next` planned node без native_ref — новый spawn; с известным idle/done/stopped ref — follow-up уже открытого потока, без освобождения слота. Пользовательский backend может не поддерживать повтор stopped; root сверяет фактическую семантику и использует доступный ref, не выдумывает close. Неизвестный/unavailable ref требует reconciliation. `next` не переименовывает и не закрывает потоки; новая lease не должна пересекаться с прежней.
 

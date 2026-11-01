@@ -109,21 +109,35 @@ def process_identity(pid):
                 return {"pid": int(pid), "created": f"{creation.dwHighDateTime}:{creation.dwLowDateTime}"}
             finally:
                 k.CloseHandle(wintypes.HANDLE(handle))
-        stat = Path(f"/proc/{int(pid)}/stat")
+        pid = int(pid)
+        if pid <= 0:
+            return None
+        # A bind-mounted /proc can describe a different PID namespace. ESRCH in
+        # our namespace wins over a stale or unrelated /proc/<pid>/stat entry.
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return None
+        except PermissionError:
+            pass  # EPERM proves existence; do not reclaim a live owner's lease.
+        stat = Path(f"/proc/{pid}/stat")
         if stat.exists():
-            tail = stat.read_text().rsplit(")", 1)[1].split()
+            try:
+                tail = stat.read_text().rsplit(")", 1)[1].split()
+            except PermissionError:
+                return {"pid": pid, "created": "unknown"}
             if tail[0] == "Z":
                 return None
             return {"pid": int(pid), "created": tail[19]}
-        os.kill(int(pid), 0)
         # Portable fallback is conservative: cannot distinguish reused PIDs.
-        return {"pid": int(pid), "created": "unknown"}
+        return {"pid": pid, "created": "unknown"}
     except (OSError, ValueError, IndexError):
         return None
 
 
 def identity_alive(identity):
-    return bool(identity and process_identity(identity["pid"]) == identity)
+    current = process_identity(identity["pid"]) if identity else None
+    return bool(current and (current == identity or current["created"] == "unknown" or identity.get("created") == "unknown"))
 
 
 @contextmanager
@@ -261,8 +275,14 @@ def validate_contract(contract):
     if len(ids) != len(set(ids)):
         raise HarnessError("Check IDs must be unique")
     budget = contract.get("budget", {})
-    if not isinstance(budget.get("max_attempts", 3), int) or budget.get("max_attempts", 3) < 1:
+    if not isinstance(budget, dict):
+        raise HarnessError("budget must be an object")
+    if type(budget.get("max_attempts", 3)) is not int or budget.get("max_attempts", 3) < 1:
         raise HarnessError("max_attempts must be positive")
+    if "native_cap" in budget and (type(budget["native_cap"]) is not int or budget["native_cap"] < 1):
+        raise HarnessError("native_cap must be a positive integer")
+    if "root_counts" in budget and type(budget["root_counts"]) is not bool:
+        raise HarnessError("root_counts must be an explicit boolean")
     remaining_budget_seconds(contract)
     for shared in scope.get("shared_files", []):
         _relative(shared.get("path", ""))
@@ -476,7 +496,14 @@ class Run:
                     raise HarnessError("Attempt must belong to the same run and task")
             if contract["attempt_id"] in state["attempts"]:
                 raise HarnessError("Attempt ID already used")
-            if len(state["attempts"]) >= old.get("budget", {}).get("max_attempts", 3):
+            old_budget, new_budget = old.get("budget", {}), contract.get("budget", {})
+            old_limit, new_limit = old_budget.get("max_attempts", 3), new_budget.get("max_attempts", 3)
+            if new_limit > old_limit:
+                raise HarnessError("An ordinary attempt cannot increase the run attempt budget")
+            old_deadline, new_deadline = old_budget.get("deadline"), new_budget.get("deadline")
+            if old_deadline and (not new_deadline or datetime.fromisoformat(new_deadline.replace("Z", "+00:00")) > datetime.fromisoformat(old_deadline.replace("Z", "+00:00"))):
+                raise HarnessError("An ordinary attempt cannot extend or remove the run deadline")
+            if len(state["attempts"]) >= new_limit:
                 raise HarnessError("Attempt budget exhausted; do not reset it with a new agent")
             if len(state["attempts"]) >= 2 and reason == state.get("attempt_reason"):
                 signatures = []
@@ -587,24 +614,31 @@ class Run:
             for key, operation in state.get("operations", {}).items():
                 if operation["status"] in {"planned", "unknown"}:
                     problems.append(f"operation outcome requires observation before retry: {key}")
-            from .runner import validate_artifacts
+            from .runner import accepted_evidence_errors, validate_artifacts
             evidence_validation = []
-            for path in sorted((self.attempt_dir(state) / "checks").glob("*/result.json")):
-                try:
-                    record = read_json(path)
-                    sha = record.pop("digest", None)
-                    errors = []
-                    if digest(record) != sha:
-                        errors.append("result content hash failed")
-                    record["digest"] = sha
-                    errors.extend(validate_artifacts(self, record))
-                    for key, expected in {"run_id": contract["run_id"], "task_id": contract["task_id"], "attempt_id": contract["attempt_id"], "contract_digest": state["contract_digest"], "candidate_digest": state.get("candidate_digest")}.items():
-                        if record.get(key) != expected:
-                            errors.append(f"wrong/stale {key}")
-                    evidence_validation.append({"check_id": record.get("check_id"), "errors": errors})
-                    problems.extend(f"evidence {record.get('check_id')}: {error}" for error in errors)
-                except (OSError, ValueError, KeyError) as error:
-                    problems.append(f"unreadable evidence {path.name}: {type(error).__name__}")
+            if state.get("accepted"):
+                # Read-only validation takes no state locks and sees persisted
+                # state until this edit commits. Hash artifacts only once while
+                # checking receipts and the full accepted dependency chain.
+                errors = accepted_evidence_errors(self, state["accepted"]["verdict_digest"], _evidence_validation=evidence_validation)
+                problems.extend("accepted result: " + error for error in errors)
+            else:
+                for path in sorted((self.attempt_dir(state) / "checks").glob("*/result.json")):
+                    try:
+                        record = read_json(path)
+                        sha = record.pop("digest", None)
+                        errors = []
+                        if digest(record) != sha:
+                            errors.append("result content hash failed")
+                        record["digest"] = sha
+                        errors.extend(validate_artifacts(self, record))
+                        for key, expected in {"run_id": contract["run_id"], "task_id": contract["task_id"], "attempt_id": contract["attempt_id"], "contract_digest": state["contract_digest"], "candidate_digest": state.get("candidate_digest")}.items():
+                            if record.get(key) != expected:
+                                errors.append(f"wrong/stale {key}")
+                        evidence_validation.append({"check_id": record.get("check_id"), "errors": errors})
+                        problems.extend(f"evidence {record.get('check_id')}: {error}" for error in errors)
+                    except (OSError, ValueError, KeyError) as error:
+                        problems.append(f"unreadable evidence {path.name}: {type(error).__name__}")
             if state.get("checkpoints"):
                 checkpoint = self.path / "checkpoints" / f"{state['checkpoints']:06d}.json"
                 try:
@@ -614,17 +648,6 @@ class Run:
                         problems.append("latest checkpoint integrity failed")
                 except (OSError, ValueError):
                     problems.append("latest checkpoint missing or unreadable")
-            if state.get("accepted"):
-                try:
-                    verdict = read_json(self.path / state["accepted"]["verdict_path"])
-                    sha = verdict.pop("digest", None)
-                    if digest(verdict) != sha or sha != state["accepted"]["verdict_digest"]:
-                        problems.append("accepted verdict integrity failed")
-                    for check in contract["checks"]:
-                        if check["required"] and not (self.attempt_dir(state) / "checks" / check["id"] / "result.json").is_file():
-                            problems.append(f"accepted result lost mandatory check: {check['id']}")
-                except (OSError, ValueError, KeyError):
-                    problems.append("accepted verdict missing or unreadable")
             state["resume"] = {"observed_at": now(), "snapshot": actual["digest"], "problems": problems, "evidence_validation": evidence_validation, "mode": "checkpoint_context_recovery", "native_resume": "not_claimed"}
             if problems:
                 state["status"] = "blocked"
@@ -674,8 +697,11 @@ class Run:
             contract = self.contract(state)
             budget = contract.get("budget", {})
             cap = budget.get("native_cap")
-            if not isinstance(cap, int) or cap < 1 or not budget.get("native_cap_source"):
+            if type(cap) is not int or cap < 1 or not budget.get("native_cap_source"):
                 raise HarnessError("No observed/documented native cap and source in contract")
+            root_counts = budget.get("root_counts")
+            if type(root_counts) is not bool:
+                raise HarnessError("Native capacity requires explicit boolean budget.root_counts")
             previous = state["owners"].get(record["owner_id"])
             remaining = remaining_budget_seconds(contract)
             if previous is None and remaining is not None and remaining <= 0:
@@ -684,7 +710,7 @@ class Run:
                 raise HarnessError("Original owner lifecycle unresolved; cannot replace native reference")
             owners = {**state["owners"], record["owner_id"]: {**record, "observed_at": now()}}
             open_owners = [v for v in owners.values() if v["status"] != "closed"]
-            count = len(open_owners) + (1 if budget.get("root_counts", False) else 0)
+            count = len(open_owners) + int(root_counts)
             if count > cap:
                 raise HarnessError(f"Shared native cap exceeded: {count}>{cap}; idle/done/stopped still count until closed")
             # A helper and its owner share this exact same ledger and cap.
@@ -702,13 +728,16 @@ class Run:
         state = self.state()
         budget = self.contract(state).get("budget", {})
         cap = budget.get("native_cap")
-        if not isinstance(cap, int) or not budget.get("native_cap_source"):
+        if type(cap) is not int or cap < 1 or not budget.get("native_cap_source"):
             raise HarnessError("Native capacity is unknown; observe the client before spawning")
+        root_counts = budget.get("root_counts")
+        if type(root_counts) is not bool:
+            raise HarnessError("Native capacity requires explicit boolean budget.root_counts")
         owners = state.get("owners", {})
         counted = [key for key, value in owners.items() if value.get("status") != "closed"]
-        count = len(counted) + (1 if budget.get("root_counts", False) else 0)
+        count = len(counted) + int(root_counts)
         pending = [key for key, value in owners.items() if value.get("needs_native_reconciliation") or value.get("status") == "unavailable"]
-        return {"cap": cap, "root_counts": budget.get("root_counts", False), "cap_source": budget["native_cap_source"], "counted": count, "open_owner_ids": counted, "remaining": max(0, cap - count), "must_reconcile": pending, "spawn_allowed": count < cap and not pending, "limitation": "A preflight for the sole native orchestrator, not a spawn API or account-wide quota"}
+        return {"cap": cap, "root_counts": root_counts, "cap_source": budget["native_cap_source"], "counted": count, "open_owner_ids": counted, "remaining": max(0, cap - count), "must_reconcile": pending, "spawn_allowed": count < cap and not pending, "limitation": "A preflight for the sole native orchestrator, not a spawn API or account-wide quota"}
 
     def submit_result(self, record):
         """An owner can request review; only gate can accept the candidate."""

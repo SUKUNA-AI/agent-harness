@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 import tomllib
 
 from agent_harness import installation as install
@@ -118,7 +119,88 @@ class ConfigPatchTests(unittest.TestCase):
             data = tomllib.loads(changed)
             self.assertTrue(data["agents"]["enabled"])
             self.assertEqual(data["agents"]["max_concurrent_threads_per_session"], 2 if "max_threads" in text else 4)
+            self.assertNotIn("max_threads", data["agents"])
             self.assertEqual(data["other"], {"x": 1})
+
+    def test_agents_rollback_rejects_multiline_text_instead_of_changing_it(self):
+        before = 'model="mine"\n'
+        installed, meta = install.patch_config(before)
+        current = installed.replace('max_concurrent_threads_per_session = 4', '"max_concurrent_threads_per_session" = 4')
+        current = current.replace('model="mine"\n', 'model="mine"\nnotes="""\n[agents]\nmax_concurrent_threads_per_session = 4\n"""\n')
+        with self.assertRaisesRegex(install.InstallError, "unrelated settings preserved"):
+            install.revert_config(before, installed, current, meta)
+
+    def test_cap_alias_migration_is_single_idempotent_and_reversible(self):
+        cases = (
+            '[agents]\nmax_threads = 2 # user cap\n',
+            'agents.max_threads = 7 # user cap\n[other]\nx=12\n',
+            '[agents]\nmax_threads=2\nmax_concurrent_threads_per_session=9\n',
+            '[agents]\nmax_threads=9\nmax_concurrent_threads_per_session=2\n',
+        )
+        for eol in ("\n", "\r\n"):
+            for original in cases:
+                before = original.replace("\n", eol)
+                with self.subTest(before=before):
+                    installed, meta = install.patch_config(before)
+                    data = tomllib.loads(installed)
+                    original_agents = tomllib.loads(before)["agents"]
+                    expected_cap = min(4, *(original_agents[k] for k in ("max_threads", "max_concurrent_threads_per_session") if k in original_agents))
+                    self.assertEqual(data["agents"]["max_concurrent_threads_per_session"], expected_cap)
+                    self.assertNotIn("max_threads", data["agents"])
+                    self.assertEqual(install.patch_config(installed)[0], installed)
+                    self.assertEqual(install.revert_config(before, installed, installed, meta), before)
+                    current = installed + eol + "[added_by_user]" + eol + "keep=42" + eol
+                    restored = install.revert_config(before, installed, current, meta)
+                    self.assertEqual(tomllib.loads(restored), {**tomllib.loads(before), "added_by_user": {"keep": 42}})
+
+    def test_explicit_cap_applies_to_legacy_alias_without_duplicates(self):
+        before = '[agents]\nmax_threads = 2\n'
+        installed, meta = install.patch_config(before, preferred_cap=5, explicit_cap=True)
+        self.assertEqual(tomllib.loads(installed)["agents"]["max_concurrent_threads_per_session"], 5)
+        self.assertNotIn("max_threads", tomllib.loads(installed)["agents"])
+        current = installed + '\n[user]\nx=1\n'
+        restored = install.revert_config(before, installed, current, meta)
+        self.assertEqual(tomllib.loads(restored)["agents"], {"max_threads": 2})
+
+    def test_dotted_cap_without_final_newline_rolls_back_with_user_additions(self):
+        for eol in ("\n", "\r\n"):
+            for key in ("max_threads", "max_concurrent_threads_per_session"):
+                for explicit in (False, True):
+                    before = 'model="mine"' + eol + f'agents.{key} = 9 # original cap'
+                    with self.subTest(eol=repr(eol), key=key, explicit=explicit):
+                        installed, meta = install.patch_config(before, preferred_cap=5, explicit_cap=explicit)
+                        prefix = "# user comment" + eol
+                        self.assertEqual(install.revert_config(before, installed, prefix + installed, meta), prefix + before)
+                        suffix = eol + "[user_added]" + eol + "keep=42" + eol
+                        restored = install.revert_config(before, installed, installed + suffix, meta)
+                        self.assertEqual(tomllib.loads(restored), {**tomllib.loads(before), "user_added": {"keep": 42}})
+
+    def test_old_dotted_eof_metadata_uses_verified_installed_separator(self):
+        for eol in ("\n", "\r\n"):
+            before = 'model="mine"' + eol + 'agents.max_concurrent_threads_per_session=9'
+            installed, meta = install.patch_config(before)
+            edit = meta["keys"]["max_concurrent_threads_per_session"]
+            edit["after"] = edit["after"][:-len(edit.pop("separator_added"))]
+            prefix = "# user comment" + eol
+            with self.subTest(eol=repr(eol)):
+                self.assertEqual(install.revert_config(before, installed, prefix + installed, meta), prefix + before)
+                self.assertNotIn("separator_added", edit)
+
+    def test_alias_rollback_preserves_manual_cap_edits(self):
+        for before in ('[agents]\nmax_threads=2\n', '[agents]\nmax_threads=2\nmax_concurrent_threads_per_session=4\n'):
+            installed, meta = install.patch_config(before)
+            current = installed.replace('max_concurrent_threads_per_session=2', 'max_concurrent_threads_per_session=1')
+            with self.subTest(before=before), self.assertRaises(install.InstallError):
+                install.revert_config(before, installed, current, meta)
+
+    def test_old_duplicate_alias_metadata_still_rolls_back(self):
+        before = '[agents]\nmax_threads=2\n'
+        additions = {"enabled": "enabled = true\n", "max_concurrent_threads_per_session": "max_concurrent_threads_per_session = 2\n", "interrupt_message": "interrupt_message = true\n"}
+        installed = before + ''.join(additions.values())
+        meta = {"keys": {k: {"before": None, "after": line} for k, line in additions.items()}, "table_created": False}
+        current = installed + '[user]\nx=1\n'
+        restored = install.revert_config(before, installed, current, meta)
+        self.assertEqual(tomllib.loads(restored), {"agents": {"max_threads": 2}, "user": {"x": 1}})
 
     def test_manual_edit_in_managed_key_is_conflict(self):
         before = "model='mine'\n"
@@ -302,7 +384,10 @@ class InstallerTests(unittest.TestCase):
         # Воспроизводим прежнюю установку без root_keys, затем обновляем новым кодом.
         legacy = self.make_plan()
         config_plan = next(p for p in legacy if p["kind"] == "config")
-        config_plan["after"] = config_plan["after"].replace(b"model_auto_compact_token_limit = 500000\n", b"", 1)
+        added_line = config_plan["meta"]["root_keys"]["model_auto_compact_token_limit"]["after"].encode("utf-8")
+        self.assertEqual(config_plan["after"].count(added_line), 1)
+        config_plan["after"] = config_plan["after"].replace(added_line, b"", 1)
+        self.assertNotIn("model_auto_compact_token_limit", tomllib.loads(install.decode(config_plan["after"])))
         config_plan["meta"].pop("root_keys")
         with install.lock(self.state):
             install.apply_plan(legacy, self.state, self.package)
@@ -310,7 +395,9 @@ class InstallerTests(unittest.TestCase):
         source.write_text(source.read_text(encoding="utf-8") + "\n# package update\n", encoding="utf-8")
         self.apply()
         config = self.home / "config.toml"
-        config.write_text(config.read_text(encoding="utf-8") + '\n[user_added]\nkeep=12\n', encoding="utf-8")
+        content = config.read_bytes()
+        eol = b"\r\n" if b"\r\n" in content else b"\n"
+        config.write_bytes(content + eol + b"[user_added]" + eol + b"keep=12" + eol)
         args = ["--package-root", str(self.package), "--codex-home", str(self.home), "--skills-home", str(self.skills), "--state-dir", str(self.state), "--apply"]
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
@@ -320,6 +407,134 @@ class InstallerTests(unittest.TestCase):
         self.assertNotIn(install.START, (self.home / "AGENTS.md").read_text(encoding="utf-8"))
         self.assertEqual(tomllib.loads(config.read_text(encoding="utf-8")), {**tomllib.loads(self.original_config), "user_added": {"keep": 12}})
         self.assertFalse((self.state / "active.json").exists())
+
+    def test_uninstall_legacy_fixture_with_crlf(self):
+        (self.home / "config.toml").write_bytes(self.original_config.replace("\n", "\r\n").encode("utf-8"))
+        self.test_uninstall_unwinds_updates_preserving_user_fields()
+
+    def test_final_install_pointer_failure_restores_targets_and_allows_retry(self):
+        original = {p: p.read_bytes() for p in self.home.rglob("*") if p.is_file()}
+        for fail_after_write in (False, True):
+            failed = False
+            real_atomic = install.atomic
+            def fail_pointer(path, data):
+                nonlocal failed
+                if path == self.state / "active.json" and not failed:
+                    failed = True
+                    if fail_after_write:
+                        real_atomic(path, data)
+                    raise OSError("injected pointer commit failure")
+                return real_atomic(path, data)
+            with self.subTest(fail_after_write=fail_after_write), patch.object(install, "atomic", side_effect=fail_pointer), self.assertRaises(OSError):
+                self.apply()
+            self.assertFalse((self.state / "active.json").exists())
+            self.assertEqual(original, {p: p.read_bytes() for root in (self.home, self.skills) for p in root.rglob("*") if p.is_file()})
+            self.assertTrue(self.make_plan())
+        self.apply()
+        self.assertEqual(install.verify(self.package.resolve(), self.home, self.skills, self.state)["status"], "structural_verified")
+
+    def test_final_manifest_failure_restores_targets(self):
+        original = {p: p.read_bytes() for p in self.home.rglob("*") if p.is_file()}
+        real_atomic = install.atomic
+        def fail_final_manifest(path, data):
+            if path.name == "manifest.json" and json.loads(data).get("status") == "written_pending_native_verification":
+                raise OSError("injected manifest commit failure")
+            return real_atomic(path, data)
+        with patch.object(install, "atomic", side_effect=fail_final_manifest), self.assertRaises(OSError):
+            self.apply()
+        self.assertFalse((self.state / "active.json").exists())
+        self.assertEqual(original, {p: p.read_bytes() for root in (self.home, self.skills) for p in root.rglob("*") if p.is_file()})
+
+    def test_failed_install_preserves_concurrent_target_edit_during_compensation(self):
+        real_atomic = install.atomic
+        user_text = "user changed instructions during installation\n"
+        def fail_pointer_with_user_edit(path, data):
+            if path == self.state / "active.json":
+                (self.home / "AGENTS.md").write_text(user_text, encoding="utf-8")
+                raise OSError("injected pointer failure after concurrent edit")
+            return real_atomic(path, data)
+        with patch.object(install, "atomic", side_effect=fail_pointer_with_user_edit), self.assertRaisesRegex(install.InstallError, "concurrent edit preserved"):
+            self.apply()
+        self.assertEqual((self.home / "AGENTS.md").read_text(encoding="utf-8"), user_text)
+        self.assertFalse((self.state / "active.json").exists())
+        manifests = list((self.state / "installs").glob("*/manifest.json"))
+        self.assertEqual(json.loads(manifests[0].read_text(encoding="utf-8"))["status"], "failed_recovery_required")
+
+    def test_failed_update_restores_previous_active_manifest(self):
+        self.apply()
+        pointer = self.state / "active.json"
+        previous = pointer.read_bytes()
+        original = {p: p.read_bytes() for root in (self.home, self.skills) for p in root.rglob("*") if p.is_file()}
+        source = self.package / "adapters/codex/agents/delivery_owner.toml"
+        source.write_text(source.read_text(encoding="utf-8") + "\n# package update\n", encoding="utf-8")
+        real_atomic = install.atomic
+        failed = False
+        def fail_after_pointer_commit(path, data):
+            nonlocal failed
+            real_atomic(path, data)
+            if path == pointer and not failed:
+                failed = True
+                raise OSError("injected update commit failure")
+        with patch.object(install, "atomic", side_effect=fail_after_pointer_commit), self.assertRaises(OSError):
+            self.apply()
+        self.assertEqual(pointer.read_bytes(), previous)
+        self.assertIsNotNone(install.active_manifest(self.state))
+        self.assertEqual(original, {p: p.read_bytes() for root in (self.home, self.skills) for p in root.rglob("*") if p.is_file()})
+
+    def test_orphan_installation_is_not_unchanged_or_verified_and_can_be_recovered(self):
+        self.apply()
+        pointer = self.state / "active.json"
+        ref = json.loads(pointer.read_text(encoding="utf-8"))
+        pointer.unlink()
+        with self.assertRaisesRegex(install.InstallError, "no active manifest"):
+            self.make_plan()
+        with self.assertRaisesRegex(install.InstallError, "without an active"):
+            install.apply_plan([], self.state, self.package)
+        self.assertEqual(install.verify(self.package.resolve(), self.home, self.skills, self.state)["status"], "failed")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = install.dispatch("rollback", ["--package-root", str(self.package), "--codex-home", str(self.home), "--skills-home", str(self.skills), "--state-dir", str(self.state), "--manifest", ref["manifest"], "--apply"])
+        self.assertEqual(code, 0, output.getvalue())
+        self.assertNotIn(install.START, (self.home / "AGENTS.md").read_text(encoding="utf-8"))
+        self.assertTrue(self.make_plan())
+
+    def test_verify_rejects_tampered_installed_copy(self):
+        self.apply()
+        manifest = install.active_manifest(self.state)
+        Path(manifest["files"][0]["installed_copy"]).write_bytes(b"tampered installed backup")
+        self.assertEqual(install.verify(self.package.resolve(), self.home, self.skills, self.state)["status"], "failed")
+
+    def test_matching_new_package_file_does_not_hide_untracked_manual_edit(self):
+        self.apply()
+        for path in (self.package / "adapters/codex/agents/delivery_owner.toml", self.home / "agents/delivery_owner.toml"):
+            path.write_bytes(path.read_bytes() + b"\n# matching manual update\n")
+        with self.assertRaisesRegex(install.InstallError, "manually edited"):
+            self.make_plan()
+        self.assertEqual(install.verify(self.package.resolve(), self.home, self.skills, self.state)["status"], "failed")
+
+    def test_doctor_reports_model_sources_without_secrets_or_effective_claims(self):
+        (self.home / "config.toml").write_text('model="user-model"\nmodel_provider="custom"\nmodel_reasoning_effort="high"\nmodel_auto_compact_token_limit=500000\nmodel_context_window=400000\ntool_output_token_limit=4096\n[agents.hidden]\ndeveloper_instructions="do-not-print-agent-secret"\n[model_providers.custom]\napi_key="do-not-print-provider-secret"\n[profiles.legacy]\nmodel="legacy-model"\n', encoding="utf-8")
+        (self.home / "deep.config.toml").write_text('model="profile-model"\nmodel_reasoning_effort="max"\napi_key="do-not-print-profile-secret"\n', encoding="utf-8")
+        (self.home / "agents").mkdir()
+        (self.home / "agents/reviewer.toml").write_text('model_reasoning_effort="high"\ndeveloper_instructions="do-not-print-role-secret"\n', encoding="utf-8")
+        (self.home / "broken.config.toml").write_text('[broken', encoding="utf-8")
+        before = {p: p.read_bytes() for p in self.home.rglob("*") if p.is_file()}
+        result = install.doctor(self.package, self.home, self.skills, self.state)
+        self.assertEqual(before, {p: p.read_bytes() for p in self.home.rglob("*") if p.is_file()})
+        report = result["model_configuration"]
+        self.assertEqual(report["observation"], "files_only")
+        self.assertEqual(report["effective_runtime"], "unknown_until_client_probe")
+        self.assertEqual(report["base"]["settings"]["model"], "user-model")
+        self.assertEqual(report["base"]["settings"]["model_auto_compact_token_limit"], 500000)
+        self.assertEqual(report["base"]["settings"]["tool_output_token_limit"], 4096)
+        self.assertIn("compaction_threshold_at_or_above_declared_context_window", report["base"]["warnings"])
+        profiles = {p["name"]: p for p in report["profile_files"]}
+        self.assertEqual(profiles["deep"]["settings"]["model"], "profile-model")
+        self.assertEqual(profiles["deep"]["source"], str(self.home / "deep.config.toml"))
+        self.assertEqual(profiles["broken"]["status"], "unreadable")
+        self.assertEqual(report["agent_role_files"][0]["settings"], {"model_reasoning_effort": "high"})
+        self.assertEqual(report["inline_profile_tables"][0]["settings"], {"model": "legacy-model"})
+        self.assertNotIn("do-not-print", json.dumps(result))
 
     def test_diff_does_not_expose_secret(self):
         diff = install.redacted_diff(Path("config.toml"), b"api_key='secret-value'\n", b"api_key='new-secret'\n")

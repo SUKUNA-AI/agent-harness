@@ -1,6 +1,6 @@
-# Native Agent Harness 1.1.0
+# Native Agent Harness 1.1.1
 
-[Релиз v1.1.0](https://github.com/SUKUNA-AI/agent-harness/releases/tag/v1.1.0)
+[Предыдущий релиз v1.1.0](https://github.com/SUKUNA-AI/agent-harness/releases/tag/v1.1.0)
 · [История изменений](CHANGELOG.md) · [Автоподключение](docs/AUTOLOAD_RU.md)
 
 Переносимый комплект общих настроек для локального Codex. Скачайте этот
@@ -17,12 +17,14 @@
 контекста. Пользователь формулирует результат обычным сообщением; служебные
 контракты, брифы и команды готовит основной агент.
 
-Для содержательной задачи по умолчанию работают два native владельца; третий
-подключается при независимой части и доступной ёмкости. Короткие задачи идут
-напрямую. Неделимость, ограничения пользователя или нехватка native slots дают
+Ограниченная самостоятельная задача выполняется напрямую. Полезные независимые
+части делегируются автоматически: обычно два native владельца, третий — при
+дополнительной независимой части и доступной ёмкости. Неделимость, ограничения пользователя или нехватка native slots дают
 последовательный путь. Все потомки и idle/open refs учитываются вместе.
-Модель/provider и безопасность наследуются. Усилие координатора сохраняется;
-узкая механика — medium, содержательная реализация и ревью — high.
+Provider и безопасность наследуются; модель учитывает defaults дочерних
+агентов и overrides клиента. Усилие координатора сохраняется;
+узкая механика — medium, содержательная реализация и ревью — high. Фиксированный
+effort в файле роли имеет приоритет над effort запроса spawn.
 
 ```mermaid
 flowchart LR
@@ -83,8 +85,15 @@ model/provider/reasoning/security не меняет. Если корневой �
 [Описание параметра OpenAI](https://learn.chatgpt.com/docs/config-file/config-reference).
 Portable default cap — 4 children;
 существующий более строгий cap сохраняется. Явный `--max-child-threads N` адресно
-разрешает иной cap. Число логических направлений, target active owners и backend
+разрешает иной cap. Legacy `agents.max_threads` обратимо переносится в единственный
+`agents.max_concurrent_threads_per_session`; при двух старых значениях выбирается
+более строгий предел, если не задан явный override. Число логических направлений, target active owners и backend
 slots — разные значения; фактическую ёмкость наблюдают в текущем клиенте.
+
+`doctor` показывает разрешённые поля модели/effort/контекста/tool output limit
+с источниками: основной config, `*.config.toml` профили и TOML файлов ролей.
+Это наблюдение файлов, а не утверждение о текущей модели сессии: CLI/project/managed
+overrides и runtime limits проверяются в самом клиенте.
 
 Непустой `AGENTS.override.md` имеет приоритет над `AGENTS.md`. Ставятся managed
 bootstrap, machine pointer, три native роли и skills. Пути обновляются через
@@ -156,7 +165,8 @@ python -I -B tools/check_mcp.py
 
 CI запускает эти проверки на Windows/Ubuntu и Python 3.11/3.13. Наличие YAML не
 равно успешному запуску — сверяйте Actions конкретного commit. Реально выполненные
-проверки и ограничения: [RELEASE_REVIEW](docs/RELEASE_REVIEW.md).
+проверки и ограничения: [проверка 1.1.1](docs/REVIEW_2026-11-01.md),
+[историческая проверка 1.1.0](docs/RELEASE_REVIEW.md).
 Tests не заменяют native/visual/runtime acceptance. Unknown/not_run/skipped
 не passed; ускорение и экономия токенов не объявляются без измерения.
 

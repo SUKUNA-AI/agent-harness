@@ -64,9 +64,41 @@ def _checkout(value):
     """Find physical Git checkout without executing Git; nested cwd shares its writer."""
     path = Path(value).resolve()
     for parent in (path, *path.parents):
-        if (parent / ".git").exists():
+        if _git_metadata(parent / ".git"):
             return parent
     return path
+
+
+def _git_metadata(marker):
+    """Recognize real repository/worktree metadata, not an empty .git placeholder."""
+    try:
+        if marker.is_dir():
+            git_dir = marker
+        elif marker.is_file():
+            pointer = marker.read_text(encoding="utf-8", errors="surrogateescape").strip()
+            if not pointer.startswith("gitdir: ") or not pointer[8:].strip():
+                return False
+            git_dir = (marker.parent / pointer[8:]).resolve()
+        else:
+            return False
+        head = git_dir / "HEAD"
+        if head.is_symlink():
+            valid_head = bool(re.fullmatch(r"refs/[^\s]+", head.readlink().as_posix()))
+        elif head.is_file():
+            value = head.read_text(encoding="ascii", errors="surrogateescape").strip()
+            valid_head = bool(re.fullmatch(r"ref: refs/[^\s]+|[0-9a-fA-F]{40}|[0-9a-fA-F]{64}", value))
+        else:
+            return False
+        common = git_dir
+        common_pointer = git_dir / "commondir"
+        if common_pointer.is_file():
+            relative = common_pointer.read_text(encoding="utf-8", errors="surrogateescape").strip()
+            if not relative:
+                return False
+            common = (git_dir / relative).resolve()
+        return valid_head and (common / "objects").is_dir() and ((common / "refs").is_dir() or (common / "reftable").is_dir())
+    except OSError as exc:
+        raise HarnessError(f"Cannot inspect Git checkout metadata at {marker}: {exc}") from exc
 
 
 def _checkout_overlap(left, right):
@@ -110,7 +142,7 @@ def validate_plan(plan, contract):
     _require(plan.get("input_digest") == snapshot(contract)["digest"], "Plan input digest is stale")
     _require(type(plan.get("plan_revision")) is int and plan["plan_revision"] >= 1, "Positive plan_revision required")
     _require(plan.get("fallback_reason") in {None, "indivisible", "capacity", "native_unavailable", "user_constraint"}, "Unknown fallback reason")
-    _require(type(plan.get("target_owners", 2)) is int and 2 <= plan.get("target_owners", 2) <= 3, "target_owners must be two or three")
+    _require(type(plan.get("target_owners", 2)) is int and 1 <= plan.get("target_owners", 2) <= 3, "target_owners must be one, two or three")
     nodes = plan.get("nodes")
     _require(isinstance(nodes, list) and bool(nodes), "Plan requires nodes")
     roots = [Path(contract["cwd"]).resolve()] if contract.get("cwd") else []
@@ -195,7 +227,9 @@ def observe_capacity(observation, contract):
     _require(-5 <= age <= 120, "Native inventory is stale; observe again before spawn")
     cap = observation.get("cap")
     budget = contract.get("budget", {})
-    _require(type(cap) is int and cap >= 1 and budget.get("root_counts") is True and type(budget.get("native_cap")) is int and cap <= budget["native_cap"] and budget.get("native_cap_source"), "Unknown/inconsistent observed native cap including root")
+    root_counts = budget.get("root_counts")
+    _require(type(root_counts) is bool, "Native capacity requires explicit boolean budget.root_counts")
+    _require(type(cap) is int and cap >= 1 and type(budget.get("native_cap")) is int and cap <= budget["native_cap"] and budget.get("native_cap_source"), "Unknown/inconsistent observed native cap")
     threads = observation.get("threads")
     _require(isinstance(threads, list), "Native threads list required")
     refs, writers = {}, []
@@ -209,10 +243,11 @@ def observe_capacity(observation, contract):
             _cwd(item["write_cwd"])
             _require(not any(_checkout_overlap(item["write_cwd"], other) for other in writers), "Native writer checkout conflict")
             writers.append(item["write_cwd"])
-    _require(observation.get("root_ref") in refs and refs[observation["root_ref"]]["status"] != "closed", "Inventory must include open root exactly once")
-    counted = sum(item["status"] != "closed" for item in refs.values())
+    root_ref = observation.get("root_ref")
+    _require(isinstance(root_ref, str) and root_ref in refs and refs[root_ref]["status"] != "closed", "Inventory must include open root exactly once")
+    counted = sum(item["status"] != "closed" and (ref != root_ref or root_counts) for ref, item in refs.items())
     _require(counted <= cap, "Observed native capacity exceeded")
-    return {"cap": cap, "counted": counted, "remaining": cap - counted, "refs": refs}
+    return {"cap": cap, "root_counts": root_counts, "counted": counted, "remaining": cap - counted, "refs": refs}
 
 
 def _accepted(node, plan, contract):
@@ -287,7 +322,7 @@ def next_wave(plan, contract, observation):
             remaining -= 1
         chosen.append({"node_id": key, "mode": mode, "native_ref": ref})
     _require(snapshot(contract)["digest"] == plan["input_digest"], "Inputs changed during planning")
-    return {"plan_revision": plan["plan_revision"], "input_digest": plan["input_digest"], "selected": chosen, "blocked": blocked, "capacity": {k: capacity[k] for k in ("cap", "counted", "remaining")}, "fallback_reason": plan.get("fallback_reason") or ("capacity" if "capacity" in blocked.values() else "indivisible" if len(nodes) == 1 else None), "limitation": "Read-only recommendation; root must reobserve and serialize every native spawn/follow-up. This is not native resume or an acceptance gate."}
+    return {"plan_revision": plan["plan_revision"], "input_digest": plan["input_digest"], "selected": chosen, "blocked": blocked, "capacity": {k: capacity[k] for k in ("cap", "root_counts", "counted", "remaining")}, "fallback_reason": plan.get("fallback_reason") or ("capacity" if "capacity" in blocked.values() else "indivisible" if len(nodes) == 1 else None), "limitation": "Read-only recommendation; root must reobserve and serialize every native spawn/follow-up. This is not native resume or an acceptance gate."}
 
 
 def brief(plan, contract, node_id):

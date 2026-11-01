@@ -18,10 +18,11 @@ import tempfile
 import tomllib
 import uuid
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 START = "<!-- agent-harness:begin -->"
 END = "<!-- agent-harness:end -->"
 AUTO_COMPACT_TOKEN_LIMIT = 500000
+CAP_KEY = "max_concurrent_threads_per_session"
 MANAGED = {"enabled": True, "max_concurrent_threads_per_session": 4, "interrupt_message": True}
 SENSITIVE = re.compile(r"(?i)(token|secret|password|credential|authorization|api[_-]?key|headers)")
 
@@ -135,6 +136,41 @@ def positive_cap(value: object) -> int:
     return value
 
 
+def line_value(line: str, key: str) -> object:
+    """Read a scalar assignment from our metadata, including dotted agents keys."""
+    parsed = tomllib.loads(line)
+    return parsed.get("agents", parsed)[key]
+
+
+def normalize_cap_alias(text: str, agents: dict) -> tuple[str, list[dict]]:
+    """Keep one native cap key; record enough text to undo the migration exactly."""
+    if "max_threads" not in agents:
+        return text, []
+    found = assignment(text, "max_threads")
+    if found is None:
+        raise InstallError("Unsupported quoted/inline agents.max_threads; no rewrite performed")
+    index, old = found
+    if CAP_KEY in agents:
+        # Leave a uniquely identified comment where the removed alias was. This
+        # retains the location for a later rollback without moving user fields.
+        eol = "\r\n" if old.endswith("\r\n") else "\n" if old.endswith("\n") else ""
+        new = "# agent-harness:legacy-cap " + digest(old.encode("utf-8"))[:16] + eol
+        kind = "remove"
+    else:
+        new = re.sub(r"^(\s*(?:agents\.)?)max_threads(?=\s*=)", rf"\g<1>{CAP_KEY}", old)
+        kind = "rename"
+    lines = text.splitlines(keepends=True)
+    lines[index] = new
+    result = "".join(lines)
+    expected = tomllib.loads(text)
+    legacy = expected["agents"].pop("max_threads")
+    if kind == "rename":
+        expected["agents"][CAP_KEY] = legacy
+    if tomllib.loads(result) != expected:
+        raise InstallError("Cap alias migration would change unrelated TOML values")
+    return result, [{"kind": kind, "before": old, "after": new}]
+
+
 def patch_config(text: str, preferred_cap: int = 4, explicit_cap: bool = False) -> tuple[str, dict]:
     preferred_cap = positive_cap(preferred_cap)
     try:
@@ -156,13 +192,14 @@ def patch_config(text: str, preferred_cap: int = 4, explicit_cap: bool = False) 
         raise InstallError("Existing agents cap must be a positive integer")
     if caps and not explicit_cap:
         desired["max_concurrent_threads_per_session"] = min([preferred_cap, *caps])
-    if explicit_cap and "max_threads" in agents and agents["max_threads"] != preferred_cap:
-        # Two disagreeing aliases are ambiguous. Changing a legacy user key is outside
-        # this installer's managed-key contract, even after authorization of the new key.
-        raise InstallError("Explicit child cap conflicts with legacy agents.max_threads; resolve that alias explicitly first")
     # A user disabling interrupt messages is preserved; changing it is unnecessary for delegation.
     if "interrupt_message" in agents:
         desired["interrupt_message"] = agents["interrupt_message"]
+    text, alias_edits = normalize_cap_alias(text, agents)
+    # Existing min/explicit-cap selection used both original aliases. All edits
+    # from here operate on the unambiguous normalized configuration.
+    data = tomllib.loads(text)
+    agents = data.get("agents", {})
     eol = "\r\n" if "\r\n" in text else "\n"
     lines = text.splitlines(keepends=True)
     edits = {}
@@ -198,6 +235,15 @@ def patch_config(text: str, preferred_cap: int = 4, explicit_cap: bool = False) 
             first_table = re.search(r"(?m)^\s*\[", result)
             at = first_table.start() if first_table else len(result)
             prefix = "" if at == 0 or result[:at].endswith(eol) else eol
+            if prefix:
+                # Appending to a dotted config can terminate its original last
+                # line. That separator belongs to this patch, so the recorded
+                # installed lines must include it (including an alias which is
+                # restored after a separate cap-value edit during rollback).
+                for edit in (*edits.values(), *alias_edits):
+                    if edit["after"] and not edit["after"].endswith("\n"):
+                        edit["after"] += prefix
+                        edit["separator_added"] = prefix
             result = result[:at] + prefix + "".join(additions) + result[at:]
         elif header:
             at = result.find("\n", header.end())
@@ -224,37 +270,98 @@ def patch_config(text: str, preferred_cap: int = 4, explicit_cap: bool = False) 
         original_other[compact_key] = AUTO_COMPACT_TOKEN_LIMIT
     if {k: v for k, v in parsed.items() if k != "agents"} != original_other:
         raise InstallError("Config patch changed unrelated settings")
-    return result, {"keys": edits, "root_keys": root_edits, "table_created": table_created}
+    return result, {"keys": edits, "root_keys": root_edits, "alias_edits": alias_edits, "table_created": table_created}
+
+
+def replace_rollback_line(lines: list[str], index: int, replacement: str) -> None:
+    """Keep a separator until later rollback edits remove the following lines."""
+    if replacement and not replacement.endswith("\n") and index + 1 < len(lines):
+        replacement += "\r\n" if lines[index].endswith("\r\n") else "\n"
+    lines[index] = replacement
 
 
 def revert_config(before: str, installed: str, current: str, meta: dict) -> str:
     if current == installed:
         return before
+    # Older manifests could omit a separator added after a final dotted
+    # assignment. Recover that exact byte from the verified installed copy,
+    # never from the user's current file, and keep the stored manifest intact.
+    meta = {**meta, "keys": {key: dict(edit) for key, edit in meta["keys"].items()}}
+    for key, edit in meta["keys"].items():
+        if edit["after"] and not edit["after"].endswith("\n"):
+            observed = assignment(installed, key)
+            for separator in ("\n", "\r\n"):
+                if observed and observed[1] == edit["after"] + separator:
+                    edit["after"] = observed[1]
+                    edit["separator_added"] = separator
+                    break
     result = current
+    installed_data = tomllib.loads(installed)
     # Старые manifests содержат только keys; root_keys появился вместе с порогом.
     for root, edits in ((False, meta["keys"]), (True, meta.get("root_keys", {}))):
         for key, edit in edits.items():
-            if root:
-                expected = tomllib.loads(result)
-                if key not in expected or expected[key] != tomllib.loads(installed).get(key):
-                    raise InstallError(f"Rollback conflict at {key}; user edit preserved")
-                original = tomllib.loads(before)
-                if key in original:
-                    expected[key] = original[key]
-                else:
-                    expected.pop(key)
+            expected = tomllib.loads(result)
+            section = expected if root else expected.get("agents", {})
+            installed_section = installed_data if root else installed_data.get("agents", {})
+            label = key if root else "agents." + key
+            if key not in section or section[key] != installed_section.get(key):
+                raise InstallError(f"Rollback conflict at {label}; user edit preserved")
+            if edit["before"] is not None:
+                section[key] = line_value(edit["before"], key)
+            else:
+                section.pop(key)
             found = assignment(result, key, root=root)
             if found is None or found[1] != edit["after"]:
                 raise InstallError(f"Rollback conflict at {key if root else 'agents.' + key}; user edit preserved")
             lines = result.splitlines(keepends=True)
-            lines[found[0]] = edit["before"] or ""
+            replace_rollback_line(lines, found[0], edit["before"] or "")
             result = "".join(lines)
-            # Regex не различает multiline-строки: чужие TOML-значения обязаны совпасть.
-            if root and tomllib.loads(result) != expected:
-                raise InstallError(f"Rollback conflict at {key}; unrelated settings preserved")
+            # The textual locator can see a TOML example inside a multiline
+            # string. Check the full semantic delta for agents AND root keys.
+            if tomllib.loads(result) != expected:
+                raise InstallError(f"Rollback conflict at {label}; unrelated settings preserved")
+    for edit in reversed(meta.get("alias_edits", [])):
+        expected = tomllib.loads(result)
+        agents = expected.get("agents", {})
+        if "max_threads" in agents:
+            raise InstallError("Rollback conflict at legacy agents.max_threads; user edit preserved")
+        lines = result.splitlines(keepends=True)
+        if edit["kind"] == "rename":
+            found = assignment(result, CAP_KEY)
+            if found is None or found[1] != edit["after"] or agents.get(CAP_KEY) != line_value(edit["before"], "max_threads"):
+                raise InstallError("Rollback conflict at cap alias migration; user edit preserved")
+            index = found[0]
+            agents.pop(CAP_KEY)
+        elif edit["kind"] == "remove":
+            matches = [i for i, line in enumerate(lines) if line == edit["after"]]
+            if len(matches) != 1:
+                raise InstallError("Rollback conflict at removed cap alias; user edit preserved")
+            index = matches[0]
+        else:
+            raise InstallError("Unsupported cap alias migration metadata")
+        agents["max_threads"] = line_value(edit["before"], "max_threads")
+        replace_rollback_line(lines, index, edit["before"])
+        result = "".join(lines)
+        if tomllib.loads(result) != expected:
+            raise InstallError("Cap alias rollback would change unrelated TOML values")
     if meta["table_created"]:
         # Remove our table only if no user content was added to it.
-        result = re.sub(r"(?m)^\[agents\]\r?\n(?=\s*(?:\[|\Z))", "", result)
+        cleaned = re.sub(r"(?m)^\[agents\]\r?\n(?=\s*(?:\[|\Z))", "", result)
+        if cleaned != result:
+            expected = tomllib.loads(result)
+            if expected.get("agents") == {}:
+                expected.pop("agents")
+            if tomllib.loads(cleaned) != expected:
+                raise InstallError("Rollback table cleanup would change unrelated TOML values")
+            result = cleaned
+    for edit in (*meta["keys"].values(), *meta.get("alias_edits", [])):
+        separator = edit.get("separator_added")
+        if separator and edit["before"]:
+            lines = result.splitlines(keepends=True)
+            if lines and lines[-1] == edit["before"] + separator:
+                # The original EOF is restored only when nothing now follows
+                # it. A user-added section still needs the line separator.
+                result = result[:-len(separator)]
     tomllib.loads(result)
     return result
 
@@ -271,10 +378,15 @@ def active_manifest(state: Path) -> dict | None:
     if not p.exists():
         return None
     ref = json.loads(p.read_text(encoding="utf-8"))
+    if not isinstance(ref, dict) or not isinstance(ref.get("manifest"), str) or not isinstance(ref.get("sha256"), str):
+        raise InstallError("Invalid active installation reference")
     target = Path(ref["manifest"])
     if not target.is_file() or digest(target.read_bytes()) != ref["sha256"]:
         raise InstallError("Active installation manifest is missing or modified")
-    return json.loads(target.read_text(encoding="utf-8"))
+    manifest = json.loads(target.read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict) or manifest.get("schema_version") != 1 or manifest.get("status") != "written_pending_native_verification":
+        raise InstallError("Active installation manifest is not a committed installation")
+    return manifest
 
 
 def manifest_chain(manifest: dict | None) -> list[dict]:
@@ -300,6 +412,11 @@ def plan(package: Path, home: Path, skills: Path, state: Path, overlay: Path, ma
     if not (package / "policies/global.md").is_file() or not (package / "tools/harness.py").is_file():
         raise InstallError("Package policy or executable entrypoint missing")
     old_active = active_manifest(state)
+    if old_active is None and ((home / "harness-machine.json").exists() or managed_block(decode(read(selected_instructions(home))))):
+        raise InstallError(
+            "Installed harness targets have no active manifest; inspect the installation "
+            f"transactions in {state / 'installs'} and recover with rollback --manifest before reinstalling"
+        )
     owned = {x["path"]: x for m in reversed(manifest_chain(old_active)) for x in m["files"]}
     existing_machine = json.loads(overlay.read_text(encoding="utf-8")) if overlay.exists() else None
     if existing_machine is not None and existing_machine.get("schema_version") != 1:
@@ -310,12 +427,12 @@ def plan(package: Path, home: Path, skills: Path, state: Path, overlay: Path, ma
     def add(path: Path, new: bytes, kind: str, meta: dict | None = None):
         desired.add(str(path))
         old = read(path)
-        if old == new:
-            return
         if kind == "owned" and old is not None:
             prior = owned.get(str(path))
             if not prior or digest(old) != prior["after_sha256"]:
                 raise InstallError(f"Existing or manually edited file conflicts: {path}")
+        if old == new:
+            return
         plans.append({"path": path, "before": old, "after": new, "kind": kind, "meta": meta or {}})
     instruction = selected_instructions(home)
     text = decode(read(instruction))
@@ -396,7 +513,10 @@ def plan(package: Path, home: Path, skills: Path, state: Path, overlay: Path, ma
 
 def apply_plan(plans: list[dict], state: Path, package: Path) -> dict:
     previous = active_manifest(state)
+    previous_ref = read(state / "active.json")
     if not plans:
+        if previous is None:
+            raise InstallError("Cannot report unchanged without an active installation manifest")
         return {"status": "unchanged", "manifest": (state / "active.json").as_posix(), "policy_version": VERSION}
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
     transaction = state / "installs" / stamp
@@ -411,29 +531,59 @@ def apply_plan(plans: list[dict], state: Path, package: Path) -> dict:
             atomic(backup, p["before"])
         atomic(installed, p["after"])
         files.append({"path": str(p["path"]), "before_sha256": digest(p["before"]) if p["before"] is not None else None, "after_sha256": digest(p["after"]), "backup": str(backup) if p["before"] is not None else None, "installed_copy": str(installed), "kind": p["kind"], "meta": p["meta"]})
-    manifest = {"schema_version": 1, "policy_version": VERSION, "package_root": str(package), "install_id": stamp, "created": dt.datetime.now(dt.timezone.utc).isoformat(), "files": files, "previous_manifest": json.loads((state / "active.json").read_text(encoding="utf-8")) if previous else None, "status": "prepared"}
+    manifest = {"schema_version": 1, "policy_version": VERSION, "package_root": str(package), "install_id": stamp, "created": dt.datetime.now(dt.timezone.utc).isoformat(), "files": files, "previous_manifest": json.loads(previous_ref) if previous_ref else None, "status": "prepared"}
     manifest_path = transaction / "manifest.json"
     atomic(manifest_path, canonical(manifest))
     written = []
+    new_ref = None
     try:
         for p in plans:
             if read(p["path"]) != p["before"]:
                 raise InstallError(f"Concurrent edit while installing: {p['path']}")
-            atomic(p["path"], p["after"])
+            # Track even an atomic implementation which commits then raises.
             written.append(p)
-    except BaseException:
-        for p in reversed(written):
-            if read(p["path"]) == p["after"]:
-                if p["before"] is None:
-                    p["path"].unlink()
-                else:
-                    atomic(p["path"], p["before"])
-        manifest["status"] = "failed_restored_unchanged_targets"
+            atomic(p["path"], p["after"])
+        manifest["status"] = "written_pending_native_verification"
         atomic(manifest_path, canonical(manifest))
+        if read(state / "active.json") != previous_ref:
+            raise InstallError("Concurrent edit to the active installation manifest")
+        new_ref = canonical({"manifest": str(manifest_path), "sha256": digest(manifest_path.read_bytes())})
+        atomic(state / "active.json", new_ref)
+    except BaseException as original_error:
+        recovery_errors = []
+        # The pointer is part of the transaction, too. Never overwrite a ref
+        # which an external writer changed to something other than our value.
+        try:
+            if new_ref is not None and read(state / "active.json") == new_ref:
+                if previous_ref is None:
+                    (state / "active.json").unlink()
+                else:
+                    atomic(state / "active.json", previous_ref)
+        except OSError:
+            recovery_errors.append("active manifest pointer")
+        for p in reversed(written):
+            try:
+                current = read(p["path"])
+                if current == p["after"]:
+                    if p["before"] is None:
+                        p["path"].unlink()
+                    else:
+                        atomic(p["path"], p["before"])
+                elif current != p["before"]:
+                    recovery_errors.append(str(p["path"]) + " (concurrent edit preserved)")
+            except OSError:
+                recovery_errors.append(str(p["path"]))
+        manifest["status"] = "failed_recovery_required" if recovery_errors else "failed_restored_unchanged_targets"
+        try:
+            atomic(manifest_path, canonical(manifest))
+        except OSError:
+            recovery_errors.append("transaction status")
+        if recovery_errors:
+            raise InstallError(
+                f"Installation failed; inspect {manifest_path} before recovery. "
+                "Unrestored or unrecorded targets: " + ", ".join(recovery_errors)
+            ) from original_error
         raise
-    manifest["status"] = "written_pending_native_verification"
-    atomic(manifest_path, canonical(manifest))
-    atomic(state / "active.json", canonical({"manifest": str(manifest_path), "sha256": digest(manifest_path.read_bytes())}))
     return {"status": manifest["status"], "manifest": str(manifest_path), "files_changed": len(files), "policy_version": VERSION}
 
 
@@ -478,6 +628,20 @@ def verify(package: Path, home: Path, skills: Path, state: Path, native: bool = 
     errors = []
     warnings = []
     pointer = home / "harness-machine.json"
+    try:
+        active = active_manifest(state)
+        if active is None:
+            errors.append("active installation manifest missing; installed files alone are not a verified installation")
+        else:
+            for manifest in manifest_chain(active):
+                for entry in manifest["files"]:
+                    installed = Path(entry["installed_copy"]).read_bytes()
+                    if digest(installed) != entry["after_sha256"]:
+                        raise InstallError("Installed backup integrity error")
+                    if entry["backup"] and digest(Path(entry["backup"]).read_bytes()) != entry["before_sha256"]:
+                        raise InstallError("Original backup integrity error")
+    except (OSError, KeyError, ValueError) as ex:
+        errors.append("Installation state invalid: " + str(ex))
     try:
         data = json.loads(pointer.read_text(encoding="utf-8"))
         if Path(data["package_root"]).resolve() != package or data["policy_version"] != VERSION:
@@ -558,13 +722,35 @@ def verify(package: Path, home: Path, skills: Path, state: Path, native: bool = 
 
 
 def doctor(package: Path, home: Path, skills: Path, state: Path) -> dict:
+    from .diagnostics import model_configuration
+
     parsed = tomllib.loads(decode(read(home / "config.toml")))
     names = ["codex", "git", "python", "python3", "node", "npm", "bash", "go"]
-    def redact(obj):
-        if isinstance(obj, dict):
-            return {k: "<redacted>" if SENSITIVE.search(k) else redact(v) for k, v in obj.items()}
-        return [redact(v) for v in obj] if isinstance(obj, list) else obj
-    return {"schema_version": 1, "policy_version": VERSION, "platform": platform.platform(), "python": sys.version.split()[0], "codex_home": str(home), "codex_home_source": "explicit/CLI argument" if home != Path.home() / ".codex" else "default ~/.codex", "active_instruction_file": str(selected_instructions(home)), "override_nonempty": selected_instructions(home).name == "AGENTS.override.md", "config_syntax": "valid", "agents_file_config": redact(parsed.get("agents", {})), "security_config": {k: parsed[k] for k in ("approval_policy", "sandbox_mode") if k in parsed}, "windows_sandbox": parsed.get("windows", {}).get("sandbox", "not_explicit"), "effective_runtime_security": "must_be_observed_in_client", "native_roles": sorted(p.name for p in (home / "agents").glob("*.toml")), "skills_count": len(list(skills.glob("*/SKILL.md"))), "executables": {name: shutil.which(name) for name in names}, "package_root": str(package), "state_dir": str(state), "hosted_work": "local_codex_config_not_applicable", "arch_linux": "unverified"}
+    agent_data = parsed.get("agents", {})
+    agent_values = {
+        k: agent_data[k] for k in ("enabled", CAP_KEY, "max_threads", "interrupt_message")
+        if isinstance(agent_data, dict) and k in agent_data and isinstance(agent_data[k], (bool, int))
+    }
+    windows = parsed.get("windows", {})
+    windows_sandbox = windows.get("sandbox", "not_explicit") if isinstance(windows, dict) else "invalid_type"
+    return {
+        "schema_version": 1, "policy_version": VERSION,
+        "platform": platform.platform(), "python": sys.version.split()[0],
+        "codex_home": str(home),
+        "codex_home_source": "explicit/CLI argument" if home != Path.home() / ".codex" else "default ~/.codex",
+        "active_instruction_file": str(selected_instructions(home)),
+        "override_nonempty": selected_instructions(home).name == "AGENTS.override.md",
+        "config_syntax": "valid", "agents_file_config": agent_values,
+        "security_config": {k: parsed[k] for k in ("approval_policy", "sandbox_mode") if k in parsed and isinstance(parsed[k], str)},
+        "windows_sandbox": windows_sandbox if isinstance(windows_sandbox, str) else "invalid_type",
+        "effective_runtime_security": "must_be_observed_in_client",
+        "native_roles": sorted(p.name for p in (home / "agents").glob("*.toml")),
+        "skills_count": len(list(skills.glob("*/SKILL.md"))),
+        "executables": {name: shutil.which(name) for name in names},
+        "package_root": str(package), "state_dir": str(state),
+        "hosted_work": "local_codex_config_not_applicable", "arch_linux": "unverified",
+        "model_configuration": model_configuration(home, parsed),
+    }
 
 
 def installed_locations(package: Path, home: Path) -> tuple[Path, Path]:

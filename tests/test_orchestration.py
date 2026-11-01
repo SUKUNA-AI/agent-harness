@@ -5,6 +5,7 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -12,7 +13,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from agent_harness.core import HarnessError, Run, digest, file_hash, snapshot
-from agent_harness.orchestration import _conflict, _parent_binding, brief, dispatch, next_wave, observe_capacity, repair_brief, validate_plan
+from agent_harness.orchestration import _checkout, _conflict, _parent_binding, brief, dispatch, next_wave, observe_capacity, repair_brief, validate_plan
 from agent_harness.runner import accepted_evidence_errors, gate, run_check
 
 
@@ -43,6 +44,9 @@ class OrchestrationTests(unittest.TestCase):
         for node in self.plan["nodes"]:
             node["read_sections"] = [{**self.context_ref(), "sections": ["value definition"]}]
 
+    def git(self, cwd, *args):
+        return subprocess.run(["git", "-c", "init.templateDir=", "-c", "core.hooksPath=" + str(self.base / "no-hooks"), "-c", "core.fsmonitor=false", "-c", "commit.gpgsign=false", "-c", "user.name=Harness Test", "-c", "user.email=harness-test@example.invalid", "-C", str(cwd), *args], check=True, capture_output=True, text=True)
+
     def test_two_ready_owners_and_no_side_effects(self):
         before = snapshot(self.contract)
         result = next_wave(self.plan, self.contract, self.observation)
@@ -59,6 +63,21 @@ class OrchestrationTests(unittest.TestCase):
         self.plan["target_owners"] = 6
         with self.assertRaises(HarnessError):
             validate_plan(self.plan, self.contract)
+
+    def test_one_owner_target_serializes_useful_work_without_extra_agents(self):
+        self.plan["target_owners"] = 1
+        result = next_wave(self.plan, self.contract, self.observation)
+        self.assertEqual(["a"], [x["node_id"] for x in result["selected"]])
+        self.assertEqual("target_owners", result["blocked"]["b"])
+        self.plan["nodes"][0].update(state="running", native_ref="owner-a")
+        self.observation["threads"].append({"native_ref": "owner-a", "status": "running"})
+        result = next_wave(self.plan, self.contract, self.observation)
+        self.assertEqual([], result["selected"])
+        self.assertEqual("target_owners", result["blocked"]["b"])
+        for invalid in (0, True, "1"):
+            self.plan["target_owners"] = invalid
+            with self.subTest(target=invalid), self.assertRaises(HarnessError):
+                validate_plan(self.plan, self.contract)
 
     def test_cycle_rejected(self):
         self.plan["nodes"][0]["depends_on"] = ["b"]
@@ -132,6 +151,62 @@ class OrchestrationTests(unittest.TestCase):
         result = next_wave(self.plan, self.contract, self.observation)
         self.assertEqual("followup", result["selected"][0]["mode"])
         self.assertEqual(6, result["capacity"]["counted"])
+
+    def test_child_only_capacity_uses_all_child_slots_and_reuses_idle_refs(self):
+        self.contract["budget"].update(root_counts=False, native_cap=2)
+        self.observation["cap"] = 2
+        self.refresh()
+        result = next_wave(self.plan, self.contract, self.observation)
+        self.assertEqual(["a", "b"], [x["node_id"] for x in result["selected"]])
+        self.assertEqual({"cap": 2, "root_counts": False, "counted": 0, "remaining": 2}, result["capacity"])
+        self.observation["threads"] += [{"native_ref": "child-a", "status": "idle"}, {"native_ref": "child-b", "status": "done"}]
+        result = next_wave(self.plan, self.contract, self.observation)
+        self.assertEqual([], result["selected"])
+        self.assertEqual(2, result["capacity"]["counted"])
+        self.plan["nodes"][0]["native_ref"] = "child-a"
+        result = next_wave(self.plan, self.contract, self.observation)
+        self.assertEqual("followup", result["selected"][0]["mode"])
+        self.observation["threads"].append({"native_ref": "too-many", "status": "stopped"})
+        with self.assertRaisesRegex(HarnessError, "capacity exceeded"):
+            observe_capacity(self.observation, self.contract)
+
+    def test_inventory_capacity_matches_core_ledger_for_both_semantics(self):
+        for root_counts in (False, True):
+            with self.subTest(root_counts=root_counts):
+                contract = deepcopy(self.contract)
+                contract["budget"].update(root_counts=root_counts, native_cap=3)
+                run = Run.create(self.base / ("ledger-total" if root_counts else "ledger-children"), contract)
+                observation = deepcopy(self.observation)
+                observation["cap"] = 3
+                for key, status in (("a", "idle"), ("b", "done")):
+                    record = {"owner_id": key, "lane_id": key, "native_ref": key, "status": status, "observation": "fixture inventory"}
+                    run.record_owner(record)
+                    observation["threads"].append({"native_ref": key, "status": status})
+                measured = observe_capacity(observation, contract)
+                ledger = run.capacity()
+                for key in ("cap", "root_counts", "counted", "remaining"):
+                    self.assertEqual(ledger[key], measured[key])
+
+    def test_capacity_semantics_require_an_explicit_boolean(self):
+        for invalid in (None, 0, 1, "false", [], {}):
+            self.contract["budget"]["root_counts"] = invalid
+            with self.subTest(root_counts=invalid), self.assertRaisesRegex(HarnessError, "root_counts"):
+                observe_capacity(self.observation, self.contract)
+        self.contract["budget"].pop("root_counts")
+        with self.assertRaisesRegex(HarnessError, "root_counts"):
+            observe_capacity(self.observation, self.contract)
+
+    def test_child_only_inventory_still_requires_and_protects_root(self):
+        self.contract["budget"]["root_counts"] = False
+        self.refresh()
+        root = self.observation["threads"][0]
+        root["write_cwd"] = self.plan["nodes"][0]["cwd"]
+        result = next_wave(self.plan, self.contract, self.observation)
+        self.assertEqual("ownership_conflict", result["blocked"]["a"])
+        self.assertEqual(0, result["capacity"]["counted"])
+        self.observation["threads"] = []
+        with self.assertRaisesRegex(HarnessError, "root"):
+            observe_capacity(self.observation, self.contract)
 
     def test_duplicate_ref_and_missing_root_rejected(self):
         self.observation["threads"].append(deepcopy(self.observation["threads"][0]))
@@ -289,12 +364,45 @@ class OrchestrationTests(unittest.TestCase):
 
     def test_sibling_cwds_in_one_actual_checkout_conflict(self):
         root = self.base / "owner-a"
-        (root / ".git").mkdir()
+        self.git(root, "init", "--quiet")
         (root / "one").mkdir()
         (root / "two").mkdir()
         left = {"cwd": str(root / "one"), "write_paths": ["left.py"]}
         right = {"cwd": str(root / "two"), "write_paths": ["right.py"]}
         self.assertTrue(_conflict(left, right))
+
+    def test_empty_git_placeholder_does_not_merge_independent_directories(self):
+        marker = self.base / ".git"
+        marker.mkdir()
+        self.assertEqual(self.base / "owner-a", _checkout(self.base / "owner-a"))
+        result = next_wave(self.plan, self.contract, self.observation)
+        self.assertEqual(["a", "b"], [x["node_id"] for x in result["selected"]])
+        (marker / "objects").mkdir()
+        (marker / "refs").mkdir()
+        (marker / "HEAD").write_text("not a Git head\n", encoding="ascii")
+        self.assertEqual(self.base / "owner-a", _checkout(self.base / "owner-a"))
+
+    def test_separate_git_directory_pointer_detects_shared_checkout(self):
+        root = self.base / "owner-a"
+        self.git(root, "init", "--quiet", "--separate-git-dir", str(self.base / "git-metadata"))
+        (root / ".git").write_text("gitdir: ../git-metadata\n", encoding="utf-8")
+        (root / "one").mkdir()
+        (root / "two").mkdir()
+        self.assertEqual(root.resolve(), Path(self.git(root, "rev-parse", "--show-toplevel").stdout.strip()).resolve())
+        self.assertEqual(root, _checkout(root / "one"))
+        self.assertTrue(_conflict({"cwd": str(root / "one"), "write_paths": ["left.py"]}, {"cwd": str(root / "two"), "write_paths": ["right.py"]}))
+
+    def test_linked_worktrees_keep_isolated_writers_and_detect_nested_cwds(self):
+        root = self.base / "owner-a"
+        self.git(root, "init", "--quiet")
+        self.git(root, "commit", "--quiet", "--allow-empty", "-m", "Fixture")
+        worktree = self.base / "linked-worktree"
+        self.git(root, "worktree", "add", "--quiet", "--detach", str(worktree), "HEAD")
+        for name in ("one", "two"):
+            (worktree / name).mkdir()
+        self.assertEqual(worktree, _checkout(worktree / "one"))
+        self.assertTrue(_conflict({"cwd": str(worktree / "one"), "write_paths": ["left.py"]}, {"cwd": str(worktree / "two"), "write_paths": ["right.py"]}))
+        self.assertFalse(_conflict({"cwd": str(root), "write_paths": ["left.py"]}, {"cwd": str(worktree), "write_paths": ["right.py"]}))
 
     def test_windows_case_alias_checkout_and_original_symlink_spelling(self):
         a, b = deepcopy(self.plan["nodes"])
