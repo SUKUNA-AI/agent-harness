@@ -73,7 +73,9 @@ def _schema(value):
     if isinstance(value, (str, Path)):
         path = Path(value)
         if not path.is_absolute():
-            path = SCHEMAS / path
+            source = SCHEMAS / path
+            installed = Path(__file__).resolve().parent / "schemas" / path
+            path = source if source.is_file() else installed
         data = read_regular_file(path, max_bytes=MAX_BYTES)
         return json.loads(data)
     if isinstance(value, (dict, bool)):

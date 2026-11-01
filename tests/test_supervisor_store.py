@@ -71,6 +71,17 @@ class StrictYAMLTests(unittest.TestCase):
         result = subprocess.run([sys.executable, "-I", "-S", "-c", code, str(Path(__file__).resolve().parents[1] / "src")], capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_vendored_version_hashes_license_and_no_optional_c_extension(self):
+        base = Path(sy.__file__).parent / "_vendor"
+        manifest = json.loads((base / "pyyaml-manifest.json").read_text())
+        self.assertEqual(manifest["version"], "6.0.3")
+        self.assertEqual(manifest["license"], "MIT")
+        for name, digest in manifest["files"].items():
+            self.assertEqual(hashlib.sha256((base / "yaml" / name).read_bytes()).hexdigest(), digest)
+        self.assertFalse((base / "yaml/cyaml.py").exists())
+        self.assertFalse(sy.yaml.__with_libyaml__)
+        self.assertEqual(hashlib.sha256((base / "yaml/LICENSE").read_bytes()).hexdigest(), manifest["license_sha256"])
+
 
 class SupervisorStoreTests(unittest.TestCase):
     def setUp(self):
