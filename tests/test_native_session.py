@@ -21,7 +21,8 @@ class NativeSessionTests(unittest.TestCase):
         """Создаёт независимый проект и private store для каждого поведения."""
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.base = Path(self.temp.name)
+        # Ожидания используют canonical root, включая Windows 8.3 alias каталога tempfile.
+        self.base = Path(self.temp.name).resolve()
         self.root = self.base / "project"
         self.root.mkdir()
         (self.root / "input.txt").write_text("first\n")
