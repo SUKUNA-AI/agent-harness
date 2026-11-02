@@ -33,6 +33,8 @@ flowchart TD
 
 </details>
 
+Для локального native-чата доступен [компактный session adapter и SessionStart hook](NATIVE_SESSION_RU.md).
+
 ## Provenance и свежесть
 
 Запись связана с local repository identity, revision, whole-tree snapshot,
