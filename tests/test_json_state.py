@@ -161,6 +161,70 @@ class WindowsJSONReaderContractTests(unittest.TestCase):
         api.crt.open_osfhandle.assert_not_called()
 
 
+class WindowsAtomicRenameContractTests(unittest.TestCase):
+    """Portable checks of Win32 FileRenameInfoEx layout and failure handling."""
+
+    @contextmanager
+    def native_api(self):
+        captured = {}
+
+        def renamed(handle, information_class, payload, size):
+            captured.update(handle=handle, information_class=information_class,
+                            raw=ctypes.string_at(payload, size), size=size)
+            return True
+
+        kernel = SimpleNamespace(CreateFileW=Mock(return_value=0x123456789ABC),
+                                 SetFileInformationByHandle=Mock(side_effect=renamed),
+                                 CloseHandle=Mock(return_value=True))
+        denied = PermissionError(errno.EACCES, "fixture rename denied")
+        denied.winerror = 5
+        with patch.object(core.ctypes, "WinDLL", return_value=kernel, create=True), \
+                patch.object(core.ctypes, "WinError", return_value=denied, create=True), \
+                patch.object(core.ctypes, "get_last_error", return_value=5, create=True):
+            yield SimpleNamespace(kernel=kernel, captured=captured, denied=denied)
+
+    def test_posix_rename_flags_preserve_open_generations_and_utf16_name(self):
+        source = Path("state.tmp")
+        target = Path("state-тест.json")
+        name = str(target.absolute()).encode("utf-16-le")
+        with self.native_api() as api:
+            core._replace_json_windows(source, target)
+        api.kernel.CreateFileW.assert_called_once_with("state.tmp", 0x10000, 7,
+                                                       None, 3, 0x200080, None)
+        self.assertEqual(api.captured["handle"], 0x123456789ABC)
+        self.assertEqual(api.captured["information_class"], 22)
+        raw = api.captured["raw"]
+        pointer_width = ctypes.sizeof(ctypes.c_void_p)
+        offset = ((4 + pointer_width - 1) // pointer_width) * pointer_width + pointer_width + 4
+        self.assertEqual(int.from_bytes(raw[:4], "little"), 3)  # REPLACE + POSIX
+        self.assertEqual(int.from_bytes(raw[offset - 4:offset], "little"), len(name))
+        self.assertEqual(raw[offset:offset + len(name)], name)
+        api.kernel.CloseHandle.assert_called_once_with(0x123456789ABC)
+
+    def test_true_permission_failure_never_uses_legacy_fallback(self):
+        source, target = Path("state.tmp"), Path("state.json")
+        with self.native_api() as api, patch.object(core.os, "replace") as legacy:
+            api.kernel.SetFileInformationByHandle.side_effect = None
+            api.kernel.SetFileInformationByHandle.return_value = False
+            with self.assertRaises(PermissionError) as caught:
+                core._replace_json_windows(source, target)
+            legacy.assert_not_called()
+        self.assertIs(caught.exception, api.denied)
+        self.assertEqual(caught.exception.filename, str(source))
+        self.assertEqual(caught.exception.filename2, str(target.absolute()))
+        api.kernel.CloseHandle.assert_called_once_with(0x123456789ABC)
+
+    def test_explicitly_unsupported_class_only_can_fall_back(self):
+        source, target = Path("state.tmp"), Path("state.json")
+        with self.native_api() as api, patch.object(core.os, "replace") as legacy, \
+                patch.object(core.ctypes, "get_last_error", return_value=87, create=True):
+            api.kernel.SetFileInformationByHandle.side_effect = None
+            api.kernel.SetFileInformationByHandle.return_value = False
+            core._replace_json_windows(source, target)
+            legacy.assert_called_once_with(source, target)
+        api.kernel.CloseHandle.assert_called_once_with(0x123456789ABC)
+
+
 @unittest.skipUnless(os.name == "nt", "native Windows file-sharing and HANDLE checks")
 class NativeWindowsJSONReaderTests(unittest.TestCase):
     def setUp(self):
@@ -204,15 +268,16 @@ class NativeWindowsJSONReaderTests(unittest.TestCase):
         self.assertEqual(len(handles), 1)
         self.assert_handle_closed(handles[0])
 
-    def test_plain_text_reader_is_a_negative_control_for_atomic_replacement(self):
+    def test_plain_text_reader_keeps_its_generation_under_posix_replacement(self):
         old = {"generation": "old"}
+        new = {"generation": "new"}
         core.atomic_json(self.path, old)
         with self.path.open("r", encoding="utf-8-sig") as reader:
-            with self.assertRaises(PermissionError) as caught:
-                core.atomic_json(self.path, {"generation": "new"})
-            self.assertIn(caught.exception.winerror, (5, 32))
+            # Unlike os.replace, Win32 POSIX rename semantics must preserve an
+            # older handle even when the reader did not share FILE_SHARE_DELETE.
+            core.atomic_json(self.path, new)
             self.assertEqual(json.load(reader), old)
-        self.assertEqual(core.read_json(self.path), old)
+        self.assertEqual(core.read_json(self.path), new)
         self.assertEqual(list(self.path.parent.glob(self.path.name + ".tmp-*")), [])
 
     def test_native_access_denied_retains_winerror_and_filename(self):

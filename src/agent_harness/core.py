@@ -118,6 +118,68 @@ def read_json(path):
         return json.load(source)
 
 
+def _replace_json_windows(source: Path, target: Path):
+    """Replace a JSON generation even when a cooperating reader holds the old one.
+
+    Windows' legacy rename does not implement this case reliably even when
+    readers share DELETE. FileRenameInfoEx with POSIX semantics makes old open
+    handles retain their former bytes while new opens see the replacement.
+    Unsupported older filesystems fall back to the original os.replace, which
+    can still fail safely in the presence of an open reader.
+    """
+    from ctypes import wintypes
+
+    old_name, new_name = str(source), str(target.absolute())
+    if "\0" in old_name or "\0" in new_name:
+        raise ValueError("embedded null character")
+
+    # WCHAR is UTF-16 on Windows. Use fixed-width types to keep the ABI layout
+    # checkable in portable contract tests as well.
+    class RenameInfoEx(ctypes.Structure):
+        _fields_ = [("Flags", ctypes.c_uint32), ("RootDirectory", wintypes.HANDLE),
+                    ("FileNameLength", ctypes.c_uint32), ("FileName", ctypes.c_uint16 * 1)]
+
+    name = new_name.encode("utf-16-le")
+    offset = RenameInfoEx.FileName.offset
+    payload = ctypes.create_string_buffer(max(ctypes.sizeof(RenameInfoEx), offset + len(name) + 2))
+    info = RenameInfoEx.from_buffer(payload)
+    info.Flags = 0x1 | 0x2  # FILE_RENAME_REPLACE_IF_EXISTS | FILE_RENAME_POSIX_SEMANTICS
+    info.RootDirectory = None
+    info.FileNameLength = len(name)
+    ctypes.memmove(ctypes.addressof(payload) + offset, name, len(name))
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                  wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD,
+                                  wintypes.HANDLE]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.SetFileInformationByHandle.argtypes = [wintypes.HANDLE, ctypes.c_int,
+                                                 wintypes.LPVOID, wintypes.DWORD]
+    kernel.SetFileInformationByHandle.restype = wintypes.BOOL
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+
+    handle = kernel.CreateFileW(old_name, 0x00010000, 0x1 | 0x2 | 0x4,
+                                None, 3, 0x80 | 0x00200000, None)
+    if handle == wintypes.HANDLE(-1).value:
+        error = ctypes.WinError(ctypes.get_last_error())
+        error.filename, error.filename2 = old_name, new_name
+        raise error
+    try:
+        if kernel.SetFileInformationByHandle(handle, 22, ctypes.byref(payload),
+                                             ctypes.sizeof(payload)):
+            return
+        code = ctypes.get_last_error()
+    finally:
+        kernel.CloseHandle(handle)
+    if code in {1, 50, 87}:  # Unsupported FileRenameInfoEx: preserve legacy behavior.
+        os.replace(source, target)
+        return
+    error = ctypes.WinError(code)
+    error.filename, error.filename2 = old_name, new_name
+    raise error
+
+
 def atomic_json(path, value, *, exclusive=False):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -134,7 +196,10 @@ def atomic_json(path, value, *, exclusive=False):
             output.write(data)
             output.flush()
             os.fsync(output.fileno())
-        os.replace(temp, path)
+        if os.name == "nt":
+            _replace_json_windows(temp, path)
+        else:
+            os.replace(temp, path)
     finally:
         temp.unlink(missing_ok=True)
 

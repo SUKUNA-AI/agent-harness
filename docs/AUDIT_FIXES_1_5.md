@@ -49,17 +49,39 @@ source paths внутри текста: bounded opt-in разбирает тол
 
 В старом reader обнаружен соответствующий механизм: обычное открытое чтение
 Windows не разрешало delete-sharing. JSON reader теперь открывает файл только
-для чтения, но с `FILE_SHARE_DELETE`, чтобы собственный reader не мешал rename
-атомарного writer. Это режим совместного доступа, а не изменение ACL или обход
-разрешений. См. [контракт CreateFileW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew).
+для чтения, но с `FILE_SHARE_DELETE`. Это режим совместного доступа, а не
+изменение ACL или обход разрешений. См.
+[контракт CreateFileW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew).
 Владение native handle, CRT descriptor и текстовой обёрткой разделено явно;
 дескриптор не наследуется дочерними процессами и закрывается ровно один раз.
 UTF-8/BOM и обработка ошибок сохраняются, embedded NUL не допускается.
 
-Детерминированная проверка удерживает reader открытым во время замены:
-старое чтение получает прежний целый документ, новое — новый целый документ.
-Отказы прав или посторонние несовместимые handles по-прежнему могут остановить
-запись. Writer retries, lock, verdict и immutable evidence reader не меняются.
+[Следующий CI для `f5a9fdc`](https://github.com/SUKUNA-AI/agent-harness/actions/runs/41404134695)
+доказал, что одного `FILE_SHARE_DELETE` недостаточно: оба Windows Python jobs
+получили `WinError 5` при `os.replace` в тесте с удерживаемым reader. Это
+реальная несовместимость старой операции замены с открытым целевым файлом,
+а не основание убирать строгую проверку или выдавать её за зелёную.
+
+Windows JSON writer теперь использует `SetFileInformationByHandle` с классом
+`FileRenameInfoEx` (22) и флагами `FILE_RENAME_REPLACE_IF_EXISTS` и
+`FILE_RENAME_POSIX_SEMANTICS`. Согласно
+[описанию флагов Microsoft](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_rename_information)
+и [структуре Win32](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_rename_info),
+эта комбинация позволяет заменить целевое имя даже при открытых совместимых
+handles: старое чтение получает прежнее содержимое, новое открытие — новое.
+Поддерживается Unicode-путь назначения и точно сохраняется системная ошибка
+`CreateFileW`/`SetFileInformationByHandle`; `WinError 5` не игнорируется.
+Только явные ошибки неподдерживаемого API (1/50/87) разрешают старый
+`os.replace`, который при занятом целевом файле вправе отказать безопасно.
+Проверка не открывает дополнительный сервер и не меняет принципы приёмки.
+
+Детерминированный тест удерживает reader открытым во время замены:
+старое чтение должно получить прежний целый документ, новое — новый целый
+документ. Отказы прав или посторонние несовместимые handles по-прежнему могут
+остановить запись. Writer retries, lock, verdict и immutable evidence reader
+не меняются. Portable contract tests проверяют Win32 ABI, флаги, UTF-16,
+закрытие HANDLE, fallback и отказ в доступе; фактическое Windows-поведение
+проверяется отдельно в CI.
 
 ## Границы поведения
 
@@ -98,11 +120,11 @@ Windows JSON reader дополнительно покрыт
 Actual process writes и Linux metadata проверяются отдельно от mocked ordering.
 
 Итоговый локальный объединённый прогон на Linux/Python 3.12, под длинным
-temporary parent: **560 tests**, итоговый `OK (skipped=15)`, exit 0;
-545 passed, 0 failures/errors, 200.825 s.
+temporary parent: **563 tests**, итоговый `OK (skipped=15)`, exit 0;
+548 passed, 0 failures/errors, 195.225 s.
 Включены 54 новых regression cases для A1–A11: 15 execution/recovery,
-32 context/evidence и 7 rename metadata, а также 16 дополнительных JSON reader
-cases. Skips: 9 Windows-specific, 5 optional Windows runtime
+32 context/evidence и 7 rename metadata, а также 16 JSON reader cases,
+к которым добавлены 3 portable Win32 rename contract cases. Skips: 9 Windows-specific, 5 optional Windows runtime
 closure и 1 live language server без настроенного executable.
 `tools/release_check.py`: passed, 267 files / 8 skills. `git diff --check`: passed.
 Это локальный результат, не утверждение о запуске Windows или paid Codex в

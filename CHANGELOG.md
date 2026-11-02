@@ -29,10 +29,12 @@
   проверка исходного текста на known/env secrets выполняется до этого шага.
 - Интеграционная проверка дополнительно закрыла гонку создания общего private
   каталога параллельными workers: тип созданного объекта проверяется повторно.
-- После Windows CI дополнительно исправлен JSON reader состояния: открытый
-  read-only handle не блокирует атомарную замену собственным writer. Передача
-  владения handle/descriptor и закрытие явные; права, writer lock, отказ при
-  реальной ошибке записи и семантика cancellation не меняются.
+- После двух Windows CI дополнительно исправлена атомарная запись JSON state:
+  reader открывает `FILE_SHARE_DELETE`, writer заменяет поколение через Win32
+  `FileRenameInfoEx` с POSIX semantics. Старый `os.replace` всё ещё отказывал
+  даже с новым reader; удержанное чтение и замена проверяются отдельно.
+  Владение native handle/descriptor и закрытие явные; права, writer lock,
+  реальная ошибка записи и семантика cancellation не меняются.
 
 Подробности и воспроизводимые проверки: [A1–A11](docs/AUDIT_FIXES_1_5.md).
 Model/provider/permissions, compaction 500000 и cap5 не менялись.
