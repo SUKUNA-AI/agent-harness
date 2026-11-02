@@ -69,6 +69,9 @@ Windows JSON writer теперь использует `SetFileInformationByHandl
 и [структуре Win32](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_rename_info),
 эта комбинация позволяет заменить целевое имя даже при открытых совместимых
 handles: старое чтение получает прежнее содержимое, новое открытие — новое.
+Фактический Windows/Python 3.13 CI дополнительно показал границу: обычный
+Python `open()` без `FILE_SHARE_DELETE` остаётся несовместимым и даёт
+`WinError 32`. Это безопасный отказ; он не должен маскироваться как успех.
 Поддерживается Unicode-путь назначения и точно сохраняется системная ошибка
 `CreateFileW`/`SetFileInformationByHandle`; `WinError 5` не игнорируется.
 Только явные ошибки неподдерживаемого API (1/50/87) разрешают старый

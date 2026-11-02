@@ -268,16 +268,18 @@ class NativeWindowsJSONReaderTests(unittest.TestCase):
         self.assertEqual(len(handles), 1)
         self.assert_handle_closed(handles[0])
 
-    def test_plain_text_reader_keeps_its_generation_under_posix_replacement(self):
+    def test_plain_text_reader_is_a_negative_control_for_atomic_replacement(self):
         old = {"generation": "old"}
-        new = {"generation": "new"}
         core.atomic_json(self.path, old)
         with self.path.open("r", encoding="utf-8-sig") as reader:
-            # Unlike os.replace, Win32 POSIX rename semantics must preserve an
-            # older handle even when the reader did not share FILE_SHARE_DELETE.
-            core.atomic_json(self.path, new)
+            # Win32 POSIX replacement does not override incompatible sharing
+            # modes. The harness reader shares DELETE; Python's plain open does
+            # not. A blocked replacement must preserve the old generation.
+            with self.assertRaises(PermissionError) as caught:
+                core.atomic_json(self.path, {"generation": "new"})
+            self.assertIn(caught.exception.winerror, (5, 32))
             self.assertEqual(json.load(reader), old)
-        self.assertEqual(core.read_json(self.path), new)
+        self.assertEqual(core.read_json(self.path), old)
         self.assertEqual(list(self.path.parent.glob(self.path.name + ".tmp-*")), [])
 
     def test_native_access_denied_retains_winerror_and_filename(self):
