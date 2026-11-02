@@ -1,17 +1,20 @@
-"""Portable regressions for bounded inventory, revoked facts and receipt coverage."""
+"""Portable regressions for inventory, evidence freshness and diagnostic paths."""
+from contextlib import contextmanager
 from copy import deepcopy
 import hashlib
+import json
 import os
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
-from agent_harness.core import HarnessError, digest, now, snapshot
+from agent_harness.core import HarnessError, canonical, digest, now, snapshot
 from agent_harness.execution_ledger import Ledger, provenance_for, repository_identity, sanitized
 from agent_harness.memory import EPISODE_SCHEMA, Memory
 from agent_harness.repomap_queries import _files, query_repository
-from agent_harness.strict_yaml import dump
+from agent_harness.strict_yaml import dump, load
 
 
 class ContextAuditRegressions(unittest.TestCase):
@@ -189,22 +192,276 @@ class PathSanitizationRegressions(unittest.TestCase):
         value = {"cwd": self.parent.as_posix(), "evidence_path": report.as_posix(), "argv": [report.as_posix()]}
         self.assertIs(sanitized(value), value)
 
-    def test_default_ledger_supervisor_completes_under_long_temporary_parent(self):
+    @staticmethod
+    def diagnostic_forms(path):
+        name = path.as_posix() if isinstance(path, Path) else path
+        return (f'  File "{name}", line 2, in <module>\nAssertionError\n',
+                f'{name}:2:7: error: ordinary diagnostic\n')
+
+    def test_diagnostic_path_spans_are_opt_in_and_preserve_text(self):
+        source = self.parent / "source with spaces" / "calc.py"
+        source.parent.mkdir()
+        source.touch()
+        for diagnostic in self.diagnostic_forms(source):
+            with self.subTest(diagnostic=diagnostic):
+                value = {"detail": diagnostic}
+                original = deepcopy(value)
+                with self.assertRaisesRegex(HarnessError, "High-entropy"):
+                    sanitized(value)
+                self.assertIs(sanitized(value, diagnostic_path_roots=(self.parent,)), value)
+                self.assertEqual(value, original)
+
+    def test_diagnostic_paths_outside_roots_missing_or_uri_are_not_exempt(self):
+        source = self.parent / "calc.py"
+        source.touch()
+        outside = self.parent.with_name(self.parent.name + "-outside") / "calc.py"
+        outside.parent.mkdir()
+        outside.touch()
+        paths = (outside, self.parent / "missing.py", "file://" + source.as_posix(),
+                 "https://example.invalid" + source.as_posix())
+        for path in paths:
+            for diagnostic in self.diagnostic_forms(path):
+                with self.subTest(path=str(path)), self.assertRaisesRegex(HarnessError, "High-entropy"):
+                    sanitized({"detail": diagnostic}, diagnostic_path_roots=(self.parent,))
+        # Neither arbitrary prose nor embedded JSON/YAML gains diagnostic status.
+        for text in ("observed source " + source.as_posix(), "path: " + source.as_posix(),
+                     json.dumps({"source": source.as_posix()})):
+            with self.subTest(text=text), self.assertRaisesRegex(HarnessError, "High-entropy"):
+                sanitized({"detail": text}, diagnostic_path_roots=(self.parent,))
+
+    def test_diagnostic_paths_check_opaque_components_and_surrounding_text(self):
+        source = self.parent / "calc.py"
+        source.touch()
+        opaque_path = self.parent / self.opaque
+        opaque_path.touch()
+        diagnostics = (*self.diagnostic_forms(opaque_path),
+                       *(text + "diagnostic value: " + self.opaque for text in self.diagnostic_forms(source)))
+        for text in diagnostics:
+            with self.subTest(text=text), self.assertRaisesRegex(HarnessError, "High-entropy"):
+                sanitized({"detail": text}, diagnostic_path_roots=(self.parent,))
+
+    def test_diagnostic_known_secrets_are_checked_before_path_projection(self):
+        source = self.parent / "calc.py"
+        source.touch()
+        known = "ghp_" + "a" * 32
+        secret_path = self.parent / known
+        secret_path.touch()
+        diagnostics = (*self.diagnostic_forms(secret_path),
+                       *(text + known for text in self.diagnostic_forms(source)),
+                       self.diagnostic_forms(source)[0] + "password=fixture-only-value")
+        with patch("agent_harness.execution_ledger._diagnostic_entropy_projection") as project:
+            for text in diagnostics:
+                with self.subTest(text=text), self.assertRaises(HarnessError):
+                    sanitized({"detail": text}, diagnostic_path_roots=(self.parent,))
+            project.assert_not_called()
+
+    def test_diagnostic_environment_secrets_are_checked_before_path_projection(self):
+        synthetic = "fixture-only-diagnostic-private-value"
+        source = self.parent / "calc.py"
+        source.touch()
+        secret_path = self.parent / synthetic
+        secret_path.touch()
+        diagnostics = (*self.diagnostic_forms(secret_path),
+                       *(text + synthetic for text in self.diagnostic_forms(source)))
+        with patch.dict(os.environ, {"HARNESS_REGRESSION_API_KEY": synthetic}), \
+                patch("agent_harness.execution_ledger._diagnostic_entropy_projection") as project:
+            for text in diagnostics:
+                with self.subTest(text=text), self.assertRaisesRegex(HarnessError, "Environment credential"):
+                    sanitized({"detail": text}, diagnostic_path_roots=(self.parent,))
+            project.assert_not_called()
+
+    def test_diagnostic_link_paths_and_link_roots_are_not_exempt(self):
+        source = self.parent / "calc.py"
+        source.touch()
+        link = self.parent / "linked-source"
+        try:
+            link.symlink_to(self.parent, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("Symlink creation is unavailable")
+        for text in self.diagnostic_forms(link / source.name):
+            with self.subTest(text=text), self.assertRaisesRegex(HarnessError, "High-entropy"):
+                sanitized({"detail": text}, diagnostic_path_roots=(self.parent,))
+        with self.assertRaisesRegex(HarnessError, "Diagnostic path root"):
+            sanitized({"detail": self.diagnostic_forms(source)[0]}, diagnostic_path_roots=(link,))
+
+    def test_diagnostic_root_and_total_span_bounds_fail_closed(self):
+        source = self.parent / "calc.py"
+        source.touch()
+        text = self.diagnostic_forms(source)[0]
+        for roots in (str(self.parent), (self.parent,) * 5, (self.parent / "missing",), (source,)):
+            with self.subTest(roots=roots), self.assertRaisesRegex(HarnessError, "Diagnostic path root"):
+                sanitized({"detail": text}, diagnostic_path_roots=roots)
+        value = {"detail": text * 64}
+        self.assertIs(sanitized(value, diagnostic_path_roots=(self.parent,)), value)
+        for value in ({"detail": text * 65}, {"first": text * 32, "second": text * 33}):
+            with self.subTest(fields=list(value)), self.assertRaisesRegex(HarnessError, "Diagnostic path span limit"):
+                sanitized(value, diagnostic_path_roots=(self.parent,))
+
+    @contextmanager
+    def work_fixture(self, mode="simple", attempts=3, *, ledger=None):
         from test_work_supervisor import WorkSupervisorTests
+        from agent_harness.supervisor import Supervisor
         with patch("tempfile.tempdir", str(self.parent)):
             case = WorkSupervisorTests("test_edit_precedes_freeze_and_independent_acceptance")
             try:
                 case.setUp()
-                supervisor = case.create()
-                self.assertEqual(supervisor.contract["ledger"], "inform")
-                result = supervisor.start()
-                self.assertEqual(result["status"], "ACCEPTED", result)
-                self.assertTrue(result["evidence_current"])
-                self.assertTrue((case.run / "reports" / "report.yaml").is_file())
-                self.assertEqual(case.calls(), ["exec"])
+                supervisor = case.create(mode, attempts=attempts)
+                if ledger is not None:
+                    contract = {**supervisor.contract, "ledger": ledger}
+                    task = case.root / "ledger-option.yaml"
+                    dump(task, contract)
+                    case.run = case.root / "private" / "ledger-option-run"
+                    supervisor = Supervisor.create(task, run_dir=case.run, cwd=case.source,
+                        adapter=case.adapter, state_dir=case.root / "global-state")
+                yield case, supervisor
             finally:
                 case.tearDown()
                 case.doCleanups()
+
+    def failure_packets(self, supervisor):
+        ledger = Ledger(supervisor.path, supervisor.repository_identity())
+        rows = [row for row in ledger._records() if row["kind"] == "failure"]
+        packets = []
+        for row in rows:
+            payload = row["payload"]
+            path = Path(payload["result_pointer"])
+            self.assertTrue(path.is_relative_to(supervisor.path))
+            self.assertEqual(payload["evidence_path"], str(path))
+            self.assertEqual(payload["evidence_digest"], hashlib.sha256(path.read_bytes()).hexdigest())
+            self.assertEqual(ledger._event_validity(row, row["provenance"], set()), "valid")
+            packet = load(path)
+            self.assertEqual(packet["category"], "error_packet")
+            self.assertEqual(packet["trust"], "untrusted_observations")
+            self.assertLessEqual(len(canonical(packet)) + 2, 8192)
+            self.assertNotIn("error_packet", payload["fact"])
+            observations = [item["observation"] for item in packet["items"]]
+            self.assertTrue(any("AssertionError" in item["detail"] for item in observations))
+            for item in observations:
+                self.assertTrue(Path(item["pointer"]).is_relative_to(supervisor.path / "verification"))
+                self.assertTrue(Path(item["pointer"]).is_file())
+            packets.append(packet)
+        return rows, packets
+
+    def test_default_ledger_supervisor_completes_under_long_temporary_parent(self):
+        with self.work_fixture() as (case, supervisor):
+            self.assertEqual(supervisor.contract["ledger"], "inform")
+            result = supervisor.start()
+            self.assertEqual(result["status"], "ACCEPTED", result)
+            self.assertTrue(result["evidence_current"])
+            self.assertTrue((case.run / "reports" / "report.yaml").is_file())
+            self.assertEqual(case.calls(), ["exec"])
+
+    def test_long_parent_repair_preserves_packet_and_exact_resume_prompt(self):
+        with self.work_fixture("repair") as (case, supervisor), \
+                patch.object(case.adapter, "run", wraps=case.adapter.run) as execute:
+            result = supervisor.start()
+            self.assertEqual(result["status"], "ACCEPTED", result)
+            self.assertTrue(result["evidence_current"])
+            self.assertEqual(case.calls(), ["exec", "resume"])
+            self.assertEqual(result["attempt"], 2)
+            rows, packets = self.failure_packets(supervisor)
+            self.assertEqual(len(rows), 1)
+            detail = supervisor.state["failure_history"][0]["detail"]
+            prefix = rows[0]["payload"]["fact"] + "\n"
+            self.assertTrue(detail.startswith(prefix))
+            self.assertLessEqual(len(detail), 6000)
+            self.assertEqual(json.loads(detail[len(prefix):]), packets[0])
+            prompt = execute.call_args_list[1].args[0]
+            task = json.loads(prompt.rsplit("Task contract and failure packet:\n", 1)[1])
+            self.assertEqual(task["failure"]["detail"], detail)
+
+    def test_long_parent_python_file_traceback_reaches_exact_repair(self):
+        from agent_harness.supervisor import Supervisor
+        with self.work_fixture("repair") as (case, seed):
+            check = case.source / "test_calc.py"
+            check.write_text("from pathlib import Path\nassert 'VALUE = 42' in Path('calc.py').read_text()\n",
+                             encoding="utf-8")
+            contract = deepcopy(seed.contract)
+            contract["acceptance"][0]["argv"] = [sys.executable, str(check)]
+            task = case.root / "script-check.yaml"
+            dump(task, contract)
+            supervisor = Supervisor.create(task, run_dir=case.root / "private" / "script-check-run",
+                cwd=case.source, adapter=case.adapter, state_dir=case.root / "global-state")
+            with patch.object(case.adapter, "run", wraps=case.adapter.run) as execute:
+                result = supervisor.start()
+            self.assertEqual(result["status"], "ACCEPTED", result)
+            self.assertTrue(result["evidence_current"])
+            self.assertEqual(case.calls(), ["exec", "resume"])
+            self.assertEqual(result["attempt"], 2)
+            rows, packets = self.failure_packets(supervisor)
+            self.assertEqual(len(rows), 1)
+            observations = [item["observation"] for item in packets[0]["items"]]
+            diagnostic = next(item for item in observations if 'File "' in item["detail"])
+            self.assertIn(f'File "{check}", line 2', diagnostic["detail"])
+            self.assertEqual(diagnostic["detail"], Path(diagnostic["pointer"]).read_bytes().decode("utf-8"))
+            prompt = execute.call_args_list[1].args[0]
+            repair = json.loads(prompt.rsplit("Task contract and failure packet:\n", 1)[1])
+            detail = supervisor.state["failure_history"][0]["detail"]
+            self.assertEqual(repair["failure"]["detail"], detail)
+            prefix = rows[0]["payload"]["fact"] + "\n"
+            self.assertEqual(json.loads(detail[len(prefix):]), packets[0])
+
+    def test_long_parent_failed_checks_keep_terminal_and_no_progress_semantics(self):
+        for mode, attempts, status, calls in (("failure", 1, "FAILED_TERMINAL", ["exec"]),
+                                             ("no-progress", 3, "NO_PROGRESS", ["exec", "resume"])):
+            with self.subTest(mode=mode), self.work_fixture(mode, attempts) as (case, supervisor):
+                result = supervisor.start()
+                self.assertEqual(result["status"], status, result)
+                self.assertEqual(result["required_passed"], 0)
+                self.assertEqual(case.calls(), calls)
+                rows, _ = self.failure_packets(supervisor)
+                self.assertEqual(len(rows), len(calls))
+                self.assertEqual(len({row["payload"]["result_pointer"] for row in rows}), len(rows))
+                with self.assertRaisesRegex(HarnessError, "Terminal"):
+                    supervisor.resume()
+
+    def test_repeated_failed_candidate_verification_keeps_immutable_packets(self):
+        with self.work_fixture("repair") as (case, supervisor):
+            with patch("agent_harness.supervisor.repair_decision",
+                       side_effect=HarnessError("fixture interruption after failure packet")):
+                interrupted = supervisor.start()
+            self.assertEqual(interrupted["status"], "UNKNOWN_OUTCOME", interrupted)
+            self.assertIn("fixture interruption", interrupted["reason"])
+            before, packets_before = self.failure_packets(supervisor)
+            self.assertEqual(len(before), 1)
+            resumed = supervisor.resume()
+            self.assertEqual(resumed["status"], "ACCEPTED", resumed)
+            self.assertEqual(case.calls(), ["exec", "resume"])
+            after, packets_after = self.failure_packets(supervisor)
+            self.assertEqual(len(after), 2)
+            self.assertNotEqual(after[0]["payload"]["result_pointer"], after[1]["payload"]["result_pointer"])
+            self.assertEqual(packets_after, packets_before * 2)
+
+    def diagnostic_with_opaque_token(self, records, **kwargs):
+        packet = self.original_reduce(records, **kwargs)
+        if kwargs.get("category") == "error_packet":
+            packet["items"][0]["observation"]["detail"] = self.opaque
+        return packet
+
+    def test_diagnostic_secret_is_rejected_before_packet_persistence(self):
+        from agent_harness.context_reducer import reduce
+        self.original_reduce = reduce
+        with self.work_fixture("failure", attempts=1) as (case, supervisor), \
+                patch("agent_harness.context_reducer.reduce", side_effect=self.diagnostic_with_opaque_token):
+            result = supervisor.start()
+            self.assertEqual(result["status"], "UNKNOWN_OUTCOME", result)
+            self.assertIn("High-entropy", result["reason"])
+            self.assertEqual(case.calls(), ["exec"])
+            self.assertEqual(list((case.run / "acceptance" / "error-packets").glob("*.yaml")), [])
+            ledger = Ledger(case.run, supervisor.repository_identity())
+            self.assertFalse(any(row["kind"] == "failure" for row in ledger._records()))
+
+    def test_ledger_off_does_not_add_a_packet_persistence_guard(self):
+        from agent_harness.context_reducer import reduce
+        self.original_reduce = reduce
+        with self.work_fixture("failure", attempts=1, ledger="off") as (case, supervisor), \
+                patch("agent_harness.context_reducer.reduce", side_effect=self.diagnostic_with_opaque_token):
+            result = supervisor.start()
+            self.assertEqual(result["status"], "FAILED_TERMINAL", result)
+            self.assertEqual(case.calls(), ["exec"])
+            self.assertIn(self.opaque, supervisor.state["current_failure"]["detail"])
+            self.assertFalse((case.run / "ledger").exists())
+            self.assertFalse((case.run / "acceptance" / "error-packets").exists())
 
     def test_path_field_name_cannot_bypass_opaque_token_detection(self):
         for name in ("cwd", "path", "evidence_path", "result_pointer", "fact"):

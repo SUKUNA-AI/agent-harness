@@ -22,6 +22,11 @@
 - Длинные обычные local paths не считаются одним credential token; known/env
   secrets и opaque components продолжают проверяться. Ошибка Ledger не
   теряет checkpoint уже завершённого model process.
+- Failure diagnostics сохраняются отдельным immutable YAML packet с digest;
+  Ledger хранит краткий факт и evidence pointer, а exact resume получает
+  диагностический sample. Для обычного traceback/compiler diagnostic допускается
+  проверка компонентов существующего пути внутри candidate или private run;
+  проверка исходного текста на known/env secrets выполняется до этого шага.
 - Интеграционная проверка дополнительно закрыла гонку создания общего private
   каталога параллельными workers: тип созданного объекта проверяется повторно.
 

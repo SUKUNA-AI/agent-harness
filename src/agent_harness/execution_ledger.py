@@ -134,8 +134,55 @@ def _existing_path_parts(value):
     return None
 
 
-def sanitized(value):
-    """Reject secret-looking data rather than turning secrets into facts."""
+_DIAGNOSTIC_PATH = re.compile(
+    r'^[ \t]*(?:File "(?P<python>[^"\r\n]{1,4096})", line [0-9]{1,10}(?=[,\r\n]|$)'
+    r'|(?P<compiler>(?:/|[A-Za-z]:[\\/])[^:\r\n]{1,4096}):[0-9]{1,10}:[0-9]{1,10}:)', re.M)
+
+
+def _diagnostic_roots(values):
+    """Explicit opt-in roots must themselves be observed ordinary directories."""
+    if not isinstance(values, (tuple, list)) or len(values) > 4:
+        raise HarnessError("Diagnostic path roots must be a list/tuple of at most four directories")
+    roots = []
+    for value in values:
+        try:
+            text = os.fspath(value)
+            if not isinstance(text, str) or _existing_path_parts(text) is None or not Path(text).is_dir():
+                raise ValueError("not an ordinary absolute directory")
+            roots.append(Path(text))
+        except (TypeError, ValueError, OSError, HarnessError) as error:
+            raise HarnessError("Diagnostic path root must be an existing ordinary absolute directory") from error
+    return tuple(roots)
+
+
+def _diagnostic_entropy_projection(text, roots, remaining):
+    """Split only bounded, observed path spans; preserve all other text.
+
+    This is a validation projection, never a rewritten diagnostic or parser for
+    arbitrary prose/JSON. The caller must first check the original text for
+    known and environment credentials. Every path component remains scanned.
+    """
+    pieces, offset = [], 0
+    for match in _DIAGNOSTIC_PATH.finditer(text):
+        if remaining <= 0:
+            raise HarnessError("Diagnostic path span limit exceeded")
+        remaining -= 1
+        group = "python" if match.group("python") is not None else "compiler"
+        candidate = match.group(group)
+        if not any(Path(candidate).is_relative_to(root) for root in roots):
+            continue
+        parts = _existing_path_parts(candidate)
+        if parts is None:
+            continue
+        start, end = match.span(group)
+        pieces.extend((text[offset:start], " ".join(parts)))
+        offset = end
+    pieces.append(text[offset:])
+    return "".join(pieces), remaining
+
+
+def sanitized(value, *, diagnostic_path_roots=()):
+    """Reject secrets; diagnostic path-span handling requires explicit roots."""
     data = json.dumps(value, ensure_ascii=False, allow_nan=False)
     if len(data.encode("utf-8")) > 262144:
         raise HarnessError("Knowledge record exceeds 262144 bytes")
@@ -151,6 +198,8 @@ def sanitized(value):
             raise HarnessError("Environment credential in knowledge record")
         if re.search(r'(?i)(?:authorization|api[_-]?key|password|access[_-]?token)\s*[=:]\s*["\w-]', text):
             raise HarnessError("Credential-shaped data in knowledge record")
+    roots = _diagnostic_roots(diagnostic_path_roots)
+    remaining_paths = 64  # Total candidate/stat work across this bounded record.
     for text, structured in fields:
         tokens = re.findall(r"[A-Za-z0-9_+/=-]{48,}", text)
         if not tokens:
@@ -158,6 +207,9 @@ def sanitized(value):
         parts = _existing_path_parts(text) if structured else None
         if parts is not None:
             tokens = [token for part in parts for token in re.findall(r"[A-Za-z0-9_+/=-]{48,}", part)]
+        elif structured and roots:
+            projected, remaining_paths = _diagnostic_entropy_projection(text, roots, remaining_paths)
+            tokens = re.findall(r"[A-Za-z0-9_+/=-]{48,}", projected)
         for token in tokens:
             if re.fullmatch(r"[a-fA-F0-9]{48,128}", token):
                 continue  # expected content digests

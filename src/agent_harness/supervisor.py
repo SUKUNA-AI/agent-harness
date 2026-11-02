@@ -411,6 +411,8 @@ class Supervisor:
         failed = dict(failed)
         failed["errors"] = verdict["errors"]
         failure = classify(failed)
+        ledger_failure = {"category": failure["category"], "signature": failure["signature"],
+                          "status": "unresolved", "fact": failure["detail"]}
         # Keep a compact diagnostic sample with the immutable full receipt/log
         # pointer. Never pass an entire raw stdout stream back to the model.
         samples = []
@@ -429,9 +431,18 @@ class Supervisor:
         if samples:
             from .context_reducer import reduce
             packet = reduce(samples, category="error_packet", max_bytes=8192)
+            if self.contract["ledger"] != "off":
+                from .core import file_hash
+                from .execution_ledger import sanitized
+                # Keep structured paths separate from free-text facts. Check the
+                # diagnostics themselves before writing an immutable packet;
+                # a safe pointer must not conceal credential-bearing contents.
+                packet_path = self.store.write("acceptance/error-packets/" + uuid.uuid4().hex + ".yaml",
+                    sanitized(packet, diagnostic_path_roots=(self.state["cwd"], self.path)), exclusive=True)
+                ledger_failure.update(result_pointer=str(packet_path), evidence_path=str(packet_path),
+                                      evidence_digest=file_hash(packet_path))
             failure["detail"] = (failure["detail"] + "\n" + json.dumps(packet, ensure_ascii=False))[:6000]
-        self._ledger("failure", {"category": failure["category"], "signature": failure["signature"],
-                                  "status": "unresolved", "fact": failure["detail"]})
+        self._ledger("failure", ledger_failure)
         self.state["current_failure"] = failure
         self.transition("FAILED_REPAIRABLE", "fresh acceptance rejected; classify before repair")
         decision = repair_decision(self.state["failure_history"], failure, candidate["digest"],

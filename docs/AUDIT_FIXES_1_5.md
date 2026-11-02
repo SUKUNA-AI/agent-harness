@@ -19,7 +19,7 @@ release ZIP или результатов прошлого аудита.
 | A8 | Verified episode имеет уникальное точное покрытие всех evidence IDs | Missing/extra/duplicate refs отклоняются; старые неполные записи не становятся verified при recall |
 | A9 | Неподдерживаемый Linux inode flag не теряется молча | Реальный nodump отвергается до staging, bytes/inode/flags оригинала неизменны; обычный extent flag допустим |
 | A10 | Inherited metadata обнаруживается до записи bytes в staged inode и до замены originals | Default ACL на backup или replacement даёт безопасный отказ; обе копии каждого файла проверены до первой замены |
-| A11 | Подтверждённый local path не превращается целиком в entropy credential; защита секретов сохранена | Default Ledger работает под длинным parent; known/env secrets, opaque components, links и field-name bypass отвергаются |
+| A11 | Подтверждённый local path не превращается целиком в entropy credential; failure packet остаётся структурированным, защита секретов сохранена | Default Ledger, failed check и exact repair работают под длинным parent, включая настоящий Python-file traceback; known/env secrets, opaque components, links и field-name bypass отвергаются |
 
 Во время интеграции также воспроизведена и исправлена гонка создания общего
 private parent двумя workers. `FileExistsError` от второго mkdir допустим
@@ -27,6 +27,16 @@ private parent двумя workers. `FileExistsError` от второго mkdir �
 файл или ссылку. Read-only candidate validation не создаёт потерянный ownership
 store. При настоящем Ledger persistence failure уже остановленный процесс и
 наблюдённый usage сохраняются до перехода в неизвестный результат.
+
+Дополнительный полный прогон под длинным temporary parent выявил A11 также
+в error packet: структурированная диагностика превращалась в одну JSON-строку.
+Теперь Ledger связывается с отдельным immutable YAML packet по pointer/digest,
+а repair prompt сохраняет диагностический sample. Независимый контрпример с
+настоящим Python traceback дополнительно проверяет существующие абсолютные
+source paths внутри текста: bounded opt-in разбирает только path spans известных
+диагностических форм, только внутри candidate/private run. Секреты проверяются
+в исходном тексте до такой проверки, каждый компонент пути остаётся проверяемым,
+сам packet не переписывается. Ledger-off поведение сохранено.
 
 ## Границы поведения
 
@@ -62,9 +72,10 @@ python tools/release_check.py
 публикация fixture repositories и пользовательские credentials не нужны.
 Actual process writes и Linux metadata проверяются отдельно от mocked ordering.
 
-Локальный объединённый прогон на Linux/Python 3.12: **531 tests**, итоговый
-`OK (skipped=11)`, exit 0; 520 passed, 0 failures/errors, 153.993 s.
-Включены 41 новый regression case: 15 execution/recovery, 19 context/evidence
+Итоговый локальный объединённый прогон на Linux/Python 3.12, под длинным
+temporary parent: **544 tests**, итоговый `OK (skipped=11)`, exit 0;
+533 passed, 0 failures/errors, 195.917 s.
+Включены 54 новых regression cases: 15 execution/recovery, 32 context/evidence
 и 7 rename metadata. Skips: 5 Windows-specific, 5 optional Windows runtime
 closure и 1 live language server без настроенного executable.
 `tools/release_check.py`: passed, 266 files / 8 skills. `git diff --check`: passed.
@@ -74,6 +85,9 @@ closure и 1 live language server без настроенного executable.
 Независимое ревью исполнения дополнительно проверило старый accepted run,
 созданный исходным кодом 1.5.0 с пустым usage. Новый status/resume не подтверждает
 его budget: возвращается STALE, исторический PASS не переписывается.
+Отдельное повторение исходного A11-контрпримера с Python-file traceback получило
+ACCEPTED только после второй попытки `exec → resume` и свежей проверки;
+девять независимых focused checks подтвердили guard, bounds и ledger-off.
 Датированные прежние отчёты и релизные receipts сохранены как история.
 
 Настройки модели/provider/reasoning, permissions, порог compaction 500000,
