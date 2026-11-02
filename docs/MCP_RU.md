@@ -1,6 +1,6 @@
 # Необязательный локальный MCP: статус запусков
 
-Контракт релиза **1.5.0**, сверено **2026-11-02** по
+Контракт релиза **1.5.1**, сверено **2026-11-02** по
 [mcp_server.py](../src/agent_harness/mcp_server.py) и
 [SDK smoke](../tools/check_mcp.py). Это read-only stdio server для **одного явно
 выбранного private run store**. Основные install, snapshots, RepoMap и code/LSP

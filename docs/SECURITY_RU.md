@@ -1,4 +1,4 @@
-# Границы доверия 1.5.0
+# Границы доверия 1.5.1
 
 User contract определяет разрешённые scopes, argv проверок и budgets. Model
 plan, source, retrieved memory, trace, stdout и model response — недоверенные

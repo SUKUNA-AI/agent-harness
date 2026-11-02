@@ -1,4 +1,4 @@
-# Метрики и эксперименты — 1.5.0
+# Метрики и эксперименты — 1.5.1
 
 [Baseline](BASELINE_1_5_0.md) · [Источники](SOURCES_AND_EVALS.md) · [Memory/context](MEMORY_AND_CONTEXT_RU.md)
 

@@ -1,4 +1,4 @@
-# Форматы состояния и миграция — 1.5.0
+# Форматы состояния и миграция — 1.5.1
 
 [Supervisor](EXECUTION_SUPERVISOR_RU.md) · [Установка](../SETUP_RU.md) · [Memory](MEMORY_AND_CONTEXT_RU.md)
 

@@ -1,4 +1,4 @@
-# Карта документации 1.5.0
+# Карта документации 1.5.1
 
 [Индекс](INDEX.md) · [Диаграммы draw.io](diagrams/README.md)
 
@@ -12,7 +12,7 @@ receipts конкретного commit, среды и candidate. Дата акт
 | --- | --- |
 | [README](../README.md) | Общие границы runtime, installer, CLI и release builder |
 | [SETUP](../SETUP_RU.md) | `installation.py`, `diagnostics.py`, templates установленных assets |
-| [CHANGELOG](../CHANGELOG.md), [Release notes](RELEASE_NOTES_1.5.0.md) | Изменения 1.5.0 и совместимость; не замена verification report |
+| [CHANGELOG](../CHANGELOG.md), [Release notes](RELEASE_NOTES_1.5.1.md) | Исправления 1.5.1 и совместимость; не замена verification report |
 | [Архитектура](ARCHITECTURE_RU.md) | Границы Codex, supervisor, core runner, Rust и LSP |
 | [CLI](CLI_REFERENCE_RU.md) | `cli.py`, `work_cli.py`, nested dispatchers и актуальный `--help` |
 | [Supervisor](EXECUTION_SUPERVISOR_RU.md) | `supervisor.py`, `work_contract.py`, `failure_policy.py` |

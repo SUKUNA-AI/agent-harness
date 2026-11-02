@@ -1,4 +1,4 @@
-# Native Agent Harness 1.5.0
+# Native Agent Harness 1.5.1
 
 Локальное расширение установленного Codex для длительных задач. Модельные заходы
 исполняет штатный `codex exec`; harness управляет процессами, памятью и независимой
@@ -8,13 +8,13 @@
 [Memory/context](docs/MEMORY_AND_CONTEXT_RU.md) ·
 [Managed agents](docs/DYNAMIC_AGENTS_RU.md) ·
 [Migration](docs/STATE_FORMATS_AND_MIGRATION_RU.md) ·
-[Релиз 1.5.0](docs/RELEASE_NOTES_1.5.0.md) ·
+[Релиз 1.5.1](docs/RELEASE_NOTES_1.5.1.md) ·
 [Редактируемые схемы draw.io](docs/diagrams/README.md)
 
-В `main` после тега 1.5.0 исправлены все пункты независимого аудита A1–A11:
-[что изменилось и как проверяется](docs/AUDIT_FIXES_1_5.md). Исторический
-релизный ZIP не заменяется обновлением ветки; для этих исправлений нужен
-соответствующий новый source checkout или последующий релиз.
+В **1.5.1** включены все исправления независимого аудита A1–A11:
+[что изменилось и как проверяется](docs/AUDIT_FIXES_1_5.md). Старый релиз
+`v1.5.0` не перезаписан: ZIP 1.5.1 привязан к своему отдельному Git tag
+и проверяемому source commit.
 
 ## Новое в 1.5.0
 
@@ -112,8 +112,9 @@ Windows Python bundle. Обычные global/venv/POSIX interpreters и arbitrar
 сам Codex через свои штатные инструменты. Постоянная служба, БД, векторное
 хранилище и отдельный LLM API для базового комплекта не требуются.
 
-Версия **1.5.0** добавляет Execution Supervisor, managed runtime, Strict YAML,
-Ledger, память и независимую приёмку; совместимые legacy APIs сохраняются.
+Версия **1.5.0** добавила Execution Supervisor, managed runtime, Strict YAML,
+Ledger, память и независимую приёмку; **1.5.1** закрепляет исправления A1–A11
+и Windows JSON-state replacement. Совместимые legacy APIs сохраняются.
 Исправления всех R01–R14 из аудита включены в [1.4.1](docs/REVIEW_1_4_1.md).
 Существующие snapshot/runner/gate переиспользуются. Параметры моделей,
 provider, reasoning, permissions и порог compaction `500000` не меняются.
@@ -125,7 +126,7 @@ provider, reasoning, permissions и порог compaction `500000` не меня
 [Установка и обновление](SETUP_RU.md) · [Вся документация](docs/INDEX.md) ·
 [Архитектура с диаграммами](docs/ARCHITECTURE_RU.md) ·
 [Справочник CLI](docs/CLI_REFERENCE_RU.md) ·
-[Релиз 1.5.0](docs/RELEASE_NOTES_1.5.0.md) · [История изменений](CHANGELOG.md)
+[Релиз 1.5.1](docs/RELEASE_NOTES_1.5.1.md) · [История изменений](CHANGELOG.md)
 
 ## Навигация
 

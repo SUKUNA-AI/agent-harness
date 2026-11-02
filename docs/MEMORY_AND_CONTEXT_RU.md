@@ -1,4 +1,4 @@
-# Ledger, память и контекст — 1.5.0
+# Ledger, память и контекст — 1.5.1
 
 [Supervisor](EXECUTION_SUPERVISOR_RU.md) · [CLI](CLI_REFERENCE_RU.md) · [Оценка](PERFORMANCE_EVAL_RU.md)
 

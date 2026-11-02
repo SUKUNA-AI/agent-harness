@@ -1,4 +1,4 @@
-# Execution Supervisor — 1.5.0
+# Execution Supervisor — 1.5.1
 
 [Индекс](INDEX.md) · [CLI](CLI_REFERENCE_RU.md) · [Форматы состояния](STATE_FORMATS_AND_MIGRATION_RU.md)
 

@@ -1,4 +1,4 @@
-# Документация Native Agent Harness 1.5.0
+# Документация Native Agent Harness 1.5.1
 
 Этот индекс разделяет актуальные инструкции, короткие процедуры для агента и
 снимки прошлых проверок. Начальная точка — [README](../README.md).
@@ -59,13 +59,13 @@
 
 ## Релизы, проверки и архив исследования
 
-Текущая линия: [1.5.0](RELEASE_NOTES_1.5.0.md). Исходная опубликованная
-база: [1.4.2](RELEASE_1_4_2.md). Полная история:
+Текущая линия: [1.5.1](RELEASE_NOTES_1.5.1.md); сохранённая база:
+[1.5.0](RELEASE_NOTES_1.5.0.md) и [1.4.2](RELEASE_1_4_2.md). Полная история:
 [CHANGELOG](../CHANGELOG.md).
 
 | Снимок | Что зафиксировано |
 | --- | --- |
-| [Исправления A1–A11 после 1.5.0](AUDIT_FIXES_1_5.md) | Candidate binding, процессные слоты, budgets, recovery, Ledger/memory и Linux rename; границы совместимости |
+| [Исправления A1–A11 в 1.5.1](AUDIT_FIXES_1_5.md) | Candidate binding, процессные слоты, budgets, recovery, Ledger/memory и Linux rename; границы совместимости |
 | [Baseline перед 1.5.0](BASELINE_1_5_0.md) | Фактически проверенная исходная main 1.4.2; не финальная приёмка 1.5.0 |
 | [Аудит 1.4.1](REVIEW_1_4_1.md) | Исправления R01–R14, metadata, гонки, LSP recovery и native build |
 | [Проверка 1.4.0](REVIEW_1_4_0.md) | Перенос scanner/snapshot в Rust, RepoMap, LSP и измерения |

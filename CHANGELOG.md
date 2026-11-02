@@ -1,6 +1,11 @@
 # История изменений
 
-## После 1.5.0 — исправления аудита A1–A11
+## 1.5.1 — 2026-11-02
+
+Первый самостоятельный patch release после 1.5.0. Включает исправления
+независимого аудита A1–A11 и последующие регрессии по Windows JSON-state.
+Старые теги и вложения v1.5.0 сохранены. Подробности:
+[release notes 1.5.1](docs/RELEASE_NOTES_1.5.1.md).
 
 - Acceptance core, workspace lock и report теперь связаны с одним candidate;
   ранний managed resume создаёт core только после staging, старый mismatch

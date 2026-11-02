@@ -22,7 +22,7 @@ import uuid
 
 from .file_io import FileReadError, read_regular_file, _stamp
 
-VERSION = "1.5.0"
+VERSION = "1.5.1"
 START = "<!-- agent-harness:begin -->"
 END = "<!-- agent-harness:end -->"
 AUTO_COMPACT_TOKEN_LIMIT = 500000
