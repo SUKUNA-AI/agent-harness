@@ -326,6 +326,9 @@
           ],
           "minimum": 0
         },
+        "usage_accounting_version": {
+          "const": 2
+        },
         "reported_usage_turns": {
           "type": "integer",
           "minimum": 0

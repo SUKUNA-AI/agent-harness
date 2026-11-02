@@ -101,24 +101,69 @@ def safe_private(path, *, create=False):
     return path
 
 
+def _text_fields(value, *, structured=False):
+    """Preserve decoded string boundaries; a field name is never a path grant."""
+    if isinstance(value, str):
+        yield value, structured
+    elif isinstance(value, dict):
+        for key, child in value.items():
+            if isinstance(key, str):
+                yield key, False
+            yield from _text_fields(child, structured=True)
+    elif isinstance(value, (list, tuple)):
+        for child in value:
+            yield from _text_fields(child, structured=True)
+
+
+def _existing_path_parts(value):
+    """Only an observed ordinary absolute local path can split entropy tokens.
+
+    Do not exempt arbitrary path-shaped strings, links, URLs or future outputs.
+    Every component still receives the normal opaque-token check below.
+    """
+    try:
+        path = Path(value)
+        if (not path.is_absolute() or value.startswith(("//", "\\\\"))
+                or ".." in path.parts or any(ord(c) < 32 for c in value)):
+            return None
+        info = safe_private(path).stat()
+        if stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode):
+            return path.parts
+    except (OSError, ValueError, HarnessError):
+        pass
+    return None
+
+
 def sanitized(value):
     """Reject secret-looking data rather than turning secrets into facts."""
     data = json.dumps(value, ensure_ascii=False, allow_nan=False)
     if len(data.encode("utf-8")) > 262144:
         raise HarnessError("Knowledge record exceeds 262144 bytes")
-    if SECRET.search(data):
-        raise HarnessError("Possible credential in knowledge record")
-    for key, secret in os.environ.items():
-        if len(secret) >= 6 and re.search(r"TOKEN|SECRET|PASSWORD|CREDENTIAL|API_KEY|AUTHORIZATION", key, re.I) and secret in data:
+    secrets = [secret for key, secret in os.environ.items() if len(secret) >= 6
+               and re.search(r"TOKEN|SECRET|PASSWORD|CREDENTIAL|API_KEY|AUTHORIZATION", key, re.I)]
+    fields = list(_text_fields(value))
+    # Check both the original serialization and decoded fields. JSON escapes
+    # must not hide a known credential, including inside an otherwise safe path.
+    for text in (data, *(text for text, _ in fields)):
+        if SECRET.search(text):
+            raise HarnessError("Possible credential in knowledge record")
+        if any(secret in text for secret in secrets):
             raise HarnessError("Environment credential in knowledge record")
-    if re.search(r'(?i)(?:authorization|api[_-]?key|password|access[_-]?token)\s*[=:]\s*["\w-]', data):
-        raise HarnessError("Credential-shaped data in knowledge record")
-    for token in re.findall(r"[A-Za-z0-9_+/=-]{48,}", data):
-        if re.fullmatch(r"[a-fA-F0-9]{48,128}", token):
-            continue  # expected content digests
-        entropy = -sum((token.count(c) / len(token)) * math.log2(token.count(c) / len(token)) for c in set(token))
-        if entropy > 4.5 and any(c.isdigit() for c in token) and any(c.isupper() for c in token):
-            raise HarnessError("High-entropy credential-shaped value in knowledge record")
+        if re.search(r'(?i)(?:authorization|api[_-]?key|password|access[_-]?token)\s*[=:]\s*["\w-]', text):
+            raise HarnessError("Credential-shaped data in knowledge record")
+    for text, structured in fields:
+        tokens = re.findall(r"[A-Za-z0-9_+/=-]{48,}", text)
+        if not tokens:
+            continue
+        parts = _existing_path_parts(text) if structured else None
+        if parts is not None:
+            tokens = [token for part in parts for token in re.findall(r"[A-Za-z0-9_+/=-]{48,}", part)]
+        for token in tokens:
+            if re.fullmatch(r"[a-fA-F0-9]{48,128}", token):
+                continue  # expected content digests
+            entropy = -sum((token.count(c) / len(token)) * math.log2(token.count(c) / len(token)) for c in set(token))
+            if entropy > 4.5 and any(c.isdigit() for c in token) and any(c.isupper() for c in token):
+                raise HarnessError("High-entropy credential-shaped value in knowledge record")
     return value
 
 
@@ -302,6 +347,18 @@ class Ledger:
         value = load(safe_private(self.events / (event_id + ".yaml")), EVENT_SCHEMA)
         return paginate(value, offset=offset, limit=limit)
 
+    @staticmethod
+    def _event_validity(row, current, superseded):
+        """Inform and controlled reuse must agree on revoked and stale evidence."""
+        payload = row["payload"]
+        evidence = (payload["evidence_path"], payload["evidence_digest"]) if payload.get("evidence_path") and payload.get("evidence_digest") else None
+        state = validity(row["provenance"], current,
+                         status="superseded" if row["event_id"] in superseded else row["validity_status"],
+                         evidence=evidence)
+        if row["kind"] == "check" and payload.get("status") in {"passed", "accepted", "satisfied"} and evidence is None:
+            state = "needs_revalidation"
+        return state
+
     def inform(self, current, *, max_bytes=8192):
         from .context_reducer import reduce
         rows = self._records()
@@ -309,10 +366,7 @@ class Ledger:
         facts, failures, examined, stale = [], [], [], []
         for row in rows:
             payload = row["payload"]
-            evidence = (payload["evidence_path"], payload["evidence_digest"]) if payload.get("evidence_path") and payload.get("evidence_digest") else None
-            state = validity(row["provenance"], current, status="superseded" if row["event_id"] in superseded else row["validity_status"], evidence=evidence)
-            if row["kind"] == "check" and payload.get("status") in {"passed", "accepted", "satisfied"} and evidence is None:
-                state = "needs_revalidation"
+            state = self._event_validity(row, current, superseded)
             item = {"event_id": row["event_id"], "kind": row["kind"], "payload": payload,
                     "provenance": row["provenance"], "validity_status": state,
                     "pointer": "ledger/events/" + row["event_id"] + ".yaml"}
@@ -352,13 +406,16 @@ class Ledger:
             if not proof or context is None:
                 decision, reason = "requires_revalidation", context_error or "complete actual tree and toolchain proof required"
             else:
-                for row in reversed(self._records()):
+                rows = self._records()
+                superseded = {row["payload"].get("supersedes") for row in rows}
+                for row in reversed(rows):
                     payload = row["payload"]
                     if (row["kind"] == "command" and payload.get("operation_fingerprint") == fingerprint
-                            and payload.get("status") == "completed" and validity(row["provenance"], current) == "valid"):
-                        if payload.get("evidence_path") and payload.get("evidence_digest") and validity(row["provenance"], current, evidence=(payload["evidence_path"], payload["evidence_digest"])) == "valid":
-                            decision, reason, reused = "suggest_reuse", "same full input closure and immutable result", row["event_id"]
-                            break
+                            and payload.get("status") == "completed"
+                            and payload.get("evidence_path") and payload.get("evidence_digest")
+                            and self._event_validity(row, current, superseded) == "valid"):
+                        decision, reason, reused = "suggest_reuse", "same full input closure and immutable result", row["event_id"]
+                        break
         result = {"decision": decision, "reason": reason, "reused_event_id": reused,
                   "operation_fingerprint": fingerprint, "scope": "advisory_for_native_codex_tools",
                   "input_closure_digest": context["input_closure"]["digest"] if context else None}

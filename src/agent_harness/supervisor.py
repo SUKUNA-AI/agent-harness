@@ -25,14 +25,14 @@ TRANSITIONS = {
     "NEW": {"PREFLIGHT"},
     "PREFLIGHT": {"PLANNING", "EXECUTING", "FREEZING"},
     "PLANNING": {"EXECUTING"},
-    "EXECUTING": {"FREEZING"},
+    "EXECUTING": {"FREEZING", "FAILED_REPAIRABLE"},
     "FREEZING": {"VERIFYING"},
     "VERIFYING": {"PASS", "FAILED_REPAIRABLE"},
     "PASS": {"ACCEPTED"},
     "FAILED_REPAIRABLE": {"REPAIRING", "NO_PROGRESS", "FAILED_TERMINAL"},
     "REPAIRING": {"EXECUTING"},
     "UNKNOWN_OUTCOME": {"RECOVERY_REQUIRED"},
-    "RECOVERY_REQUIRED": {"FREEZING", "PLANNING"},
+    "RECOVERY_REQUIRED": {"FREEZING", "PREFLIGHT", "PLANNING"},
     "CANCEL_REQUESTED": {"CANCELLED", "UNKNOWN_OUTCOME"},
     **{name: {"PREFLIGHT", "FREEZING"} for name in BLOCKED},
 }
@@ -140,6 +140,8 @@ class Supervisor:
         return (datetime.fromisoformat(self.state["deadline"].replace("Z", "+00:00")) - datetime.now(timezone.utc)).total_seconds()
 
     def _core(self):
+        if self.contract["mode"] == "managed" and not self.state["integration_worktree"]:
+            raise HarnessError("Managed acceptance requires an established integration candidate")
         if not self.state["core_run"]:
             target = self.path / "verification"
             value = legacy_contract(self.contract, cwd=self.state["cwd"], run_id=self.state["run_id"],
@@ -147,8 +149,28 @@ class Supervisor:
             run = Run.create(target, value)
             self.state["core_run"] = str(target)
             self._save("compatibility acceptance run initialized")
-            return run
-        return Run(self.state["core_run"])
+        else:
+            run = Run(self.state["core_run"])
+        self._assert_candidate_binding(run)
+        return run
+
+    def _assert_candidate_binding(self, run):
+        """The locked, checked and reported checkout must be the same candidate.
+
+        A legacy interrupted run may already have a core bound to the source
+        checkout. Never silently reuse or rebaseline that core's evidence.
+        """
+        cwd = Path(self.state["cwd"]).resolve(strict=True)
+        if Path(run.contract()["cwd"]).resolve(strict=True) != cwd:
+            raise HarnessError("Acceptance core is bound to a different candidate checkout; explicit reconciliation required")
+        if self.contract["mode"] == "managed":
+            if not self.state["integration_worktree"] or Path(self.state["integration_worktree"]).resolve(strict=True) != cwd:
+                raise HarnessError("Managed acceptance candidate does not match the integration worktree")
+            from .agent_lifecycle import Worktrees
+            staging = self.store.read("integration.yaml")
+            trees = Worktrees(self.state["source_cwd"], self.path / "worktrees", create=False)
+            if trees.validate(staging, expected_id="integration", expected_role="integrator", integrated=True) != cwd:
+                raise HarnessError("Managed acceptance candidate differs from its ownership receipt")
 
     def _adapter(self):
         if self.adapter is None:
@@ -278,19 +300,35 @@ class Supervisor:
                     slot.complete()  # Argument/config validation failed before spawn.
                     result = {"status": "failed", "error": str(error), "thread_id": self.state["thread_id"],
                               "usage": None, "events": 0, "exit_code": None, "logs": {}}
-            slot.complete()
+            if result.get("process_tree_stopped") is not False:
+                slot.complete(result)
         telemetry.observe(self.state["metrics"], result)
         self.state["process_status"] = result["status"]
         self.state["process_identity"] = None
         self.state["thread_id"] = result.get("thread_id") or self.state["thread_id"]
-        self._ledger("command", {"argv": ["codex", "exec", "resume" if repair else "initial"],
-                     "cwd": self.state["cwd"], "effect": "write", "status": result["status"],
-                     "exit_code": result.get("exit_code"), "result_pointer": str(result.get("logs", {}).get("stdout", ""))})
         self._save("model execution completed; acceptance not yet checked")
+        try:
+            self._ledger("command", {"argv": ["codex", "exec", "resume" if repair else "initial"],
+                         "cwd": self.state["cwd"], "effect": "write", "status": result["status"],
+                         "exit_code": result.get("exit_code"), "result_pointer": str(result.get("logs", {}).get("stdout", ""))})
+        except (HarnessError, OSError, ValueError) as error:
+            self.transition("UNKNOWN_OUTCOME", "Command ledger could not be persisted; reconcile before acceptance: " + str(error))
+            return False
         if result["status"] not in {"completed", "succeeded", "success"}:
             failure = classify(result)
             self.state["current_failure"] = failure
-            decision = repair_decision([], failure, "unknown", attempts=self.state["attempts_used"], max_attempts=self.state["max_attempts"])
+            current = self.provenance()["snapshot_id"] if failure["repairable"] else "unknown"
+            decision = repair_decision(self.state["failure_history"], failure, current,
+                                       attempts=self.state["attempts_used"], max_attempts=self.state["max_attempts"])
+            if failure["repairable"]:
+                self.transition("FAILED_REPAIRABLE", "model turn failed; classify before bounded repair")
+                self.state["failure_history"].append({**failure, "snapshot_id": current,
+                                                       "attempt": self.state["attempts_used"]})
+            if decision["action"] == "repair":
+                if not self.state["thread_id"]:
+                    self.transition("UNKNOWN_OUTCOME", "repair requires persisted exact Codex session identity")
+                    return False
+                self.state["metrics"]["repair_attempts"] += 1
             self.transition(decision["status"], failure["detail"] or decision["reason"])
             return False
         if not self._model_budget_ok():
@@ -304,8 +342,8 @@ class Supervisor:
         if limit is None:
             return True
         metrics = self.state["metrics"]
-        if metrics["missing_usage_turns"]:
-            self.transition("BLOCKED_ENVIRONMENT", "Configured token budget cannot be verified: Codex usage unavailable")
+        if not telemetry.budget_usage_known(metrics):
+            self.transition("BLOCKED_ENVIRONMENT", "Configured token budget cannot be verified: Codex usage missing, partial or legacy-unverified")
             return False
         used = (metrics["input_tokens"] or 0) + (metrics["output_tokens"] or 0)
         if used > limit or for_spawn and used == limit:
@@ -525,14 +563,16 @@ class Supervisor:
                 self.transition("UNKNOWN_OUTCOME", "interrupted phase; reconcile source and process before any edit")
             if self.state["status"] == "UNKNOWN_OUTCOME":
                 self.transition("RECOVERY_REQUIRED", "owned process is absent; independent verification precedes retry")
-            self._core().resume()
             if self.contract["mode"] == "managed" and (unfinished_agents or self.state["integration_worktree"] is None):
                 if unfinished_agents and self.contract["budgets"].get("max_tokens") is not None:
                     self.transition("BLOCKED_ENVIRONMENT", "Interrupted managed wave has no complete persisted usage receipts; original token budget cannot be verified")
                     return self._loop()
                 self.native_disabled_proof = native_disabled_proof
+                if self.state["status"] != "PREFLIGHT":
+                    self.transition("PREFLIGHT", "revalidate managed prerequisites after explicit recovery")
                 from .managed_execution import execute_managed
                 return execute_managed(self, recovering=True)
+            self._core().resume()
             if self.state["status"] != "FREEZING":
                 self.transition("FREEZING", "reconciled current source; do not blindly repeat model writes")
             self.state["metrics"]["recovery_successes"] += 1
@@ -577,9 +617,22 @@ class Supervisor:
         if self.recovery_required:
             result.update(status="RECOVERY_REQUIRED", reason="Journal repair awaits process/source reconciliation")
         if verify and state["core_run"]:
-            result["evidence_current"] = False if self.recovery_required else Run(state["core_run"]).status(verify_evidence=True).get("evidence_current")
+            try:
+                run = Run(state["core_run"])
+                self._assert_candidate_binding(run)
+                result["evidence_current"] = False if self.recovery_required else run.status(verify_evidence=True).get("evidence_current")
+            except (HarnessError, OSError, ValueError) as error:
+                result["evidence_current"] = False
+                result["evidence_error"] = redact(str(error))[:4096]
             if result["evidence_current"] is False and state["status"] == "ACCEPTED":
                 result.update(status="STALE", reason="Recorded acceptance no longer matches current source/evidence")
+                result["metrics"].update(accepted_tasks=0, time_to_acceptance_seconds=None)
+        if verify and state["status"] == "ACCEPTED" and self.contract["budgets"].get("max_tokens") is not None:
+            metrics = state["metrics"]
+            if (not telemetry.budget_usage_known(metrics)
+                    or (metrics["input_tokens"] or 0) + (metrics["output_tokens"] or 0) > self.contract["budgets"]["max_tokens"]):
+                result.update(status="STALE", evidence_current=False,
+                              reason="Recorded acceptance cannot establish the original token budget; missing/partial/legacy usage is not zero")
                 result["metrics"].update(accepted_tasks=0, time_to_acceptance_seconds=None)
         return result
 

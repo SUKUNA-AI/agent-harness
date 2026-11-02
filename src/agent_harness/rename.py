@@ -51,17 +51,49 @@ def capture(root, name):
             "identity": identity(after), "sha256": hashlib.sha256(data).hexdigest()}
 
 
+def _check_linux_metadata(fd):
+    """Inspect the actual inode, including flags absent from Linux stat()."""
+    import array
+    import errno
+    import fcntl
+
+    observed = os.fstat(fd)
+    if not stat.S_ISREG(observed.st_mode):
+        raise HarnessError("Rename metadata requires a regular file")
+    if getattr(observed, "st_flags", 0):
+        raise HarnessError("Rename does not preserve platform file flags; use a native editor for this file")
+    flags = array.array("l", [0])
+    try:
+        # FS_IOC_GETFLAGS uses a native long in the ioctl request encoding.
+        fcntl.ioctl(fd, 0x80006601 | (flags.itemsize << 16), flags, True)
+    except OSError as error:
+        if error.errno not in (errno.ENOTTY, errno.EOPNOTSUPP, errno.EINVAL):
+            raise
+    if flags[0] & ~0x80000:  # FS_EXTENT_FL is a storage-layout detail only.
+        raise HarnessError("Rename does not preserve Linux inode flags; use a native editor for this file")
+    if not hasattr(os, "listxattr"):
+        raise HarnessError("Cannot inspect extended attributes/ACLs; use a native editor for rename apply")
+    if os.listxattr(fd):
+        raise HarnessError("Rename refuses extended attributes/ACLs instead of dropping them; use a native editor")
+
+
 def _check_metadata(path):
     if os.name != "posix":
         return
     if not sys.platform.startswith("linux"):
         raise HarnessError("Rename metadata safety supports Linux and Windows; use a native editor on this platform")
-    if getattr(path.lstat(), "st_flags", 0):
-        raise HarnessError("Rename does not preserve platform file flags; use a native editor for this file")
-    if not hasattr(os, "listxattr"):
-        raise HarnessError("Cannot inspect extended attributes/ACLs; use a native editor for rename apply")
-    if os.listxattr(path, follow_symlinks=False):
-        raise HarnessError("Rename refuses extended attributes/ACLs instead of dropping them; use a native editor")
+    before = path.lstat()
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    try:
+        opened = os.fstat(fd)
+        if identity(before) != identity(opened):
+            raise HarnessError("Rename metadata changed before inspection")
+        _check_linux_metadata(fd)
+        if (identity(opened) != identity(os.fstat(fd))
+                or identity(before) != identity(path.lstat())):
+            raise HarnessError("Rename metadata changed while inspecting the file")
+    finally:
+        os.close(fd)
 
 
 def _windows_security():
@@ -368,10 +400,15 @@ class Parent:
             with os.fdopen(os.open(path, flags, 0o600, **args), "wb") as output:
                 if os.name == "nt":
                     _windows_dacl(self.path, self.path.parent / name)
-                elif hasattr(os, "fchown"):
-                    staged_owner = os.fstat(output.fileno())
-                    if (staged_owner.st_uid, staged_owner.st_gid) != (metadata["uid"], metadata["gid"]):
-                        os.fchown(output.fileno(), metadata["uid"], metadata["gid"])
+                else:
+                    # A default directory ACL or inode flag can be inherited by
+                    # this new inode even when the source has neither. Refuse
+                    # it while empty, before source bytes or wider mode bits.
+                    _check_linux_metadata(output.fileno())
+                    if hasattr(os, "fchown"):
+                        staged_owner = os.fstat(output.fileno())
+                        if (staged_owner.st_uid, staged_owner.st_gid) != (metadata["uid"], metadata["gid"]):
+                            os.fchown(output.fileno(), metadata["uid"], metadata["gid"])
                 output.write(data)
                 output.flush()
                 if hasattr(os, "fchmod"):
@@ -379,6 +416,8 @@ class Parent:
                 else:
                     os.chmod(self.path.parent / name, stat.S_IMODE(metadata["mode"]))
                 os.fsync(output.fileno())
+                if os.name == "posix":
+                    _check_linux_metadata(output.fileno())
                 staged = identity(os.fstat(output.fileno()))
         except BaseException:
             self.unlink(name)
@@ -563,6 +602,14 @@ def apply_plan(root, plan, *, result_budget=None):
                                            "backup": str(parent.path.parent / row["backup"]),
                                            "staged": str(parent.path.parent / row["staged"])}
                 journal["files"].append(record)
+            # Validate BOTH copies for EVERY target before replacing any
+            # original. Staging may have acquired metadata independently of
+            # the source, and backups must already be safe for compensation.
+            for row in prepared:
+                row["parent"].verify_backup(row["backup"], row["backup_identity"],
+                    row["source"]["sha256"], len(row["source"]["data"]))
+                row["parent"].verify_backup(row["staged"], row["staged_identity"],
+                    row["item"]["after_sha256"], len(row["after"]))
             journal["status"] = "prepared"
             atomic_json(journal_dir / "receipt.json", journal)
             for row in prepared:

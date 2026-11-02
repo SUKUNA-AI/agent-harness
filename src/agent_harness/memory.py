@@ -95,17 +95,25 @@ class Memory:
     def record_episode(self, record):
         self._require()
         if record.get("outcome") == "verified" and (record.get("trust_level") != "verified" or not record.get("evidence_ids") or not record.get("evidence_refs") or not self._evidence_current(record)):
-            raise HarnessError("Verified episode requires check evidence")
+            raise HarnessError("Verified episode requires unique complete current check evidence")
         return self._record(record, EPISODE_SCHEMA, "episodes")
 
     @staticmethod
     def _evidence_current(record):
         try:
-            return bool(record.get("evidence_refs")) and all(
-                ref["id"] in record["evidence_ids"] and hashlib.sha256(
+            identifiers, refs = record.get("evidence_ids"), record.get("evidence_refs")
+            if (not isinstance(identifiers, list) or not identifiers
+                    or any(not isinstance(value, str) or not value for value in identifiers)
+                    or not isinstance(refs, list) or len(refs) != len(identifiers)
+                    or any(not isinstance(ref, dict) or not isinstance(ref.get("id"), str) or not ref["id"] for ref in refs)):
+                return False
+            referenced = [ref["id"] for ref in refs]
+            if len(set(identifiers)) != len(identifiers) or len(set(referenced)) != len(referenced) or set(identifiers) != set(referenced):
+                return False
+            return all(hashlib.sha256(
                     read_regular_file(safe_private(ref["path"]), max_bytes=16 * 1024 * 1024)).hexdigest() == ref["sha256"]
-                for ref in record["evidence_refs"])
-        except (KeyError, OSError, ValueError, HarnessError):
+                for ref in refs)
+        except (KeyError, OSError, ValueError, TypeError, HarnessError):
             return False
 
     def record_semantic(self, record):

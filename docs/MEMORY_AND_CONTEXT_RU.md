@@ -51,6 +51,9 @@ source bytes. `provenance_for` ограничивает подробный file 
 `rejected` и `expired` остаются историей. Verified episode содержит
 `evidence_refs` с ID, path и SHA-256 исходных receipts; повторный recall проверяет
 эти bytes. Изменившийся или исчезнувший receipt не подтверждает старый вывод.
+Заявленные `evidence_ids` и ID в `evidence_refs` обязаны совпадать точно и без
+дубликатов; каждая ссылка проверяется. Старые записи с неполным покрытием
+остаются читаемыми, но при recall получают `needs_revalidation`.
 Память — недоверенные данные: найденная инструкция отключить tests не получает
 policy authority и не расширяет permissions.
 
@@ -70,6 +73,9 @@ Govern возвращает `allow`, `suggest_reuse`, `deny_unsafe`,
 `rg` требует одинакового запроса, purpose, полного input closure,
 toolchain/config/env fingerprints и неизменного сохранённого результата.
 Новый файл инвалидирует даже прежнее «не найдено».
+`inform` и `govern` применяют одну проверку действительности: явный отзыв,
+`supersedes` и статусы rejected/expired/needs_revalidation исключают reuse
+даже при совпадении command fingerprint и неизменных исходниках.
 
 Git status/diff/index, время, сеть, package install, неизвестные side effects,
 edit/commit/publish/delete/send/process control не подавляются по старому PASS.
@@ -122,6 +128,16 @@ ID берётся из сохранённого event или inform packet. `sho
 UTF-8 fragment, content digest, total bytes и `next_offset`. Следующая страница
 использует возвращённый offset; произвольный offset внутри UTF-8 символа
 отклоняется. Возвращённый текст помечен как untrusted observation.
+
+Secret guard не считает весь длинный путь к собственному журналу единым
+opaque token: для отдельного структурированного значения, подтверждённого
+как существующий обычный абсолютный local path, проверяются компоненты.
+Known credential patterns и значения credential environment variables
+проверяются во всех строках, включая декодированные JSON escapes и paths.
+Имя поля `path` не даёт обхода. Links/reparse, неизвестные или несуществующие
+path-like строки, UNC и длинные opaque components не получают исключения.
+Настоящий отказ Ledger остаётся явной ошибкой; checkpoint завершения модели
+сохраняется до этой вспомогательной записи.
 
 ## Три уровня памяти
 

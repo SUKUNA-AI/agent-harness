@@ -48,7 +48,12 @@ def _mkdir(path):
         try:
             _ordinary(item, directory=True)
         except FileNotFoundError:
-            item.mkdir(mode=0o700)
+            try:
+                item.mkdir(mode=0o700)
+            except FileExistsError:
+                # Independent managed workers can create the same ordinary
+                # parent. Recheck its type; never accept a raced link or file.
+                pass
             _ordinary(item, directory=True)
 
 
@@ -107,9 +112,10 @@ RECOVERY_SCHEMA = {"type": "object", "required": ["schema_version", "status", "o
 
 
 class SupervisorStore:
-    def __init__(self, root, state_schema=None):
+    def __init__(self, root, state_schema=None, *, create=True):
         self.root = Path(os.path.abspath(root))
-        _mkdir(self.root)
+        if create:
+            _mkdir(self.root)
         _parents(self.root)
         _ordinary(self.root, directory=True)
         self.state_schema = state_schema

@@ -111,6 +111,11 @@ Failure classifier различает code/test, environment, permission, ambigu
 stale evidence и unknown outcome. Одинаковая ошибка при неизменном snapshot в
 последовательных попытках завершает цикл как `NO_PROGRESS`.
 
+Исправимый `turn.failed` проходит `EXECUTING → FAILED_REPAIRABLE → REPAIRING`,
+а не пропускает допустимый переход. Он расходует исходный attempt budget,
+сохраняет signature/snapshot в failure history и требует точный session ID.
+Отсутствие usage у такой попытки также учитывается при token budget.
+
 Repair передаёт compact failure packet в `codex exec resume <exact-id>`.
 `resume --last` не используется. Thread ID сохраняется при `thread.started`,
 process identity включает PID и creation identity. На Windows используется
@@ -147,6 +152,15 @@ ignored config или внешнего fixture, объявите его явно
 явно разрешённый контракт. При неизвестном usage после controller interruption
 и заданном `max_tokens` supervisor требует reconciliation и не продолжает вслепую.
 
+Раннее восстановление managed run сначала создаёт/проверяет staging, и только
+затем связывает с ним acceptance core. Проверяемый cwd, workspace lock и
+отчёт обязаны описывать один candidate. Уже сохранённый core от другого cwd
+не переназначается молча: такая история требует явной reconciliation;
+`work status --verify-evidence` не подтверждает её как актуальный PASS.
+После устранения managed environment blocker повторный resume возвращается
+через `PREFLIGHT`: suppression proof, чистота ещё не скопированной исходной
+рабочей копии и прежние бюджеты проверяются заново.
+
 ## Что видно пользователю
 
 Status показывает phase, attempt/max, число подтверждённых required criteria,
@@ -155,6 +169,13 @@ reason, точный session ID, actual candidate cwd и `evidence_current`.
 счётчиками wall-clock, turns, reported token usage, repairs и integration.
 Отсутствующий usage остаётся `unavailable`/`null`; скрытые инструменты Codex
 не превращаются в наблюдённые tool calls.
+
+Полным usage считаются одновременно `input_tokens` и `output_tokens` как
+целые неотрицательные числа; `0/0` допустим, `{}`, пропущенное поле и boolean —
+нет. Частично наблюдённые counts сохраняются как частичные, не дополняются
+выдуманными нулями. При `max_tokens` неполнота блокирует следующий spawn и
+приёмку. Для старой истории действует отдельная
+[граница accounting v2](STATE_FORMATS_AND_MIGRATION_RU.md#полнота-usage-после-аудита).
 
 Token budget проверяется на границах model turns: CLI не предоставляет hard
 limit для скрытого inference внутри turn. Неизвестный usage после interruption

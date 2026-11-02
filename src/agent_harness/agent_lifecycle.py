@@ -21,6 +21,7 @@ LEASE_SCHEMA = {"type": "object", "additionalProperties": False,
                     "task_id": {"type": "string"}, "role": {"type": "string"},
                     "identity": IDENTITY_SCHEMA, "created_at": {"type": "string"},
                     "lease_id": {"type": "string"}, "status": {"enum": ["reserved", "active", "released"]},
+                    "tree_cleanup_required": {"type": "boolean"},
                     "child_identity": {**IDENTITY_SCHEMA, "type": ["object", "null"]}},
                 "required": ["schema_version", "run_id", "task_id", "role", "identity", "created_at", "lease_id", "status", "child_identity"]}
 
@@ -36,16 +37,20 @@ class ModelLease:
             raise HarnessError("Cannot bind model slot without a live exact child identity")
         if self.value["child_identity"] is not None and self.value["child_identity"] != identity:
             raise HarnessError("A model lease cannot silently switch its child identity")
-        self.value.update(child_identity=identity, status="active")
+        self.value.update(child_identity=identity, status="active",
+                          tree_cleanup_required=process.get("tree_control") in {
+                              "private_process_group", "windows_suspended_job_kill_on_close"})
         self.store.write(self.name, self.value, LEASE_SCHEMA)
 
-    def complete(self):
+    def complete(self, result=None):
         if identity_alive(self.value["child_identity"]):
             raise HarnessError("Cannot release model slot while the exact child is alive")
+        if self.value.get("tree_cleanup_required") and (not isinstance(result, dict) or result.get("process_tree_stopped") is not True):
+            raise HarnessError("Cannot release model slot without confirmed owned process-tree cleanup")
         self.completed = True
 
     def close(self):
-        if self.completed or self.value["child_identity"] and not identity_alive(self.value["child_identity"]):
+        if self.completed:
             self.value["status"] = "released"
             self.store.write(self.name, self.value, LEASE_SCHEMA)
 
@@ -70,7 +75,7 @@ class GlobalSlots:
                 continue
             child = value["child_identity"]
             rows.append({"slot": slot, **value, "child_alive": identity_alive(child),
-                         "unresolved": value["status"] != "released" and (child is None or identity_alive(child))})
+                         "unresolved": value["status"] != "released"})
         return rows
 
     @contextmanager
@@ -100,12 +105,11 @@ class GlobalSlots:
                     if self.store.path(name).exists():
                         previous = self.store.read(name, LEASE_SCHEMA)
                         if previous["status"] != "released":
-                            child = previous["child_identity"]
-                            # A dead controller does not prove its model died.
-                            # Missing child identity after a crash is uncertain.
-                            if child is None or identity_alive(child):
-                                context.__exit__(None, None, None)
-                                continue
+                            # Neither a dead controller nor a dead leader proves
+                            # its descendants stopped. Only explicit completion
+                            # can release a previously reserved/active slot.
+                            context.__exit__(None, None, None)
+                            continue
                 except BaseException:
                     context.__exit__(None, None, None)
                     raise
@@ -139,17 +143,18 @@ def git(cwd, *args, input_bytes=None, timeout=30):
 
 
 class Worktrees:
-    def __init__(self, repository, directory):
+    def __init__(self, repository, directory, *, create=True):
         self.repository = Path(repository).resolve(strict=True)
         from .supervisor_store import _mkdir, _parents, _ordinary
         raw_directory = Path(os.path.abspath(directory))
-        _mkdir(raw_directory)
+        if create:
+            _mkdir(raw_directory)
         _parents(raw_directory)
         _ordinary(raw_directory, directory=True)
         self.directory = raw_directory.resolve()
         if self.directory == self.repository or self.repository in self.directory.parents:
             raise HarnessError("Managed worktrees must be outside the source checkout")
-        self.ownership = SupervisorWorktreeOwnership(self.directory.parent / "worktree-ownership")
+        self.ownership = SupervisorWorktreeOwnership(self.directory.parent / "worktree-ownership", create=create)
 
     def create(self, task_id, base_revision, *, role="owner"):
         from .supervisor_store import SupervisorStore
@@ -238,9 +243,9 @@ WORKTREE_SCHEMA = {"type": "object", "additionalProperties": False, "properties"
 
 
 class SupervisorWorktreeOwnership:
-    def __init__(self, directory):
+    def __init__(self, directory, *, create=True):
         from .supervisor_store import SupervisorStore
-        self.store = SupervisorStore(directory)
+        self.store = SupervisorStore(directory, create=create)
 
     def write(self, record):
         self.store.write(record["ownership_token"] + ".yaml", record, WORKTREE_SCHEMA, exclusive=True)

@@ -119,6 +119,15 @@ identity, exact thread ID, deadline, attempts, heartbeat/progress, log offsets
 и checkpoint. Global model lease удерживается до завершения конкретного
 process tree; PID-only или записанное `running: false` не освобождает writer.
 
+Это относится и к exceptional path: ошибка сохранения checkpoint после выхода
+leader не отменяет завершение его private POSIX process group. Отдельно
+подтверждается отсутствие живых members; zombie не является writer. Если
+это нельзя доказать (например, `/proc` относится к другому PID namespace),
+результат остаётся uncertain, а слот не переиспользуется. Исчезновение leader
+само по себе не разрешает reclaimed slot ни в inventory, ни в новом acquire.
+Не удаляйте ownership receipts для обхода этой блокировки. Process group не
+является защитой от враждебного процесса, намеренно покидающего свою группу.
+
 Timeout/cancel сначала запрашивает мягкое завершение, затем использует
 контролируемый terminate. Unknown outcome не считается ready или integrated.
 Повторный foreground resume сверяет сохранённые процессы и actual source,

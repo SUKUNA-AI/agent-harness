@@ -29,6 +29,58 @@ SECRET_KEY = re.compile(r"^(?:authorization|password|passwd|secret|client_secret
 SESSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 
+def _private_group_stopped(pgid):
+    """No live members, not merely a dead group leader (POSIX only).
+
+    Linux zombies retain a process group but cannot write. Only use /proc when
+    it describes our PID namespace; otherwise keep the outcome uncertain.
+    """
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False
+    try:
+        if int(Path("/proc/self/stat").read_text().split(" ", 1)[0]) != os.getpid():
+            return False
+        with os.scandir("/proc") as entries:
+            for entry in entries:
+                if not entry.name.isdigit():
+                    continue
+                try:
+                    tail = (Path(entry.path) / "stat").read_text().rsplit(")", 1)[1].split()
+                except FileNotFoundError:
+                    continue
+                if int(tail[2]) == pgid and tail[0] not in {"Z", "X"}:
+                    return False
+        return True
+    except (OSError, ValueError, IndexError):
+        return False
+
+
+def _stop_owned_tree(process, job, identity):
+    """Bounded cleanup on *every* exit, including after the leader has exited."""
+    if os.name == "nt":
+        _terminate(process, job)
+        return
+    current = process_identity(process.pid)
+    if current and identity and current != identity:
+        raise HarnessError("Owned process identity changed; refusing to signal a reused group")
+    # SIGKILL is mandatory even if wait()/poll() already reaped the leader:
+    # a descendant can ignore SIGTERM and keep writing with closed log pipes.
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    process.wait(timeout=5)
+    deadline = time.monotonic() + 3
+    while not _private_group_stopped(process.pid):
+        if time.monotonic() >= deadline:
+            raise HarnessError("Owned process group termination remains uncertain; retain model slot")
+        time.sleep(0.02)
+
+
 def _binary_hash(path):
     """Bound executable identity without Windows filename-derived execute bits."""
     path = Path(path)
@@ -210,7 +262,7 @@ class CodexAdapter:
         process = job = None
         readers = []
         started = time.monotonic()
-        result = {"status": "unknown_outcome", "thread_id": session_id, "process": None, "usage": None, "events": 0, "observable_tool_calls": 0, "logs": {"stdout": str(stdout_path), "stderr": str(stderr_path)}, "error": None, "exit_code": None, "started_at": now(), "outcome_known": False}
+        result = {"status": "unknown_outcome", "thread_id": session_id, "process": None, "usage": None, "events": 0, "observable_tool_calls": 0, "logs": {"stdout": str(stdout_path), "stderr": str(stderr_path)}, "error": None, "exit_code": None, "started_at": now(), "outcome_known": False, "process_tree_stopped": False}
         terminal = None
         seen_thread = False
         turn_started = False
@@ -312,13 +364,8 @@ class CodexAdapter:
                         process.wait(timeout=1)
                     except (OSError, subprocess.TimeoutExpired):
                         pass
-                    _terminate(process, job)
-                job.close()
-                if os.name != "nt":
-                    try:
-                        os.killpg(process.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
+                _stop_owned_tree(process, job, identity)
+                result["process_tree_stopped"] = True
                 for reader in readers:
                     reader.join(timeout=3)
                 while not inbox.empty():
@@ -347,10 +394,18 @@ class CodexAdapter:
         finally:
             for sig, handler in handlers.items():
                 signal.signal(sig, handler)
-            if process is not None and process.poll() is None:
-                _terminate(process, job)
-            if job is not None:
-                job.close()
+            try:
+                if process is not None and not result["process_tree_stopped"]:
+                    _stop_owned_tree(process, job, (result.get("process") or {}).get("identity"))
+                    result["process_tree_stopped"] = True
+                elif process is None:
+                    result["process_tree_stopped"] = True
+            except (OSError, HarnessError, subprocess.TimeoutExpired) as error:
+                result.update(status="unknown_outcome", outcome_known=False,
+                              error="Owned process cleanup unconfirmed: " + type(error).__name__)
+            finally:
+                if job is not None:
+                    job.close()
             for reader in readers:
                 reader.join(timeout=3)
             if process is not None:

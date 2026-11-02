@@ -55,6 +55,7 @@ def _files(root):
                 dirs[:] = [d for d in dirs if d not in {".git", "node_modules", ".venv", "__pycache__"} and not (Path(directory) / d).is_symlink()]
                 names.extend((Path(directory) / f).relative_to(root).as_posix() for f in files)
                 if len(names) > 4096:
+                    partial = True  # The raw traversal stopped before source filtering.
                     break
             method = "bounded_file_lookup_rg_unavailable"
     safe = []

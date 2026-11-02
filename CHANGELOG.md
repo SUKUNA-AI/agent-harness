@@ -1,5 +1,33 @@
 # История изменений
 
+## После 1.5.0 — исправления аудита A1–A11
+
+- Acceptance core, workspace lock и report теперь связаны с одним candidate;
+  ранний managed resume создаёт core только после staging, старый mismatch
+  не подтверждает прежний PASS. Read-only status не воссоздаёт ownership.
+- POSIX cleanup выполняется и после завершения leader. Слот освобождается
+  только при подтверждённом завершении owned tree; uncertain outcome не
+  превращается в свободный slot из-за отсутствующего PID лидера.
+- Usage требует обоих nonnegative integer counters. Пустой/неполный usage
+  блокирует token-capped запуск; legacy aggregates без доказанной полноты
+  не подтверждают старую приёмку при заданном `max_tokens`.
+- Repairable model failure проходит законный finite repair переход;
+  resolved managed environment blocker возвращает задачу через preflight.
+- Bounded Python inventory сообщает неполноту сразу при остановке обхода.
+  Ledger govern учитывает отзыв/supersession; verified memory требует
+  уникального полного покрытия evidence IDs действующими receipts.
+- Linux rename проверяет inode flags через descriptor/ioctl и отклоняет
+  неподдерживаемые flags и inherited ACL до изменения originals. Все backup
+  и replacement copies проверяются до первой замены.
+- Длинные обычные local paths не считаются одним credential token; known/env
+  secrets и opaque components продолжают проверяться. Ошибка Ledger не
+  теряет checkpoint уже завершённого model process.
+- Интеграционная проверка дополнительно закрыла гонку создания общего private
+  каталога параллельными workers: тип созданного объекта проверяется повторно.
+
+Подробности и воспроизводимые проверки: [A1–A11](docs/AUDIT_FIXES_1_5.md).
+Model/provider/permissions, compaction 500000 и cap5 не менялись.
+
 ## 1.5.0 — 2026-11-02
 
 - Foreground Execution Supervisor с настоящим Codex exec/exact resume,

@@ -101,7 +101,8 @@ def _plan(supervisor, capabilities):
                 timeout=min(supervisor.remaining(), 300), deadline=supervisor.state["deadline"], read_only=True, native_children=False,
                 output_schema=str(schema_path), log_dir=supervisor.path / "planner", on_process=planner_process,
                 cancel_file=supervisor.path / "cancel.yaml")
-            slot.complete()
+            if result.get("process_tree_stopped") is not False:
+                slot.complete(result)
         telemetry.observe(supervisor.state["metrics"], result)
         supervisor.state["process_identity"] = None
         supervisor.state["process_status"] = result["status"]
@@ -141,7 +142,7 @@ def execute_managed(supervisor, *, recovering=False):
         except (HarnessError, ValueError) as error:
             supervisor.transition("BLOCKED_ENVIRONMENT", str(error) + "; safe alternative: native mode or managed cap1")
             return supervisor._loop()
-    if not recovering and git(state["source_cwd"], "status", "--porcelain", "--untracked-files=all").strip():
+    if (not recovering or state["integration_worktree"] is None) and git(state["source_cwd"], "status", "--porcelain", "--untracked-files=all").strip():
         supervisor.transition("BLOCKED_ENVIRONMENT", "Managed worktree base must be clean; user changes remain untouched")
         return supervisor._loop()
     supervisor.transition("PLANNING", "on-demand critical-path decomposition")
@@ -166,7 +167,9 @@ def execute_managed(supervisor, *, recovering=False):
     state["integration_worktree"] = staging["path"]
     if not recovering or not supervisor.store.path("integration.yaml").exists():
         supervisor.store.write("integration.yaml", staging, {"type": "object", "additionalProperties": True})
-    supervisor._core()  # Baseline BEFORE any worker changes, uses the existing hardened gate.
+    core = supervisor._core()  # Bind staging BEFORE any worker changes or recovery.
+    if recovering:
+        core.resume()
     supervisor.transition("EXECUTING", "validated scopes; spawn only ready independent tasks")
     completed, records = set(), {}
     for agent_id in state["agents"]:
@@ -240,7 +243,8 @@ def execute_managed(supervisor, *, recovering=False):
                 read_only=node["read_only"], native_children=False,
                 write_authorized=not node["read_only"],
                 log_dir=supervisor.path / "codex" / node["id"])
-            slot.complete()
+            if result.get("process_tree_stopped") is not False:
+                slot.complete(result)
         agent["status"] = "ready_for_review" if result["status"] == "completed" else result["status"]
         agent["process_identity"] = None
         agent["stdout_offset"] = Path(result["logs"]["stdout"]).stat().st_size

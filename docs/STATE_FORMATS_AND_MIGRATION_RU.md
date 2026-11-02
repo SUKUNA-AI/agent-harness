@@ -107,6 +107,26 @@ Single-writer lease проверяет process creation identity, не толь�
 
 ## Legacy compatibility и миграция
 
+### Полнота usage после аудита
+
+В `work-state` добавлено optional `metrics.usage_accounting_version: 2`.
+Новая версия означает, что каждый наблюдённый turn оценивался на полноту обоих
+token counters. Старое состояние без поля по-прежнему читается; schema version
+не меняется, исходные checkpoints/receipts не переписываются автоматически.
+
+Старые totals не доказывают отсутствие пустого usage в одной из прошлых
+попыток. Поэтому при заданном `max_tokens` legacy history без accounting v2
+не разрешает новый spawn или повторное подтверждение приёмки. Read-only
+`status --verify-evidence`/accepted resume возвращают `STALE`, сохраняя
+`recorded_status: ACCEPTED` в историческом результате. Нельзя просто дописать
+маркер вручную: он не восстанавливает отсутствующую статистику. Новый полный
+turn не делает старую историю проверенной. Без token cap это ограничение не
+блокирует legacy run; totals помечаются `unverified_legacy`, если они есть.
+История, в которой ещё вообще не было model execution или usage, может начать
+accounting v2 при первой наблюдённой попытке. Настоящий `0/0` считается полным.
+
+### Существующие core и installation данные
+
 Команды `init`, `attempt`, `freeze`, `check`, `evidence`, `gate`, `checkpoint`,
 `resume`, `status`, installer verify/rollback продолжают работать с legacy
 JSON. Namespace `work` добавлен отдельно. Supervisor создаёт compatibility
