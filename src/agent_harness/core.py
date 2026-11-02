@@ -70,8 +70,52 @@ def file_hash(path):
     return h.hexdigest()
 
 
+@contextmanager
+def _open_json_reader(path):
+    """Read one generation without blocking a cooperating atomic replacement."""
+    path = Path(path)
+    if os.name != "nt":
+        with path.open("r", encoding="utf-8-sig") as source:
+            yield source
+        return
+
+    filename = str(path)
+    if "\0" in filename:
+        raise ValueError("embedded null character")
+    from ctypes import wintypes
+    import msvcrt
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                  wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD,
+                                  wintypes.HANDLE]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    # NULL security attributes keep the handle non-inheritable. Sharing delete
+    # permits atomic_json to replace the path while this reader keeps its inode.
+    handle = kernel.CreateFileW(filename, 0x80000000, 0x1 | 0x2 | 0x4,
+                                None, 3, 0x80, None)
+    if handle == wintypes.HANDLE(-1).value:
+        error = ctypes.WinError(ctypes.get_last_error())
+        error.filename = filename
+        raise error
+    try:
+        fd = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY | os.O_NOINHERIT)
+    except BaseException:
+        kernel.CloseHandle(handle)
+        raise
+    # The CRT now owns the HANDLE. Keep one explicit fd owner even if fdopen
+    # fails partway through constructing the text wrapper; never CloseHandle it.
+    try:
+        with os.fdopen(fd, "r", encoding="utf-8-sig", closefd=False) as source:
+            yield source
+    finally:
+        os.close(fd)
+
+
 def read_json(path):
-    return json.loads(Path(path).read_text(encoding="utf-8-sig"))
+    with _open_json_reader(path) as source:
+        return json.load(source)
 
 
 def atomic_json(path, value, *, exclusive=False):

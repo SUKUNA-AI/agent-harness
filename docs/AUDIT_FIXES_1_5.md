@@ -38,6 +38,29 @@ source paths внутри текста: bounded opt-in разбирает тол
 в исходном тексте до такой проверки, каждый компонент пути остаётся проверяемым,
 сам packet не переписывается. Ledger-off поведение сохранено.
 
+### Дополнительная проверка Windows state reader
+
+[CI для `0c97f59`](https://github.com/SUKUNA-AI/agent-harness/actions/runs/41401866390)
+прошёл в пяти jobs, но Windows/Python 3.13 выявил один отказ
+старого cancellation test: атомарная замена `state.json` получила WinError 5
+при параллельном опросе состояния. Ошибка возникла при регистрации основного
+процесса; более поздняя отмена validator не должна скрывать такой отказ записи.
+Лог не устанавливает, какой именно handle блокировал замену.
+
+В старом reader обнаружен соответствующий механизм: обычное открытое чтение
+Windows не разрешало delete-sharing. JSON reader теперь открывает файл только
+для чтения, но с `FILE_SHARE_DELETE`, чтобы собственный reader не мешал rename
+атомарного writer. Это режим совместного доступа, а не изменение ACL или обход
+разрешений. См. [контракт CreateFileW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew).
+Владение native handle, CRT descriptor и текстовой обёрткой разделено явно;
+дескриптор не наследуется дочерними процессами и закрывается ровно один раз.
+UTF-8/BOM и обработка ошибок сохраняются, embedded NUL не допускается.
+
+Детерминированная проверка удерживает reader открытым во время замены:
+старое чтение получает прежний целый документ, новое — новый целый документ.
+Отказы прав или посторонние несовместимые handles по-прежнему могут остановить
+запись. Writer retries, lock, verdict и immutable evidence reader не меняются.
+
 ## Границы поведения
 
 - Старый acceptance core, связанный с другим cwd, не переназначается молча.
@@ -68,17 +91,20 @@ python tools/release_check.py
 [`test_audit_execution_regressions.py`](../tests/test_audit_execution_regressions.py),
 [`test_audit_context_regressions.py`](../tests/test_audit_context_regressions.py) и
 [`test_audit_rename_regressions.py`](../tests/test_audit_rename_regressions.py).
+Windows JSON reader дополнительно покрыт
+[`test_json_state.py`](../tests/test_json_state.py).
 Они используют temporary projects и fake Codex CLI; платные model calls,
 публикация fixture repositories и пользовательские credentials не нужны.
 Actual process writes и Linux metadata проверяются отдельно от mocked ordering.
 
 Итоговый локальный объединённый прогон на Linux/Python 3.12, под длинным
-temporary parent: **544 tests**, итоговый `OK (skipped=11)`, exit 0;
-533 passed, 0 failures/errors, 195.917 s.
-Включены 54 новых regression cases: 15 execution/recovery, 32 context/evidence
-и 7 rename metadata. Skips: 5 Windows-specific, 5 optional Windows runtime
+temporary parent: **560 tests**, итоговый `OK (skipped=15)`, exit 0;
+545 passed, 0 failures/errors, 200.825 s.
+Включены 54 новых regression cases для A1–A11: 15 execution/recovery,
+32 context/evidence и 7 rename metadata, а также 16 дополнительных JSON reader
+cases. Skips: 9 Windows-specific, 5 optional Windows runtime
 closure и 1 live language server без настроенного executable.
-`tools/release_check.py`: passed, 266 files / 8 skills. `git diff --check`: passed.
+`tools/release_check.py`: passed, 267 files / 8 skills. `git diff --check`: passed.
 Это локальный результат, не утверждение о запуске Windows или paid Codex в
 этой среде; отдельные native/Windows jobs проверяются в CI по опубликованному SHA.
 
