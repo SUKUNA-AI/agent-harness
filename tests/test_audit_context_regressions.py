@@ -181,7 +181,9 @@ class PathSanitizationRegressions(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="AuditHarnessSupervisorLongPath123-")
         self.addCleanup(self.temp.cleanup)
         self.base = Path(self.temp.name).resolve()
-        self.parent = self.base / "regression-fixtures" / "independent-execution-checks" / "ordinary-local-workspace"
+        # Компонент короче 48 символов безопасен отдельно, но гарантирует энтропию
+        # сырого пути выше порога независимо от случайного суффикса tempfile.
+        self.parent = self.base / "Aa0Bb1Cc2Dd3Ee4Ff5Gg6Hh7Ii8Jj9" / "regression-fixtures" / "independent-execution-checks" / "ordinary-local-workspace"
         self.parent.mkdir(parents=True)
         # Synthetic high-entropy data, not a real provider token or credential.
         self.opaque = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789aB"
