@@ -620,6 +620,61 @@ fn observed(path: &Path) -> Result<(Metadata, Stamp), std::io::Error> {
     Ok((metadata, identity.map_err(std::io::Error::other)?))
 }
 
+#[cfg(any(windows, test))]
+fn windows_root_identity(volume: u64, identifier: [u8; 16]) -> Value {
+    let file_id: String = identifier
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    json!({"identity_kind":"windows-file-id-info-v1",
+           "device":format!("{volume:016x}"),"inode":file_id})
+}
+
+fn root_identity(path: &Path) -> Result<Value, String> {
+    #[cfg(unix)]
+    {
+        let (_, identity) = observed(path).map_err(|e| e.to_string())?;
+        Ok(json!({"device":identity.device,"inode":identity.inode}))
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::{
+            fs::{MetadataExt, OpenOptionsExt},
+            io::AsRawHandle,
+        };
+        use windows_sys::Win32::Storage::FileSystem::{
+            FileIdInfo, GetFileInformationByHandleEx, FILE_FLAG_BACKUP_SEMANTICS,
+            FILE_FLAG_OPEN_REPARSE_POINT, FILE_ID_INFO, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        };
+        let file = OpenOptions::new()
+            .access_mode(0)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)
+            .map_err(|e| e.to_string())?;
+        let metadata = file.metadata().map_err(|e| e.to_string())?;
+        if !metadata.is_dir() || metadata.file_attributes() & 0x400 != 0 {
+            return Err("physical source root must be an ordinary directory".into());
+        }
+        let mut value: FILE_ID_INFO = unsafe { std::mem::zeroed() };
+        if unsafe {
+            GetFileInformationByHandleEx(
+                file.as_raw_handle(),
+                FileIdInfo,
+                (&mut value as *mut FILE_ID_INFO).cast(),
+                std::mem::size_of::<FILE_ID_INFO>() as u32,
+            )
+        } == 0
+        {
+            return Err("full Windows FileIdInfo root identity is unavailable".into());
+        }
+        Ok(windows_root_identity(
+            value.VolumeSerialNumber,
+            value.FileId.Identifier,
+        ))
+    }
+}
+
 fn parent_topology(path: &Path) -> Result<Vec<(PathBuf, u64, u64)>, String> {
     let mut result = Vec::new();
     for parent in path.ancestors().skip(1) {
@@ -916,6 +971,7 @@ pub fn snapshot(contract: &Value) -> Result<Value, String> {
     }
     let deadline = Instant::now() + Duration::from_secs(120);
     let mut result = json!({"schema_version":1,"kind":"non_file","files":{},"external_inputs":{}});
+    let mut bound_root = None;
     if let Some(cwd) = contract
         .get("cwd")
         .and_then(Value::as_str)
@@ -923,9 +979,9 @@ pub fn snapshot(contract: &Value) -> Result<Value, String> {
     {
         let root = lexical_absolute(Path::new(cwd))?;
         let topology = parent_topology(&root.join(".harness-root-binding"))?;
-        let (_, root_identity) = observed(&root).map_err(|e| e.to_string())?;
-        result["root_binding"] =
-            json!({"device": root_identity.device, "inode": root_identity.inode});
+        let root_binding = root_identity(&root)?;
+        result["root_binding"] = root_binding.clone();
+        bound_root = Some((root.clone(), root_binding.clone()));
         let mut excludes = vec![".git".to_owned(), ".git/**".to_owned()];
         if let Some(values) = contract.pointer("/scope/exclude") {
             for value in values.as_array().ok_or("scope.exclude must be an array")? {
@@ -966,7 +1022,9 @@ pub fn snapshot(contract: &Value) -> Result<Value, String> {
                 .collect::<Result<_, _>>()
         })?;
         result["files"] = Value::Object(rows.into_iter().collect());
-        if parent_topology(&root.join(".harness-root-binding"))? != topology {
+        if parent_topology(&root.join(".harness-root-binding"))? != topology
+            || root_identity(&root)? != root_binding
+        {
             return Err("source root physical identity changed during snapshot".into());
         }
     }
@@ -992,6 +1050,11 @@ pub fn snapshot(contract: &Value) -> Result<Value, String> {
             result["external_inputs"][shown_path(&path)?] = observed;
         }
     }
+    if let Some((root, binding)) = bound_root {
+        if root_identity(&root)? != binding {
+            return Err("source root physical identity changed before manifest publication".into());
+        }
+    }
     result["snapshot_scheme_version"] = json!(2);
     result["topology_policy"] = json!("nofollow-ancestors-literal-leaf-v1");
     let mut content = result.clone();
@@ -1008,6 +1071,24 @@ pub fn snapshot(contract: &Value) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_root_identity_retains_all_bits_as_opaque_bytes() {
+        let mut identifier = [0u8; 16];
+        for (index, byte) in identifier.iter_mut().enumerate() {
+            *byte = index as u8;
+        }
+        let result = windows_root_identity(0x123456789abcdef0, identifier);
+        assert_eq!(
+            result,
+            json!({"identity_kind":"windows-file-id-info-v1",
+            "device":"123456789abcdef0","inode":"000102030405060708090a0b0c0d0e0f"})
+        );
+        let mut changed = identifier;
+        changed[15] ^= 1;
+        assert_ne!(result, windows_root_identity(0x123456789abcdef0, changed));
+        assert_ne!(result, windows_root_identity(0x9abcdef0, identifier));
+    }
 
     #[test]
     fn glob_matches_python_path_rules() {

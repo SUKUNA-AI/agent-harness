@@ -647,14 +647,14 @@ def _snapshot_python(contract):
 
 
 def snapshot_python(contract):
-    from .file_io import ParentDirectory, FileReadError, directory_identity
+    from .file_io import ParentDirectory, FileReadError
     try:
         with ExitStack() as stack:
             parent = None
             if contract.get("cwd"):
                 root = Path(os.path.abspath(contract["cwd"]))
                 parent = stack.enter_context(ParentDirectory(root / ".harness-root-binding"))
-                binding = directory_identity(root.lstat())
+                binding = parent.physical_identity()
             result = _snapshot_python(contract)
             result["snapshot_scheme_version"] = 2
             result["topology_policy"] = "nofollow-ancestors-literal-leaf-v1"

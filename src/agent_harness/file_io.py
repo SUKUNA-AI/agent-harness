@@ -32,6 +32,38 @@ def directory_identity(info):
     return {"device": info.st_dev, "inode": info.st_ino}
 
 
+def windows_file_id_identity(volume_serial, identifier):
+    """One explicit WinAPI representation, independent of Python stat versions.
+
+    Preserve all volume/file-ID bits. FILE_ID_128 is an opaque byte sequence,
+    so encode its bytes directly rather than packing/truncating it as an inode.
+    """
+    if (type(volume_serial) is not int or not 0 <= volume_serial < 2**64
+            or type(identifier) is not bytes or len(identifier) != 16):
+        raise FileReadError("Invalid full Windows file identity")
+    return {"identity_kind": "windows-file-id-info-v1", "device": f"{volume_serial:016x}",
+            "inode": identifier.hex()}
+
+
+def _windows_directory_identity(kernel, handle):
+    import ctypes
+    from ctypes import wintypes
+
+    class FileId128(ctypes.Structure):
+        _fields_ = [("Identifier", ctypes.c_ubyte * 16)]
+
+    class FileIdInfo(ctypes.Structure):
+        _fields_ = [("VolumeSerialNumber", ctypes.c_uint64), ("FileId", FileId128)]
+
+    kernel.GetFileInformationByHandleEx.argtypes = [wintypes.HANDLE, ctypes.c_int,
+                                                   ctypes.c_void_p, wintypes.DWORD]
+    kernel.GetFileInformationByHandleEx.restype = wintypes.BOOL
+    value = FileIdInfo()
+    if not kernel.GetFileInformationByHandleEx(handle, 18, ctypes.byref(value), ctypes.sizeof(value)):
+        raise FileReadError("Full Windows FileIdInfo root identity is unavailable")
+    return windows_file_id_identity(value.VolumeSerialNumber, bytes(value.FileId.Identifier))
+
+
 class ParentDirectory:
     """Pin every ancestor; POSIX operations use dirfd, Windows denies retarget.
 
@@ -91,6 +123,17 @@ class ParentDirectory:
         if directory_identity(before) != directory_identity(opened):
             raise FileReadError("Ancestor changed while opening: " + str(path))
         self._chain.append((path, directory_identity(opened)))
+
+    def physical_identity(self):
+        """Identity of the pinned directory, with complete Windows FileIdInfo."""
+        self.check()
+        if os.name == "nt":
+            kernel, handle = self._handles[-1]
+            value = _windows_directory_identity(kernel, handle)
+        else:
+            value = directory_identity(os.fstat(self.fd))
+        self.check()
+        return value
 
     @property
     def binding(self):
