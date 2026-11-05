@@ -262,6 +262,8 @@ class ManagedSchedulingTests(unittest.TestCase):
             recovery_detail = {"status": result.get("status"), "reason": reason[:1536],
                 "reason_truncated": len(reason) > 1536, "attempt": result.get("attempt"),
                 "bound_children": len(adapter.bound_children)}
+            if result["status"] != "ACCEPTED":
+                recovery_detail["fixture_transport"] = adapter.failure_summary(result)
             self.assertEqual(result["status"], "ACCEPTED", recovery_detail)
             self.assertGreaterEqual(len(adapter.bound_children), 4, recovery_detail)
             self.assertTrue(result["evidence_current"])
@@ -307,7 +309,7 @@ class ManagedSchedulingTests(unittest.TestCase):
                     except ControllerCrash:
                         pass
                     else:
-                        self.fail("Expected integration fault; observed " + repr(unexpected))
+                        self.fail("Expected integration fault; observed " + repr(adapter.failure_summary(unexpected)))
                 calls_before = fake.with_suffix(".calls").read_bytes()
                 target = "integration.yaml" if corrupt == "staging" else "agents/left.yaml"
                 record = supervisor.store.read(target)
@@ -322,6 +324,22 @@ class ManagedSchedulingTests(unittest.TestCase):
                     Supervisor(supervisor.path, adapter=adapter).resume()
                 self.assertEqual(fake.with_suffix(".calls").read_bytes(), calls_before)
                 self.assertEqual((foreign / "left.py").read_text(), "VALUE = 0\n")
+
+    def test_fixture_diagnostic_keeps_the_exact_ownership_error(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fake = root / "fake.py"
+            fake.write_text(bound_fake_script(FAKE), encoding="utf-8")
+            adapter = CodexAdapter((sys.executable, str(fake)))
+            def reject(process):
+                raise HarnessError("synthetic exact identity refusal")
+            result = adapter.run("left", cwd=str(root), timeout=5, write_authorized=True,
+                allow_non_git=True, on_process=reject)
+            summary = adapter.failure_summary(result)
+            self.assertFalse(result["outcome_known"], summary)
+            self.assertEqual(summary["transports"][0]["bind_error"],
+                "HarnessError: synthetic exact identity refusal")
+            self.assertLess(len(repr(summary)), 8192)
 
     def test_all_recovery_variants_keep_child_live_during_delayed_bind(self):
         import time

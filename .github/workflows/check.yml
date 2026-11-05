@@ -51,6 +51,10 @@ jobs:
               "test_execution_durability.ExecutionDurabilityTests.test_cleanup_fixture_does_not_mask_pre_exec_failure",
               "test_benchmark_runner.BenchmarkRunnerTests.test_full_cohort_executes_existing_engines_and_never_replays_completed_trials",
               "test_managed_scheduling.ManagedSchedulingTests.test_managed_recovery_resumes_exact_workers_and_reconciles_already_applied_patch",
+              "test_managed_scheduling.ManagedSchedulingTests.test_fixture_diagnostic_keeps_the_exact_ownership_error",
+              "test_execution_durability.ExecutionDurabilityTests.test_integration_faults_reconcile_pre_post_and_completion_without_replay",
+              "test_managed_scheduling.ManagedSchedulingTests.test_recovery_rejects_foreign_worker_or_staging_before_any_model_spawn",
+              "test_managed_scheduling.ManagedSchedulingTests.test_all_recovery_variants_keep_child_live_during_delayed_bind",
           ]
           result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromNames(names))
           raise SystemExit(not result.wasSuccessful())

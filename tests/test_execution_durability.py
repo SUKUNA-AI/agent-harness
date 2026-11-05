@@ -357,6 +357,8 @@ class ExecutionDurabilityTests(unittest.TestCase):
                             supervisor.start()
                     recovered = Supervisor(supervisor.path, adapter=supervisor.adapter)
                     result = recovered.resume()
+                    if result["status"] != "ACCEPTED":
+                        result = {**result, "fixture_transport": supervisor.adapter.failure_summary(result)}
                     self.assertEqual(result["status"], "ACCEPTED", result)
                     self.assertEqual((result["metrics"]["input_tokens"], result["metrics"]["output_tokens"]), (40, 12))
                     self.assertEqual(fake.with_suffix(".calls").read_text().splitlines(), ["exec"] * 4)
