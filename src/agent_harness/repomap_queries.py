@@ -11,7 +11,7 @@ import shutil
 import subprocess
 
 from .context import _path, _read, _root
-from .core import HarnessError, canonical, snapshot, _git
+from .core import HarnessError, canonical, digest, snapshot, _git
 from .execution_ledger import repository_identity, safe_private, sanitized
 from .file_io import read_regular_file
 
@@ -31,44 +31,22 @@ def _source(root, name, *, max_bytes=262144):
     return text, hashlib.sha256(data).hexdigest()
 
 
-def _files(root):
-    rg = shutil.which("rg")
-    partial = False
-    if rg:
-        process = subprocess.run([rg, "--files", "--hidden", "-g", "!.git", "-g", "!node_modules", "-g", "!.venv"], cwd=root,
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
-        if process.returncode not in {0, 1}:
-            raise HarnessError("rg source inventory failed")
-        names = process.stdout.decode("utf-8").splitlines()
-        method = "rg_first"
-    else:
-        from .native import backend_info
-        if backend_info().get("available"):
-            from .repo_map import make_map
-            mapped = make_map(root, max_files=4096)
-            names = [r["path"] for r in [*mapped.get("neighbors", []), *mapped.get("symbols", [])] if isinstance(r, dict) and "path" in r]
-            partial = True  # bounded Rust ranking is deliberately not a full inventory
-            method = "rust_map_fallback"
-        else:
-            names = []
-            for directory, dirs, files in os.walk(root, followlinks=False):
-                dirs[:] = [d for d in dirs if d not in {".git", "node_modules", ".venv", "__pycache__"} and not (Path(directory) / d).is_symlink()]
-                names.extend((Path(directory) / f).relative_to(root).as_posix() for f in files)
-                if len(names) > 4096:
-                    partial = True  # The raw traversal stopped before source filtering.
-                    break
-            method = "bounded_file_lookup_rg_unavailable"
-    safe = []
-    for name in names:
-        name = name.replace("\\", "/") if os.name == "nt" else name
-        if Path(name).suffix.lower() not in SOURCE_EXTENSIONS:
-            continue
-        try:
+def _files(root, inventory=None):
+    """Use the same snapshot inventory, including tracked files now ignored."""
+    tree = inventory if inventory is not None else snapshot({"cwd": str(root), "scope": {"exclude": []}})
+    names = []
+    for name, entry in tree["files"].items():
+        name.encode("utf-8", errors="strict")
+        if entry.get("kind") == "file" and Path(name).suffix.lower() in SOURCE_EXTENSIONS:
             _path(root, name)
-        except HarnessError:
-            continue
-        safe.append(name)
-    return sorted(set(safe))[:4096], partial or len(safe) > 4096, method
+            names.append(name)
+    return sorted(names)[:4096], len(names) > 4096, "snapshot_inventory"
+
+
+class MatchRows(list):
+    def __init__(self, rows=(), reasons=()):
+        super().__init__(rows)
+        self.truncation_reasons = list(reasons)
 
 
 def _matches(root, names, token):
@@ -77,10 +55,11 @@ def _matches(root, names, token):
         raise HarnessError("Symbol lookup requires a bounded identifier")
     rg = shutil.which("rg")
     result = []
+    reasons = []
     if rg and names:
         # Batch argv size remains safe on Windows and does not need a shell.
         for start in range(0, len(names), 64):
-            process = subprocess.run([rg, "--json", "-n", "-F", "-w", "--max-count", "64", "--", token, *names[start:start + 64]],
+            process = subprocess.run([rg, "--no-config", "--json", "-n", "-F", "-w", "--", token, *names[start:start + 64]],
                                      cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
             if process.returncode not in {0, 1}:
                 raise HarnessError("rg symbol query failed")
@@ -98,12 +77,12 @@ def _matches(root, names, token):
         for name in names:
             source = _source(root, name)
             if source:
-                result.extend((name, index) for index, line in enumerate(source[0].splitlines(), 1) if pattern.search(line))
-    return result[:8192]
+                result.extend((name, index) for index, line in enumerate(source[0].split("\n"), 1) if pattern.search(line))
+    return MatchRows(result[:8192], [*reasons, *(["global_match_cap"] if len(result) > 8192 else [])])
 
 
 def query_repository(root, mode, *, revision=None, target=None, changed=(), symbol=None,
-                     path=None, trace_file=None, max_bytes=8192, offset=0, use_lsp=False, lsp_server=None):
+                     path=None, trace_file=None, max_bytes=8192, offset=0, use_lsp=False, lsp_server=None, cursor=None):
     if mode not in {"related-tests", "trace-to-code", "change-impact", "symbol-context"}:
         raise HarnessError("Unknown engineering repository query")
     if type(max_bytes) is not int or not 2048 <= max_bytes <= 65536 or type(offset) is not int or offset < 0:
@@ -116,24 +95,33 @@ def query_repository(root, mode, *, revision=None, target=None, changed=(), symb
         if not expected or os.fsdecode(expected).strip() != actual_revision:
             raise HarnessError("Requested revision is not the current checkout; use its isolated worktree")
     tree = snapshot({"cwd": str(root), "scope": {"exclude": []}})
-    names, partial, method = _files(root)
+    names, partial, method = _files(root, tree)
     rows, consulted, lsp_status = [], {}, "not_requested"
+    truncations = ["source_inventory_cap"] if partial else []
+    inventory_digest = digest({name: tree["files"][name] for name in names})
+
+    def matches(selected_names, token):
+        found = _matches(root, selected_names, token)
+        truncations.extend(found.truncation_reasons)
+        return found
 
     def add(name, line, rank, reason, *, selected_symbol=None, end_line=None, confidence="heuristic"):
         if len(rows) >= 8192:
+            truncations.append("global_row_cap")
             return
         source = consulted.get(name)
         if source is None:
             source = _source(root, name)
             consulted[name] = source
         if not source:
+            truncations.append("source_unavailable_or_size_cap")
             return
-        lines = source[0].splitlines()
+        lines = source[0].split("\n")
         if not 1 <= line <= max(1, len(lines)):
             return
         rows.append({"file": name, "line": line, "end_line": end_line or line,
             "symbol": selected_symbol, "rank": rank, "reason": reason,
-            "sha256": source[1], "confidence": confidence, "snippet": lines[line - 1][:512] if lines else "",
+            "sha256": source[1], "confidence": confidence, "column_encoding": "unicode_code_point", "snippet": lines[line - 1][:512] if lines else "",
             "link": {"path": name, "line": line, "revision": actual_revision, "snapshot_id": tree["digest"]}})
 
     if mode == "trace-to-code":
@@ -142,6 +130,8 @@ def query_repository(root, mode, *, revision=None, target=None, changed=(), symb
         text = read_regular_file(safe_private(trace_file), max_bytes=1024 * 1024).decode("utf-8")
         sanitized(text)
         frames = re.findall(r'(?:File\s+["\']([^"\']+)["\'],\s*line\s+(\d+)|([\w./\\:-]+\.(?:py|rs|js|ts|tsx|cpp|c|go|java)):(\d+))', text)
+        if len(frames) > 256:
+            truncations.append("trace_frame_cap")
         for frame in frames[:256]:
             raw_name, number = (frame[0], frame[1]) if frame[0] else (frame[2], frame[3])
             candidate = Path(raw_name)
@@ -184,10 +174,10 @@ def query_repository(root, mode, *, revision=None, target=None, changed=(), symb
             except (HarnessError, OSError, ValueError, subprocess.TimeoutExpired):
                 lsp_status = "unavailable_or_stale_fallback"
         pattern = re.compile(r"\b(?:def|class|fn|struct|enum|function|interface|trait)\s+" + re.escape(symbol) + r"\b")
-        for line, text in enumerate(selected[0].splitlines(), 1):
+        for line, text in enumerate(selected[0].split("\n"), 1):
             if pattern.search(text):
                 add(path, line, 100, "direct definition syntax", selected_symbol=symbol)
-        for name, line in _matches(root, names, symbol):
+        for name, line in matches(names, symbol):
             add(name, line, 50, "identifier occurrence; semantic reference not guaranteed", selected_symbol=symbol)
     else:
         targets = [target] if mode == "related-tests" else list(changed)
@@ -201,15 +191,18 @@ def query_repository(root, mode, *, revision=None, target=None, changed=(), symb
                 if stem in Path(name).stem:
                     add(name, 1, 90, "test filename corresponds to changed module")
             if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", stem):
-                for name, line in _matches(root, tests if mode == "related-tests" else names, stem):
+                for name, line in matches(tests if mode == "related-tests" else names, stem):
                     if name != target_name:
                         add(name, line, 80, "module/import identifier occurrence")
             if mode == "change-impact" and (root / target_name).exists():
                 source = _source(root, target_name)
                 if source:
-                    tokens = re.findall(r"\b(?:def|class|fn|struct|function)\s+([A-Za-z_]\w*)", source[0])[:16]
+                    all_tokens = re.findall(r"\b(?:def|class|fn|struct|function)\s+([A-Za-z_]\w*)", source[0])
+                    if len(all_tokens) > 16:
+                        truncations.append("changed_symbol_cap")
+                    tokens = all_tokens[:16]
                     for token in tokens:
-                        for name, line in _matches(root, names, token):
+                        for name, line in matches(names, token):
                             if name != target_name:
                                 add(name, line, 60, "changed module symbol occurrence", selected_symbol=token)
     # Re-read bindings after query to reject stale line references.
@@ -221,20 +214,45 @@ def query_repository(root, mode, *, revision=None, target=None, changed=(), symb
         raise HarnessError("Repository changed during query; links are stale")
     unique = {(r["file"], r["line"], r["reason"]): r for r in rows}
     ranked = sorted(unique.values(), key=lambda r: (-r["rank"], r["file"], r["line"]))
-    result = {"schema_version": 1, "mode": mode, "query": {"target": target, "changed": list(changed), "symbol": symbol, "path": path},
+    query = {"target": target, "changed": list(changed), "symbol": symbol, "path": path,
+             "use_lsp": use_lsp, "trace_digest": hashlib.sha256(text.encode()).hexdigest() if mode == "trace-to-code" else None}
+    binding = digest({"snapshot": tree["digest"], "inventory": inventory_digest,
+                      "query": query, "engine": "repomap-query-v2", "ordered_rows": ranked})
+    if cursor is not None:
+        if (not isinstance(cursor, dict) or set(cursor) != {"binding", "position"}
+                or cursor["binding"] != binding or type(cursor["position"]) is not int
+                or not 0 <= cursor["position"] <= len(ranked)):
+            raise HarnessError("STALE_CURSOR: query, inventory or ordered results changed")
+        offset = cursor["position"]
+    if offset > len(ranked):
+        raise HarnessError("Invalid query offset")
+    reasons = sorted(set(truncations))
+    result = {"schema_version": 2, "mode": mode, "query": query,
         "repository_identity": repository_identity(root), "revision": actual_revision,
-        "snapshot_id": tree["digest"], "method": method, "results": [], "total_results": len(ranked),
-        "offset": offset, "next_page": None, "complete_inventory": not partial, "lsp_status": lsp_status,
-        "limitations": ["heuristic ranking; dynamic imports and semantic references may be missing",
-                        "LSP is on-demand; fallback results are heuristic" if use_lsp else "LSP optional; no language server was requested"]}
+        "snapshot_id": tree["digest"], "method": method, "results": [],
+        "total_results": None if reasons else len(ranked), "observed_results": len(ranked),
+        "offset": offset, "next_page": None, "next_cursor": None,
+        "inventory_scope": "snapshot_source_extensions", "inventory_digest": inventory_digest,
+        "inventory_complete": not partial, "complete_inventory": not partial,
+        "results_complete": not reasons, "truncated": bool(reasons), "truncation_reasons": reasons,
+        "resume_supported": True, "terminal_diagnostic": "query_must_be_narrowed" if reasons else None,
+        "analysis_kind": "heuristic", "lsp_status": lsp_status,
+        "limitations": ["lexical and syntactic ranking; dynamic imports and semantic references may be missing"]}
+    # Cursor fields are present during sizing; changing next_page to an integer
+    # after selection cannot silently exceed the accepted transport bound.
     for index in range(offset, len(ranked)):
         result["results"].append(ranked[index])
+        result["next_page"] = index + 1 if index + 1 < len(ranked) else None
+        result["next_cursor"] = {"binding": binding, "position": index + 1} if index + 1 < len(ranked) else None
         if len(canonical(result)) + 2 > max_bytes:
             result["results"].pop()
             result["next_page"] = index
+            result["next_cursor"] = {"binding": binding, "position": index}
             break
+    if not result["results"] and offset < len(ranked):
+        raise HarnessError("BUDGET_TOO_SMALL: a query row and continuation exceed budget")
     if len(canonical(result)) + 2 > max_bytes:
-        raise HarnessError("Repository query envelope exceeds budget")
+        raise HarnessError("BUDGET_TOO_SMALL: repository query envelope exceeds budget")
     return result
 
 
@@ -250,9 +268,11 @@ def dispatch(argv):
     parser.add_argument("--trace-file")
     parser.add_argument("--max-bytes", type=int, default=8192)
     parser.add_argument("--offset", type=int, default=0)
+    parser.add_argument("--cursor", type=json.loads)
     parser.add_argument("--use-lsp", action="store_true")
     parser.add_argument("--lsp-server", nargs="+")
     args = vars(parser.parse_args(argv))
     value = query_repository(**args)
-    print(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
+    from .output import write_json
+    write_json(value, max_bytes=args["max_bytes"])
     return 0

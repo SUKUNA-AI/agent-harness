@@ -57,7 +57,7 @@ if raced: path.write_bytes(b"{}")
 else: os.mkfifo(path)
 original = file_io.os.open
 def opening(value, flags, *args, **kwargs):
-    if Path(value) == path and raced:
+    if Path(value).name == path.name and not flags & getattr(os, "O_DIRECTORY", 0) and raced:
         path.unlink(); os.mkfifo(path)
     return original(value, flags, *args, **kwargs)
 try:

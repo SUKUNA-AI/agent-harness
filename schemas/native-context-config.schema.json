@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "native-context-config v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "checkpoint_scan": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_records": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024
+        },
+        "max_bytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 16777216
+        },
+        "max_record_bytes": {
+          "type": "integer",
+          "minimum": 512,
+          "maximum": 2097152
+        },
+        "deadline_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "returned_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "max_inventory_entries": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024
+        }
+      },
+      "required": [
+        "max_records",
+        "max_bytes",
+        "max_record_bytes",
+        "deadline_ms",
+        "returned_count",
+        "max_inventory_entries"
+      ]
+    },
+    "memory_scan": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_records": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024
+        },
+        "max_bytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 16777216
+        },
+        "max_record_bytes": {
+          "type": "integer",
+          "minimum": 512,
+          "maximum": 2097152
+        },
+        "deadline_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "returned_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "max_inventory_entries": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024
+        }
+      },
+      "required": [
+        "max_records",
+        "max_bytes",
+        "max_record_bytes",
+        "deadline_ms",
+        "returned_count",
+        "max_inventory_entries"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "generation",
+    "checkpoint_scan",
+    "memory_scan"
+  ]
+}

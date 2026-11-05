@@ -156,3 +156,11 @@ Repair packet содержит `node_id`, текущую `plan_revision`, пре
 LangGraph и Langfuse не нужны для этого ограниченного control plane. LangGraph даёт собственный graph runtime/checkpoints, но не штатное управление Codex threads ([официальная документация](https://docs.langchain.com/oss/python/langgraph/overview)); повтор nodes при interrupts требует идемпотентных эффектов ([interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts)). Langfuse — observability, self-host требует web/worker и хранилища ([архитектура](https://langfuse.com/self-hosting)); MIT OSS имеет отдельные EE исключения ([license](https://github.com/langfuse/langfuse/blob/main/LICENSE)). Проверено 2026-10-31; зависимости не устанавливались. Нет новых accounts, SaaS endpoint, telemetry export или второго LLM loop.
 
 Unit/integration fixtures подтверждают локальный алгоритм. Native делегация, реальные backend lifecycle semantics, восстановление после закрытия приложения и ускорение требуют отдельных наблюдаемых runtime сценариев; этот модуль сам их не доказывает. External permissions/connector availability не создаются планом и не расширяются.
+
+## Полнота persisted plan
+
+Reconciliation correction candidate начинает со всех nodes плана. Never-started,
+blocked и unknown видны отдельно от созданных agents; отсутствие ready nodes не
+означает завершение. Integration intent закрепляет exact pre/post tree, чтобы
+recovery не применял patch повторно. Интегратор — persisted обязанность legacy
+managed executor. [Новые contracts](STABILIZATION_RU.md).

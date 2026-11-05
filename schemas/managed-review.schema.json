@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Managed final review v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "verdict": {
+      "enum": [
+        "approved",
+        "changes_requested",
+        "blocked"
+      ]
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 2048
+      },
+      "maxItems": 16
+    }
+  },
+  "required": [
+    "schema_version",
+    "verdict",
+    "findings"
+  ]
+}

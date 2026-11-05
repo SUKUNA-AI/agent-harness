@@ -39,14 +39,15 @@ def _adapter(value):
 
 
 def _print(value, style):
+    from .output import write_json, write_utf8
     if style == "yaml":
         from .strict_yaml import dumps
-        print(dumps(value), end="")
+        write_utf8(dumps(value))
     elif style == "json":
-        print(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
+        write_json(value)
     else:
         if "required_total" not in value:
-            print(json.dumps(value, ensure_ascii=False, indent=2))
+            write_json(value)
             return
         print(f"RUN {value['run_id']} | {value['status']} | attempt {value['attempt']}/{value['max_attempts']}")
         print(f"Acceptance: {value['required_passed']}/{value['required_total']} required criteria passed")
@@ -76,7 +77,13 @@ def _foreground(supervisor, callback):
 
 
 def dispatch(argv):
-    if argv and argv[0] in {"ledger", "memory", "format-bench"}:
+    if argv and argv[0] in {"ledger", "memory", "format-bench", "benchmark", "migrate"}:
+        if argv[0] == "migrate":
+            from .state_migration import dispatch as migration
+            return migration(argv[1:])
+        if argv[0] == "benchmark":
+            from .evaluation import dispatch as evaluation
+            return evaluation(argv[1:])
         if argv[0] == "ledger":
             from .execution_ledger import ledger_dispatch
             return ledger_dispatch(argv[1:])
@@ -115,6 +122,8 @@ def dispatch(argv):
     commands.add_parser("ledger", help="Version-bound execution facts; ledger --help")
     commands.add_parser("memory", help="Opt-in repository memory; memory --help")
     commands.add_parser("format-bench", help="Measured JSON/Markdown/TOON selection; format-bench --help")
+    commands.add_parser("benchmark", help="Offline frozen portfolio validation and paired accounting; benchmark --help")
+    commands.add_parser("migrate", help="Explicit versioned state migration; migrate --help")
     args = parser.parse_args(argv)
     try:
         from .supervisor import Supervisor, TERMINAL

@@ -1,0 +1,377 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "memory-fact v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "repository_identity": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "claim_kind": {
+      "enum": [
+        "exact_file_content",
+        "exact_symbol_location"
+      ]
+    },
+    "verification_rule": {
+      "const": "deterministic-claim-v1"
+    },
+    "created_at": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "validity_status": {
+      "enum": [
+        "valid",
+        "needs_revalidation",
+        "superseded",
+        "rejected",
+        "expired"
+      ]
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository_identity": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "revision": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "snapshot_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "files": {
+          "type": "object",
+          "maxProperties": 4096,
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^(?!/)(?![\\s\\S]*(?:^|/)\\.\\.(?:/|$))(?![\\s\\S]*\\\\)(?![\\s\\S]*:)[\\s\\S]+$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "toolchain_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "branch": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "file_inventory_complete": {
+          "type": "boolean"
+        },
+        "omitted_file_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "binding_kind": {
+          "enum": [
+            "whole_snapshot"
+          ]
+        },
+        "snapshot_algorithm": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "snapshot_ref": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "inventory_policy_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "scope_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "checkout_ref": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "checkout_root": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "inventory_complete": {
+          "type": "boolean"
+        },
+        "details_complete": {
+          "type": "boolean"
+        },
+        "details_omitted_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "details_ref": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 512
+        }
+      },
+      "required": [
+        "repository_identity",
+        "revision",
+        "snapshot_id",
+        "files"
+      ]
+    },
+    "closure": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "binding_kind": {
+          "const": "deterministic_claim"
+        },
+        "builder": {
+          "enum": [
+            "ordinary-file-bytes-v1",
+            "python-symbol-location-v1"
+          ]
+        },
+        "builder_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "policy_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "project_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "checkout_ref": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "physical_root": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "device": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "inode": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "device",
+            "inode"
+          ]
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "symbol": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 512
+        },
+        "parser_version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 512
+        },
+        "positive_dependencies": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "size_bytes": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "path",
+              "sha256",
+              "size_bytes"
+            ]
+          }
+        },
+        "negative_dependencies": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "enum": [
+                  "no_link_ancestors",
+                  "symbol_uniqueness"
+                ]
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "symbol": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 512
+              },
+              "matching_declarations": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              }
+            },
+            "required": [
+              "kind",
+              "path",
+              "symbol",
+              "matching_declarations"
+            ]
+          }
+        },
+        "config_refs": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "reader_policy": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "parser_policy": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "reader_policy",
+            "parser_policy"
+          ]
+        },
+        "closure_complete": {
+          "const": true
+        }
+      },
+      "required": [
+        "schema_version",
+        "binding_kind",
+        "builder",
+        "builder_digest",
+        "policy_digest",
+        "project_id",
+        "checkout_ref",
+        "physical_root",
+        "subject",
+        "symbol",
+        "parser_version",
+        "positive_dependencies",
+        "negative_dependencies",
+        "config_refs",
+        "closure_complete"
+      ]
+    },
+    "closure_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "location": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "start_line": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "end_line": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "start_column": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "end_column": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "column_encoding": {
+              "const": "utf8_bytes_zero_based"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "start_column",
+            "end_column",
+            "column_encoding"
+          ]
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "id",
+    "repository_identity",
+    "claim_kind",
+    "verification_rule",
+    "created_at",
+    "validity_status",
+    "provenance",
+    "closure",
+    "closure_digest",
+    "location"
+  ]
+}

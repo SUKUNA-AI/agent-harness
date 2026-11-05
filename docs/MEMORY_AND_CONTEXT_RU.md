@@ -219,3 +219,26 @@ heuristic fallback. Stale line ranges не являются основанием
 TOON остаётся optional input representation. Условия измерения и fallback
 описаны в [Performance Eval](PERFORMANCE_EVAL_RU.md). Пользовательский
 `model_auto_compact_token_limit=500000` эти механизмы не уменьшают.
+
+## Разделение source, evidence и presentation
+
+Correction candidate проверяет полный snapshot до compact details. Source-current
+self-report выдаётся как current observation, verified facts требуют allowlisted
+core verifier receipt и current evidence lifecycle. Typed namespace не выбирает
+первую запись при bare-ID collision. Corrupt optional foreign record изолируется;
+corrupt required own checkpoint блокирует recovery. Packets удерживают immutable
+recordsets для omitted items, queries используют snapshot inventory и LF lines.
+[Стабилизация](STABILIZATION_RU.md) · [CLI](CLI_REFERENCE_RU.md).
+
+`Memory.record_file_fact` и `record_symbol_fact` используют закрытые deterministic
+builders: physical root/project, reader policy, один полный ordinary file и
+проверяемые negative dependencies. Symbol builder фиксирует Python parser version
+и уникальность декларации. Изменение чужого файла не инвалидирует такой узкий
+факт; его собственного input или parser policy — инвалидирует. Это не closure
+поведения приложения. Facts читаются через typed kind `fact`.
+
+Derived checkpoint index имеет scan/byte/deadline/returned/inventory caps,
+generation-bound continuation и проверяет actual selected bytes. Corrupt index
+перестраивается ограниченно, partial scan не называется complete inventory.
+Private limits настраиваются явным CAS через `context-config`; реальные scan
+metrics сохраняются в retrieval receipt. Default не обещает hard OS syscall latency.

@@ -186,3 +186,20 @@ limit для скрытого inference внутри turn. Неизвестны�
 человеческая сводка — `reports/summary.md`, handoff — `context/handoff.yaml`.
 Дополнительные ограничения режима managed описаны в
 [Dynamic Agents](DYNAMIC_AGENTS_RU.md).
+
+## Durable execution correction candidate
+
+Новые work-state v2 связывают полный persisted plan с immutable invocation,
+completion и integration receipts. Usage v3 восстанавливается по уникальным
+invocations; legacy v2 и unknown outcomes не становятся полным нулём.
+Отсутствующий agent не делает обязательный plan node optional.
+Final dependency guard имеет bounded transitive closure и общую lock order;
+current validity относится к принятому поколению. Подробнее:
+[Стабилизация](STABILIZATION_RU.md).
+
+Schema2 managed выполняет отдельный fresh read-only final review после command
+checks. Reviewer verdict и completion связаны с exact candidate; cached negative
+verdict воспроизводится как negative. Неизменённый repair не становится unknown
+лишь из-за отсутствия approval. Reviewer также входит в первоначальный budget.
+Dependency closure/generation race может повторить preparation до трёх раз в
+исходном deadline; source/integrity/physical-store ошибки не ретраятся.

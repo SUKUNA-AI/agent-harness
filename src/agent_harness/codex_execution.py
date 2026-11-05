@@ -190,17 +190,27 @@ class CodexAdapter:
             raise HarnessError("Codex executable unavailable")
         self.executable = (str(Path(resolved).resolve()), *executable[1:])
 
-    def capabilities(self):
+    def capabilities(self, *, deadline=None):
         """Probe flags only. Tool-inventory suppression needs a separate receipt."""
         values = {}
         for name, args in (("version", ["--version"]), ("exec", ["exec", "--help"]), ("resume", ["exec", "resume", "--help"])):
             try:
-                result = _contained_capture([*self.executable, *args], timeout=15)
+                timeout = 15
+                if deadline is not None:
+                    from datetime import datetime, timezone
+                    end = datetime.fromisoformat(deadline.replace("Z", "+00:00"))
+                    if end.tzinfo is None:
+                        raise HarnessError("Capability deadline requires an explicit timezone")
+                    remaining = (end - datetime.now(timezone.utc)).total_seconds()
+                    if remaining <= 0:
+                        return {"status": "unavailable", "reason": "deadline_exhausted", "native_children_disabled": False}
+                    timeout = min(timeout, remaining)
+                result = _contained_capture([*self.executable, *args], timeout=timeout)
                 output = result.stdout.decode("utf-8", errors="replace")
                 if result.returncode or len(output.encode("utf-8")) > 262144:
                     raise HarnessError("Capability probe failed")
                 values[name] = output
-            except (OSError, subprocess.TimeoutExpired, HarnessError) as error:
+            except (OSError, ValueError, subprocess.TimeoutExpired, HarnessError) as error:
                 return {"status": "unavailable", "reason": type(error).__name__, "native_children_disabled": False}
         return {"status": "observed", "version": values["version"].strip(), "binary_sha256": _binary_hash(self.executable[0]), "json": "--json" in values["exec"], "resume": "SESSION_ID" in values["resume"], "output_schema": "--output-schema" in values["exec"], "resume_output_schema": "--output-schema" in values["resume"], "configured_settings": configured_settings(), "native_children_disabled": False, "suppression_proof": "Separate observed tool inventory bound to this binary/version is required"}
 

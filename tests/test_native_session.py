@@ -35,7 +35,7 @@ class NativeSessionTests(unittest.TestCase):
     def event(self, **kwargs):
         """Возвращает минимальное поддержанное событие, не читая transcript."""
         return {"hook_event_name": "SessionStart", "source": "startup", "cwd": str(self.root),
-                "session_id": "019-session-test", **kwargs}
+                "session_id": "019-session-test", "agent_type": "root", **kwargs}
 
     def test_compact_packet_and_cross_process_checkpoint(self):
         """Пакет укладывается в бюджет; новый процесс обновляет настоящую short-term память."""

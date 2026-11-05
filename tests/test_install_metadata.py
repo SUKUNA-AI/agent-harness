@@ -78,7 +78,8 @@ class InstallerMetadataTests(unittest.TestCase):
         native_set = os.setxattr
 
         def unsupported(path, name, value, *args, **kwargs):
-            if Path(path).name.startswith(".harness-metadata-"):
+            target = Path(os.readlink(f"/proc/self/fd/{path}")) if isinstance(path, int) else Path(path)
+            if target.name.startswith(".harness-metadata-"):
                 raise PermissionError("native ACL cannot be staged")
             return native_set(path, name, value, *args, **kwargs)
 
@@ -121,15 +122,16 @@ class InstallerMetadataTests(unittest.TestCase):
         config = self.home / "config.toml"
         self.acl(config)
         before = {Path(p["path"]): install.read(Path(p["path"])) for p in install.active_manifest(self.state)["files"]}
-        unlink = Path.unlink
+        unlink = install.ParentDirectory.unlink
 
-        def race(path, *args, **kwargs):
-            result = unlink(path, *args, **kwargs)
+        def race(parent, *args, **kwargs):
+            path = parent.path
+            result = unlink(parent, *args, **kwargs)
             if path == self.overlay:
                 os.setxattr(config, "user.harness_test", b"concurrent")
             return result
 
-        with patch.object(Path, "unlink", new=race):
+        with patch.object(install.ParentDirectory, "unlink", new=race):
             code, report = self.dispatch("rollback")
         self.assertEqual(code, 2, report)
         self.assertEqual(report["status"], "rollback_failed_compensated")
@@ -164,9 +166,9 @@ class InstallerMetadataTests(unittest.TestCase):
         before = config.read_bytes()
         replace = os.replace
 
-        def late_edit(source, target):
-            result = replace(source, target)
-            if target == config:
+        def late_edit(source, target, **kwargs):
+            result = replace(source, target, **kwargs)
+            if Path(target).name == config.name:
                 os.setxattr(config, "user.foreign-edit", b"preserve")
             return result
 
@@ -220,7 +222,7 @@ class InstallerMetadataTests(unittest.TestCase):
         installed.write_bytes(b"installed")
         target.chmod(0o600)
         self.acl(self.home / "config.toml")  # Require the Linux metadata contract.
-        manifest = {"files": [{"path": str(target), "installed_copy": str(installed),
+        manifest = {"schema_version": 1, "files": [{"path": str(target), "installed_copy": str(installed),
             "backup": None, "before_sha256": None, "after_sha256": install.digest(b"installed"),
             "kind": "owned", "meta": {}}]}
         self.assertIsNone(install.rollback_plan(manifest)[0]["after"])

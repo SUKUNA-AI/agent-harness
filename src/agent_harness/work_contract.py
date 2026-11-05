@@ -61,6 +61,9 @@ def normalize(value):
         if not IDENTIFIER.fullmatch(check["id"]):
             raise HarnessError("Invalid acceptance ID")
         if check["kind"] == "command":
+            from .validation import validate_equals
+            for report in check.get("reports", []):
+                validate_equals(report.get("equals", {}))
             if not check.get("argv") or any("\x00" in item for item in check["argv"]):
                 raise HarnessError("Command check requires safe argv")
         elif not check.get("criteria"):

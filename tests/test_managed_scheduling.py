@@ -96,7 +96,7 @@ class ManagedSchedulingTests(unittest.TestCase):
             self.assertEqual((source / "left.py").read_text(), "VALUE = 0\n")
             self.assertEqual(result["metrics"]["managed_spawns"], 2)
             self.assertGreater(result["metrics"]["spawn_seconds"], 0)
-            self.assertEqual(result["metrics"]["spawn_measurements"], 3)
+            self.assertEqual(result["metrics"]["spawn_measurements"], 4)
             self.assertGreater(result["metrics"]["worktree_seconds"], 0)
             agents = [supervisor.store.read("agents/" + name + ".yaml", "agent-state.schema.json") for name in ("left", "right")]
             self.assertNotEqual(agents[0]["worktree"]["path"], agents[1]["worktree"]["path"])
@@ -137,7 +137,7 @@ class ManagedSchedulingTests(unittest.TestCase):
             self.assertEqual(supervisor.state["metrics"]["input_tokens"], 5)
             self.assertEqual(supervisor.state["process_status"], "completed")
 
-    def test_interrupted_wave_cannot_reset_a_configured_token_budget(self):
+    def test_interrupted_wave_with_completion_receipts_preserves_configured_token_budget(self):
         from unittest.mock import patch
         from agent_harness.agent_lifecycle import Worktrees
         class FakeManaged(CodexAdapter):
@@ -168,9 +168,10 @@ class ManagedSchedulingTests(unittest.TestCase):
                     supervisor.start()
             calls = fake.with_suffix(".calls").read_bytes()
             result = Supervisor(supervisor.path, adapter=adapter).resume()
-            self.assertEqual(result["status"], "BLOCKED_ENVIRONMENT")
-            self.assertIn("usage receipts", result["reason"])
-            self.assertEqual(fake.with_suffix(".calls").read_bytes(), calls)
+            self.assertEqual(result["status"], "ACCEPTED", result)
+            self.assertEqual((result["metrics"]["input_tokens"], result["metrics"]["output_tokens"]), (40, 12))
+            self.assertEqual(fake.with_suffix(".calls").read_text().splitlines(), ["exec"] * 4)
+            self.assertTrue(fake.with_suffix(".calls").read_bytes().startswith(calls))
 
     def test_acceptance_cwd_and_internal_paths_are_rebased_to_staging(self):
         from agent_harness.work_contract import legacy_contract
@@ -250,9 +251,9 @@ class ManagedSchedulingTests(unittest.TestCase):
             self.assertEqual(result["status"], "ACCEPTED", result)
             self.assertTrue(result["evidence_current"])
             agents = [recovered.store.read("agents/" + name + ".yaml", "agent-state.schema.json") for name in ("left", "right")]
-            self.assertTrue(all(row["attempts_used"] == 2 for row in agents))
+            self.assertTrue(all(row["attempts_used"] == 1 for row in agents))
             self.assertNotEqual(agents[0]["thread_id"], agents[1]["thread_id"])
-            self.assertEqual(fake.with_suffix(".calls").read_text().splitlines().count("resume"), 2)
+            self.assertEqual(fake.with_suffix(".calls").read_text().splitlines().count("resume"), 0)
             self.assertEqual((source / "left.py").read_text(), "VALUE = 0\n")
 
     def test_recovery_rejects_foreign_worker_or_staging_before_any_model_spawn(self):
@@ -286,8 +287,12 @@ class ManagedSchedulingTests(unittest.TestCase):
                                                state_dir=root / "state", adapter=adapter)
                 supervisor.plan_input = str(plan)
                 with patch.object(Worktrees, "integrate", side_effect=ControllerCrash):
-                    with self.assertRaises(ControllerCrash):
-                        supervisor.start()
+                    try:
+                        unexpected = supervisor.start()
+                    except ControllerCrash:
+                        pass
+                    else:
+                        self.fail("Expected integration fault; observed " + repr(unexpected))
                 calls_before = fake.with_suffix(".calls").read_bytes()
                 target = "integration.yaml" if corrupt == "staging" else "agents/left.yaml"
                 record = supervisor.store.read(target)

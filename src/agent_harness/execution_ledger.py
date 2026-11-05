@@ -37,11 +37,16 @@ def object_schema(properties, required=()):
 PROVENANCE_SCHEMA = object_schema({
     "repository_identity": HASH, "revision": SHORT, "snapshot_id": HASH,
     "files": {"type": "object", "maxProperties": 4096,
-        "propertyNames": {"type": "string", "pattern": r"^(?!/)(?!.*(?:^|/)\.\.(?:/|$))(?!.*\\)(?!.*:).+$"},
+        "propertyNames": {"type": "string", "pattern": r"^(?!/)(?![\s\S]*(?:^|/)\.\.(?:/|$))(?![\s\S]*\\)(?![\s\S]*:)[\s\S]+$"},
         "additionalProperties": HASH},
     "toolchain_digest": HASH, "branch": SHORT,
     "file_inventory_complete": {"type": "boolean"},
     "omitted_file_count": {"type": "integer", "minimum": 0},
+    "binding_kind": {"enum": ["whole_snapshot"]}, "snapshot_algorithm": SHORT,
+    "snapshot_ref": HASH, "inventory_policy_digest": HASH, "scope_digest": HASH,
+    "checkout_ref": HASH, "checkout_root": SHORT, "inventory_complete": {"type": "boolean"},
+    "details_complete": {"type": "boolean"}, "details_omitted_count": {"type": "integer", "minimum": 0},
+    "details_ref": {"type": ["string", "null"], "maxLength": 512},
 }, ("repository_identity", "revision", "snapshot_id", "files"))
 
 PAYLOAD_PROPERTIES = {
@@ -70,7 +75,9 @@ KINDS = {"file_read": ("path", "digest", "purpose"),
          "check": ("check_id", "status", "evidence_id"),
          "failure": ("category", "signature", "status"),
          "repair_hypothesis": ("hypothesis", "outcome"),
-         "decision": ("reason",), "state_transition": ("from_status", "to_status", "reason")}
+         "decision": ("reason",), "lifecycle": ("reason",), "checkpoint": ("reason",),
+         "retrieval": ("reason",), "observation": ("reason",), "invalidation": ("reason", "supersedes"),
+         "integration": ("reason",), "state_transition": ("from_status", "to_status", "reason")}
 EVENT_SCHEMA = object_schema({
     "schema_version": {"const": 1}, "event_id": IDENTIFIER, "run_id": IDENTIFIER,
     "task_id": IDENTIFIER, "kind": {"enum": list(KINDS)}, "actor": SHORT,
@@ -236,7 +243,14 @@ def provenance_for(root, snapshot, *, toolchain_digest=None, file_limit=256):
     entries = [(name, entry["sha256"]) for name, entry in sorted(snapshot["files"].items()) if entry.get("kind") == "file"]
     value = {"repository_identity": repository_identity(root),
              "revision": snapshot.get("git", {}).get("head") or "directory",
-             "snapshot_id": snapshot["digest"],
+             "snapshot_id": snapshot["digest"], "binding_kind": "whole_snapshot",
+             "snapshot_ref": snapshot["digest"], "snapshot_algorithm": "harness-snapshot-v" + str(snapshot.get("snapshot_scheme_version", 1)),
+             "checkout_ref": digest({"root": str(Path(root).resolve()), "physical": snapshot.get("root_binding")}),
+             "checkout_root": str(Path(root).resolve()),
+             "inventory_policy_digest": digest(snapshot.get("inventory_policy", {"algorithm": "snapshot-default-v1"})),
+             "scope_digest": digest({"exclude": snapshot.get("exclude", [])}),
+             "inventory_complete": True, "details_complete": len(entries) <= file_limit,
+             "details_omitted_count": max(0, len(entries) - file_limit), "details_ref": None,
              "files": dict(entries[:file_limit]), "file_inventory_complete": len(entries) <= file_limit,
              "omitted_file_count": max(0, len(entries) - file_limit)}
     if snapshot.get("git", {}).get("branch"):
@@ -249,13 +263,21 @@ def provenance_for(root, snapshot, *, toolchain_digest=None, file_limit=256):
 def validity(provenance, current, *, status="valid", evidence=None):
     if status != "valid":
         return status
-    for field in ("repository_identity", "revision", "branch", "toolchain_digest"):
+    for field in ("repository_identity", "revision", "branch", "toolchain_digest",
+                  "binding_kind", "snapshot_algorithm", "inventory_policy_digest", "scope_digest", "checkout_ref"):
         if field in provenance and provenance.get(field) != current.get(field):
             return "needs_revalidation"
     # Snapshot binding is intentionally conservative, even with a file subset.
     if provenance.get("snapshot_id") != current.get("snapshot_id"):
         return "needs_revalidation"
-    if any(current.get("files", {}).get(name) != sha for name, sha in provenance.get("files", {}).items()):
+    # A compact details projection is not the source inventory. Equal complete
+    # snapshot bindings establish all bytes, including details omitted in either view.
+    full_binding = (provenance.get("inventory_complete") is True
+        and current.get("inventory_complete") is True
+        and provenance.get("snapshot_algorithm") == current.get("snapshot_algorithm")
+        and provenance.get("snapshot_algorithm") is not None)
+    if not full_binding and any(current.get("files", {}).get(name) != sha
+                               for name, sha in provenance.get("files", {}).items()):
         return "needs_revalidation"
     if evidence:
         try:
@@ -431,7 +453,8 @@ class Ledger:
             else:
                 facts.append(item)
         return reduce(failures + facts + examined, category="memory", max_bytes=max_bytes,
-                      required={"repository_revision": current.get("revision"), "stale_items": stale[:10], "stale_items_count": len(stale),
+                      recordset_store=self.root / "recordsets",
+                      required={"repository_identity": current.get("repository_identity"), "repository_revision": current.get("revision"), "stale_items": stale[:10], "stale_items_count": len(stale),
                                 "govern_scope": "advisory_for_native_codex_tools"})
 
     def govern(self, operation, current, *, force=False):
@@ -492,5 +515,6 @@ def ledger_dispatch(argv):
     args = parser.parse_args(argv)
     ledger = Ledger(args.run_dir)
     value = ledger.show(args.event_id, offset=args.offset, limit=args.limit) if args.command == "show" else {"events": len(ledger.rebuild_index())}
-    print(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
+    from .output import write_json
+    write_json(value)
     return 0

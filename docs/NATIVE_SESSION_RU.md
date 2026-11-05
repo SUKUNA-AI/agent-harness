@@ -64,3 +64,23 @@ Hook получает только cwd/native session ID/source; цель bootst
 Локальный hook не устанавливает hosted/cloud orchestration, другой `CODEX_HOME`
 или чужое устройство. Уже открытый чат не доказывает загрузку новых hooks.
 Никакие model/provider/effort, permissions или compaction settings не меняются.
+
+## Native context contracts correction candidate
+
+Generic hook сохраняет explicit active goal; отдельный `goal-update` требует
+expected generation. Checkpoint принимает устойчивый `--operation-id` для
+повтора после broken pipe. Evidence note сохраняет typed refs; старый note
+без current status chain остаётся observation.
+
+SessionStart без reliable agent/root identity сохраняется unbound и возвращает
+degraded; явный `start` остаётся fallback. Наличие hooks.json не доказывает trust,
+invocation или task acceptance. `status`, `intake`, `verify-result` и bounded
+recordset retrieval описаны в [CLI](CLI_REFERENCE_RU.md) и
+[контрактах стабилизации](STABILIZATION_RU.md).
+
+Новые observer/operation/bridge receipts v2 содержат actual package build digest
+(Python, schemas, vendored runtime) и отдельный loaded producer digest. V1 readers
+сохраняют unknown; новый schema marker не повышает trust старой записи.
+`status --session ID --verify-evidence` сохраняет identity/coverage и recorded
+verdict при потере linked core run, выдавая current acceptance unknown и stable
+missing/unavailable reason вместо потери всего отчёта.

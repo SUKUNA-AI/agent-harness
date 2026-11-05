@@ -1,0 +1,217 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "record_id": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "project_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "run_id": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "task_id": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "node_id": {
+      "type": "null"
+    },
+    "attempt_id": {
+      "type": "null"
+    },
+    "invocation_id": {
+      "type": "null"
+    },
+    "producer_id": {
+      "const": "explicit-migration"
+    },
+    "producer_kind": {
+      "const": "migration"
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "created_at": {
+      "type": "string",
+      "format": "utc"
+    },
+    "harness_version": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "harness_build_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "client_version": {
+      "const": "unknown"
+    },
+    "capability_receipt_ref": {
+      "type": "null"
+    },
+    "input_refs": {
+      "type": "array",
+      "maxItems": 512,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "path",
+          "sha256",
+          "bytes"
+        ]
+      }
+    },
+    "payload_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "record_type": {
+      "const": "work_state_migration_intent"
+    },
+    "operation_id": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "plan_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "record_type": {
+          "const": "work_state_migration_plan"
+        },
+        "source_version": {
+          "const": 1
+        },
+        "destination_version": {
+          "const": 2
+        },
+        "run_id": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "expected_generation": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "targets": {
+          "type": "array",
+          "maxItems": 512,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string",
+                "maxLength": 512
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "path",
+              "sha256",
+              "bytes"
+            ]
+          }
+        },
+        "usage_policy": {
+          "const": "legacy_history_unverified"
+        },
+        "downgrade_policy": {
+          "const": "baseline_writer_refuses_v2"
+        }
+      },
+      "required": [
+        "schema_version",
+        "record_type",
+        "source_version",
+        "destination_version",
+        "run_id",
+        "expected_generation",
+        "targets",
+        "usage_policy",
+        "downgrade_policy"
+      ]
+    },
+    "status": {
+      "const": "prepared"
+    },
+    "source_state_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "pending_state_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "final_state": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "record_id",
+    "project_id",
+    "run_id",
+    "task_id",
+    "node_id",
+    "attempt_id",
+    "invocation_id",
+    "producer_id",
+    "producer_kind",
+    "generation",
+    "created_at",
+    "harness_version",
+    "harness_build_digest",
+    "client_version",
+    "capability_receipt_ref",
+    "input_refs",
+    "payload_digest",
+    "schema_version",
+    "record_type",
+    "operation_id",
+    "plan_digest",
+    "plan",
+    "status",
+    "source_state_digest",
+    "pending_state_digest",
+    "final_state"
+  ]
+}

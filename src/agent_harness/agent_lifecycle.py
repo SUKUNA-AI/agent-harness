@@ -78,6 +78,26 @@ class GlobalSlots:
                          "unresolved": value["status"] != "released"})
         return rows
 
+    def reconcile(self, run_id, accounting):
+        """Release only a receipt-proven finished invocation under its slot lock."""
+        if self.store is None:
+            return
+        by_lease = {r["payload"]["owner_id"]: invocation for invocation, r in accounting["intents"].items()}
+        for row in self.inventory(run_id):
+            invocation = by_lease.get(row["lease_id"])
+            completion = accounting["completions"].get(invocation)
+            if not row["unresolved"] or completion is None or row["child_alive"]:
+                continue
+            if row.get("tree_cleanup_required") and completion["payload"]["process_tree_stopped"] is not True:
+                continue
+            name = "slot-" + str(row["slot"]) + ".yaml"
+            with _os_lock(self.store.root / ("slot-" + str(row["slot"]) + ".guard")):
+                value = self.store.read(name, LEASE_SCHEMA)
+                if value["lease_id"] != row["lease_id"] or identity_alive(value["child_identity"]):
+                    raise HarnessError("Model slot changed during completion reconciliation")
+                value["status"] = "released"
+                self.store.write(name, value, LEASE_SCHEMA)
+
     @contextmanager
     def acquire(self, run_id, task_id, role, *, cancel_file=None, timeout=60):
         from .strict_yaml import dump
@@ -118,6 +138,7 @@ class GlobalSlots:
                          "created_at": now(), "lease_id": uuid.uuid4().hex,
                          "status": "reserved", "child_identity": None}
                 ownership = ModelLease(self.store, name, lease)
+                ownership.wait_seconds = time.monotonic() - start
                 try:
                     self.store.write(name, lease, LEASE_SCHEMA)
                     yield ownership
@@ -133,9 +154,9 @@ class GlobalSlots:
             time.sleep(0.1)
 
 
-def git(cwd, *args, input_bytes=None, timeout=30):
+def git(cwd, *args, input_bytes=None, timeout=30, env=None):
     result = subprocess.run(["git", *args], cwd=cwd, input=input_bytes,
-                            capture_output=True, timeout=timeout, shell=False)
+                            capture_output=True, timeout=timeout, shell=False, env=env)
     if result.returncode:
         from .runner import redact
         raise HarnessError("Git operation failed: " + redact(result.stderr.decode("utf-8", errors="replace"))[:2048])
@@ -231,6 +252,23 @@ class Worktrees:
             return {"status": "reconciled_already_applied", "patch_digest": __import__("hashlib").sha256(patch).hexdigest()}
         git(target, "apply", "--binary", "-", input_bytes=patch)
         return {"status": "integrated", "patch_digest": __import__("hashlib").sha256(patch).hexdigest()}
+
+    def tree(self, staging, *, patch=None):
+        """Compute exact current/expected Git tree using an isolated index.
+
+        No mutation of the checkout/index or hooks is needed to prepare the
+        postcondition. The temporary index is private and removed on failure.
+        """
+        import tempfile
+        path = self.validate(staging, expected_id="integration", expected_role="integrator", integrated=True)
+        with tempfile.TemporaryDirectory(prefix="integration-index-", dir=self.directory.parent) as temp:
+            env = dict(os.environ, GIT_INDEX_FILE=str(Path(temp) / "index"))
+            git(path, "read-tree", "HEAD", env=env)
+            if patch is None:
+                git(path, "add", "--all", env=env)
+            elif patch:
+                git(path, "apply", "--cached", "--binary", "-", input_bytes=patch, env=env)
+            return git(path, "write-tree", env=env).decode().strip()
 
 
 WORKTREE_SCHEMA = {"type": "object", "additionalProperties": False, "properties": {

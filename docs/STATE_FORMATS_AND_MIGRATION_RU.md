@@ -155,3 +155,14 @@ Codex process; изменение файлов не гарантирует hot r
 Portable package содержит schemas/parser/license, но не local machine paths.
 Проверьте extracted distribution через isolated homes, upgrade и rollback;
 ZIP source archive без native bundle не подтверждает Rust capability.
+
+## Work-state v2 и explicit migration
+
+Новый writer создаёт work/agent state v2; readers сохраняют v1 без повышения trust.
+Execution receipts имеют собственную закрытую schema; usage accounting v3
+подтверждает invocation coverage, а не одно наличие чисел.
+`work migrate` сначала показывает hash-bound план; apply проверяет expected
+generation, сохраняет backups/intent и публикует pending versioned barrier.
+Pending блокирует supervisor; `--recover` явно завершает переход.
+`legacy_history_unverified` не снимается новой успешной попыткой.
+[Команды и downgrade ограничения](STABILIZATION_RU.md).

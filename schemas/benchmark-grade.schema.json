@@ -1,0 +1,41 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "record_type": {
+      "const": "independent_grade"
+    },
+    "manifest_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "trial_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "evaluator_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "outcome": {
+      "enum": [
+        "accepted",
+        "failed",
+        "cancelled",
+        "timeout",
+        "environment_error"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "record_type",
+    "manifest_digest",
+    "trial_id",
+    "evaluator_digest",
+    "outcome"
+  ]
+}

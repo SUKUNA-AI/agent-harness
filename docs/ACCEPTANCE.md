@@ -46,6 +46,22 @@ version probes и declared implementation files проверяются до/по
 Python и native snapshots должны совпадать по manifest/digest; adaptive выбор
 backend не освобождает от повторного хеширования файлов.
 
+Snapshot scheme v2 (`snapshot_scheme_version=2`,
+`topology_policy=nofollow-ancestors-literal-leaf-v1`) запрещает root alias и
+intermediate symlink/junction/reparse. Каждый tracked path проверяется вместе
+с ancestors, даже под ignored parent. Leaf symlink учитывается literal target;
+внешние file bytes через него не становятся обычным source проекта.
+
+`root_binding` хранит локальную physical identity root. Полный `digest` связывает
+её с manifest; `content_digest` вычисляется без `root_binding`, но по-прежнему
+содержит cwd, Git metadata, scope/exclusions. Это не универсальный переносимый
+hash между checkout-ами. Для переноса candidate нужна явная versioned content
+projection, проверенное целевое владение и полный digest целевого candidate;
+совпадение file hashes само по себе не переносит приёмку. Смена scheme делает
+старую source binding stale без переписывания исторических receipts.
+Python/native обязаны выдавать один protocol; старый native backend без v2
+capability отклоняется с требованием rebuild, даже при той же версии продукта.
+
 Для `work` внешние и ignored ordinary files, от которых зависит check,
 объявляйте в typed `inputs` с абсолютным path и optional SHA-256. Они попадают
 в frozen contract и evidence. Это не автоматическое вычисление всех зависимостей
@@ -87,18 +103,58 @@ command ради замены этих проверок. Applicable required che
 используйте уникальный output path для каждого check/attempt. Это не повод
 подменять mtime в тестах или объявлять старый report новым.
 
-JSON equals использует рекурсивное сравнение: `true != 1`, `false != 0`, в том числе
-в lists/objects. Числа `1` и `1.0` сохраняют числовую эквивалентность. Та же семантика
-применяется к чужим shared-record values и защищённым non-record metadata.
-Allowed record ID не разрешает менять чужую запись либо metadata всего файла.
-Record IDs — непустые strings/integers, не boolean.
+`reports.equals` поддерживается одинаково в core и managed contract. Это map
+из dotted selector в JSON value: null, boolean, finite number, string, ordered
+array либо object. Selector проходит по object keys; missing key отличается
+от explicit null. Разрешены до 1000 selectors длиной 1–1000 символов. Payload
+ограничен 2 MiB в JSON с ASCII escaping, depth 48, 100000 nodes и 262144 символами
+на строку; keys учитываются в node bound. Остальные report fields остаются
+закрытыми. Duplicate/non-string keys, reserved merge key `<<` и non-finite
+values отклоняются. Пустой map `{}` допустим по совместимости, но не доказывает
+содержательную цель пользователя.
 
-JUnit должен содержать реальные testcase. Defaults: min_tests=1, max_skipped=0.
-`required_cases` сопоставляет regex с `classname::name`; хотя бы один совпавший
-case должен реально пройти. Дочерний skipped и GoogleTest status=notrun /
-result=suppressed, явные skipped/disabled не считаются pass. Неизвестные execution
-attributes дают failure. Обычный JUnit без execution attributes поддерживается;
-разрешённое число unrelated skips не превращает skipped required case в passed.
+JSON equals использует рекурсивное сравнение: `true != 1`, `false != 0`, в том числе
+в lists/objects. Числа `1` и `1.0` сохраняют числовую эквивалентность; порядок
+массива значим. Например, fragment report definition:
+
+```json
+{"path":"result.json","format":"json","equals":{"summary.status":"ok","summary.values":[null,false,1]}}
+```
+
+Для этого fragment файл должен содержать object `summary` с указанными `status`
+и `values`; runner дополнительно проверяет свежесть файла и исход process.
+Та же JSON comparison semantics применяется к shared-record values и защищённым
+non-record metadata. Allowed record ID не разрешает менять чужую запись либо
+metadata всего файла. Record IDs — непустые strings/integers, не boolean.
+
+JUnit profile **`junit-harness-v2`** поддерживает root `testsuite`/`testsuites`,
+вложенные `testsuite`, отсутствие namespace либо единый `urn:junit`. Testcase
+допустим непосредственно внутри `testsuite`. Из вспомогательных suite elements
+поддерживаются `properties`, `system-out`, `system-err`; неизвестная критическая
+структура отклоняется. Пустой report не удовлетворяет default `min_tests=1`.
+
+Любой suite-level `failure`/`error` и case-level issue отклоняет отчёт. Если заданы
+`tests`, `skipped`, `failures`, `errors`, `disabled`, это неотрицательные целые,
+которые должны точно совпасть с наблюдаемым subtree. Suite issues учитываются
+в failures/errors, но не добавляют testcase. Parent aggregates проверяются,
+а не суммируются с child counts второй раз. Противоречие имеет diagnostic
+`report_inconsistent`; unsupported/malformed XML даёт failed validation.
+
+Defaults: `min_tests=1`, `max_skipped=0`. `required_cases` сопоставляет regex
+с полным `classname::name`; требуется хотя бы одно совпадение и **все** совпавшие
+testcase должны реально пройти. Дубликаты остаются отдельными occurrence IDs
+`case_ids`, связанными с положением в suite tree. Skipped elements, execution
+`status`/`result` notrun/skipped/disabled/suppressed не считаются pass; неизвестные
+значения дают failure. Обычный JUnit без этих attributes остаётся допустимым.
+Разрешённый unrelated skip не закрывает skipped required case.
+
+Каждый raw JSON/XML report ограничен **2 MiB**; XML дополнительно ограничен depth
+**48** и **100000 nodes**. DTD/entity declarations запрещены до expansion.
+JSON reader также отвергает duplicate keys и non-finite numbers. Parsing/regex
+выполняется в bounded worker с timeout/cancel; успешный parse не перекрывает
+wrong process exit, timeout, stale source или report от другой attempt.
+Summary сокращает список cases, сохраняя counts/omissions и raw evidence;
+сокращённый вывод не ограничивает проверку required patterns.
 
 ## Что делает gate
 
@@ -165,7 +221,10 @@ Plan helper использует ту же проверку сохранённо
 При отсутствии accepted verdict verify не может вернуть evidence_current=true.
 Exit 1 — проверка не подтверждена, включая stale/непринятый run; exit 2 — ошибка
 параметров или чтения. `recorded_status` сохраняет исторический статус, а effective
-status может быть stale. Для продолжения используйте
+status может быть stale. Если snapshot отказал из-за unsafe topology либо
+недоступного source, status не подтверждает свежесть: `source_current=false`,
+`evidence_current=false`, `actual_snapshot=null` и диагностическая причина.
+Для продолжения используйте
 [attempt/recovery](OPERATIONS.md#попытки-locks-и-ошибки), не переписывайте receipts.
 
 ## Обязательные механические отрицательные сценарии
@@ -190,6 +249,13 @@ server integration. Отсутствующий optional runtime отмечает
 fixtures доказывают механику на своих входах и не заменяют такой runtime.
 
 ## Новый клиентский запуск и наблюдаемое поведение
+
+Установка generated hook definition подтверждает configured state.
+`verify` проверяет definition/launcher и физические bindings, но оставляет trust
+и actual callback непроверенными. Отдельно нужны штатный `/hooks` review и fresh
+Codex session на каждой заявленной platform/client комбинации. `verify --native`
+проверяет поддержанные startup/model-input probes и не заменяет hook lifecycle
+qualification. Прямой stdin smoke не доказывает события root/child, fork или resume.
 
 1. Проверьте штатным parser configuration schema, выбранный активный профиль и
    новый model-input marker без требования упомянуть harness в запросе.

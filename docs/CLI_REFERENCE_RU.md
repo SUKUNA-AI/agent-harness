@@ -85,7 +85,7 @@ cwd должен находиться внутри source checkout; внутре
 python tools/harness.py work ledger --help
 python tools/harness.py work memory --help
 python tools/harness.py work format-bench --input TABLE.yaml --real-codex --repeats 5 --output BENCH.yaml --evidence-dir /absolute/private/eval
-python tools/harness.py work format-bench --input TABLE.yaml --render --evaluation BENCH.yaml
+python tools/harness.py work format-bench --input TABLE.yaml --render --evaluation BENCH.yaml --evidence-dir /absolute/private/eval
 python tools/harness.py repomap related-tests --root /absolute/repo --target src/auth.py --revision HEAD
 python tools/harness.py repomap trace-to-code --root /absolute/repo --trace-file TRACE.txt --revision HEAD
 python tools/harness.py repomap change-impact --root /absolute/repo --changed src/auth.py --revision HEAD
@@ -277,3 +277,36 @@ Optional MCP — отдельный read-only интерфейс metadata, см.
 [repomap_queries.py](../src/agent_harness/repomap_queries.py),
 [format_bench.py](../src/agent_harness/format_bench.py). При расхождении установленного
 `--help` с этой страницей сначала сверяйте версию/путь запускаемого пакета.
+
+## Correction candidate: новые операции
+
+`work migrate --run-dir RUN --expected-generation N` даёт dry-run. Apply требует
+`--apply --expected-plan-digest SHA`; `--recover OPERATION_ID` явно завершает
+pending migration. `work benchmark validate|schedule|report --manifest FILE
+--assets-root ROOT` проверяет offline portfolio; report требует `--trials FILE`.
+Это не solve runner и не разрешение на model расход.
+
+`agent-harness-session goal-update --session ID --goal TEXT --expected-generation N`
+обновляет краткую active goal через CAS. `intake [--event-file FILE]` принимает
+allowlisted metadata (default stdin); `status --root ROOT` выводит coverage.
+`verify-result --session ID --run-dir CORE_RUN --expected-candidate SHA` связывает
+существующую current core приёмку с изолированным candidate.
+Memory `show ID --kind semantic|episode|short_term` разрешает typed namespace;
+`migrate|gc --scope KIND [--apply]` сохраняет originals и unresolved refs.
+Общие `--state`/`--max-bytes` у session передаются перед именем операции.
+
+Точные contracts и ограничения: [Стабилизация](STABILIZATION_RU.md).
+
+Deterministic facts: `work memory file-fact ID --root ROOT --path RELATIVE_FILE`
+и `symbol-fact ID --root ROOT --path MODULE.py --symbol NAME`; обе команды требуют
+`--store` и `--repository-identity`. `show --kind fact` читает их typed namespace.
+Они подтверждают точные bytes/координаты, а не поведение произвольного приложения.
+
+`agent-harness-session context-config` показывает private scan limits.
+Изменение через `--checkpoint-scan '{"max_records":64}'` или `--memory-scan JSON`
+требует `--expected-generation N`. Это не Codex model/permission/compaction settings.
+Общий session transport budget принимается только в диапазоне 2048–65536 bytes.
+
+`install --adopt-hook-sha256 SHA` явно принимает существующую single-handler
+SessionStart группу по SHA256 от installer canonical(group). По умолчанию чужой
+harness handler остаётся конфликтом; mixed groups отклоняются и с digest.

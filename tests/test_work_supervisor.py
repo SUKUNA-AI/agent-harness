@@ -28,6 +28,9 @@ def event(t,**v):print(json.dumps(dict(type=t,**v)),flush=True)
 event('thread.started',thread_id=sid);event('turn.started')
 calls=pathlib.Path(__file__).with_suffix('.calls')
 with calls.open('a') as f:f.write(('resume' if 'resume' in args else 'exec')+'\n')
+if 'HARNESS_FINAL_REVIEW' in prompt:
+ event('item.completed',item={'type':'agent_message','text':json.dumps({'schema_version':1,'verdict':'approved','findings':[]})})
+ event('turn.completed',usage={'input_tokens':10,'output_tokens':3});raise SystemExit
 if 'Task contract and failure packet:\n' in prompt:
  task=json.loads(prompt.rsplit('Task contract and failure packet:\n',1)[1]); mode=task['objective']
 else:
@@ -191,7 +194,8 @@ class WorkSupervisorTests(unittest.TestCase):
         self.assertEqual(supervisor.start()["status"], "ACCEPTED")
         from agent_harness.memory import Memory
         memory = Memory(self.root / "global-state" / "memory", supervisor.repository_identity(), enabled=True)
-        self.assertEqual(len(memory.recall("calc", supervisor.provenance())["verified_facts"]), 1)
+        recalled = memory.recall("calc", supervisor.provenance())
+        self.assertEqual(len(recalled["current_observations"] if "current_observations" in recalled else recalled["verified_facts"]), 1)
         (self.source / "calc.py").write_text("VALUE = 7\n")
         self.assertEqual(memory.recall("calc", supervisor.provenance())["verified_facts"], [])
 

@@ -47,18 +47,19 @@ class InstallAuditTests(unittest.TestCase):
             self.update_package()
         before = self.targets()
         config = self.home / "config.toml"
-        unlink = Path.unlink
+        unlink = install.ParentDirectory.unlink
         raced = False
 
-        def after_unlink(path, *args, **kwargs):
+        def after_unlink(parent, *args, **kwargs):
+            path = parent.path
             nonlocal raced
-            value = unlink(path, *args, **kwargs)
+            value = unlink(parent, *args, **kwargs)
             if path == self.overlay and not raced:
                 raced = True
                 config.write_bytes(config.read_bytes() + b"\n[user_concurrent]\nkeep=42\n")
             return value
 
-        with patch.object(Path, "unlink", new=after_unlink):
+        with patch.object(install.ParentDirectory, "unlink", new=after_unlink):
             code, report = self.dispatch(command)
         self.assertTrue(raced)
         self.assertEqual(code, 2, report)
@@ -182,18 +183,19 @@ class InstallAuditTests(unittest.TestCase):
         self.apply()
         before = self.targets()
         pointer = self.state / "active.json"
-        unlink = Path.unlink
+        unlink = install.ParentDirectory.unlink
         failed = False
 
-        def fail_pointer(path, *args, **kwargs):
+        def fail_pointer(parent, *args, **kwargs):
+            path = parent.path
             nonlocal failed
-            value = unlink(path, *args, **kwargs)
+            value = unlink(parent, *args, **kwargs)
             if path == pointer and not failed:
                 failed = True
                 raise OSError("injected pointer removal failure")
             return value
 
-        with patch.object(Path, "unlink", new=fail_pointer):
+        with patch.object(install.ParentDirectory, "unlink", new=fail_pointer):
             code, report = self.dispatch()
         self.assertEqual(code, 2, report)
         self.assertEqual(report["status"], "rollback_failed_compensated")
@@ -286,15 +288,16 @@ class InstallAuditTests(unittest.TestCase):
         before = self.targets()
         pointer = self.state / "active.json"
         changed = b'{"external_change":"preserve"}\n'
-        unlink = Path.unlink
+        unlink = install.ParentDirectory.unlink
 
-        def change_reference(path, *args, **kwargs):
-            value = unlink(path, *args, **kwargs)
+        def change_reference(parent, *args, **kwargs):
+            path = parent.path
+            value = unlink(parent, *args, **kwargs)
             if path == self.overlay:
                 pointer.write_bytes(changed)
             return value
 
-        with patch.object(Path, "unlink", new=change_reference):
+        with patch.object(install.ParentDirectory, "unlink", new=change_reference):
             code, report = self.dispatch()
         self.assertEqual(code, 2, report)
         before[pointer] = changed

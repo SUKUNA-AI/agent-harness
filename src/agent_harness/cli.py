@@ -142,9 +142,11 @@ def main(argv=None):
             from .presentation import status_summary
             result = status_summary(run, result, max_bytes=args.max_output_bytes)
         if args.command == "handoff" or (args.command == "status" and args.summary):
-            print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+            from .output import write_json
+            write_json(result)
         else:
-            print(json.dumps(result, ensure_ascii=False, indent=2))
+            from .output import write_json
+            write_json(result)
         if args.command == "check":
             return 0 if result.get("status") == "passed" else 1
         if args.command == "gate":
@@ -155,7 +157,8 @@ def main(argv=None):
             return 0 if result.get("evidence_current") is True else 1
         return 0
     except (HarnessError, ValueError, OSError, KeyError) as error:
-        print(json.dumps({"error": str(error), "type": type(error).__name__}, ensure_ascii=False), file=sys.stderr)
+        from .output import write_json
+        write_json({"error": str(error), "type": type(error).__name__}, stream=sys.stderr)
         return 2
 
 

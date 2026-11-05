@@ -159,7 +159,7 @@ class KnowledgeScenarios(unittest.TestCase):
         self.assertFalse(memory.root.exists())
         memory = Memory(self.store, self.identity, enabled=True)
         memory.record_episode(self.episode())
-        self.assertEqual(len(memory.recall("expired-auth-token", self.current)["verified_facts"]), 1)
+        self.assertEqual(len(memory.recall("expired-auth-token", self.current)["current_observations"]), 1)
         other = self.base / "same-name" / "repo"
         other.mkdir(parents=True)
         (other / "auth.py").write_text((self.repo / "auth.py").read_text())
@@ -176,7 +176,7 @@ class KnowledgeScenarios(unittest.TestCase):
         memory.record_episode(self.episode(id="episode-expired", expires_at="2000-01-01T00:00:00Z"))
         memory.record_episode(self.episode(id="episode-hypothesis", outcome="unknown", trust_level="historical_hypothesis"))
         recall = memory.recall("auth", self.current)
-        self.assertEqual([row["id"] for row in recall["verified_facts"]], ["episode-fix2"])
+        self.assertEqual([row["id"] for row in recall["current_observations"]], ["episode-fix2"])
         self.assertEqual(recall["historical_hypothesis"][0]["id"], "episode-hypothesis")
         self.assertEqual({r["status"] for r in recall["stale_items"]}, {"superseded", "expired"})
         (self.repo / "auth.py").write_text("def validate_token(value):\n    return False\n")
@@ -270,7 +270,7 @@ class KnowledgeScenarios(unittest.TestCase):
         self.assertNotEqual(page["results"], next_page["results"])
         with patch("agent_harness.repomap_queries.shutil.which", return_value=None), patch("agent_harness.native.backend_info", return_value={"available": False}):
             result = query_repository(self.repo, "symbol-context", path="auth.py", symbol="validate_token")
-        self.assertIn("unavailable", result["method"])
+        self.assertEqual("snapshot_inventory", result["method"])
         self.assertTrue(result["results"])
 
     def test_selective_toon_only_after_matching_positive_real_usage_shape(self):
@@ -284,8 +284,9 @@ class KnowledgeScenarios(unittest.TestCase):
         positive = benchmark(rows, measure, model="fixture-model")
         self.assertEqual(positive["status"], "measured_positive")
         selected = select_format(rows, evaluation=positive, model="fixture-model")
-        self.assertEqual(selected["format"], "toon")
-        self.assertTrue(selected["payload"].startswith("rows[20]{identifier_long,description_long}:"))
+        self.assertEqual(selected["format"], "json")
+        self.assertEqual(positive["measurement_kind"], "synthetic")
+        self.assertFalse(positive["enabled"])
         self.assertEqual(select_format(rows + [{"identifier_long": 99, "description_long": "new"}], evaluation=positive, model="fixture-model")["format"], "json")
         self.assertEqual(select_format(rows, evaluation=positive, model="changed-model")["format"], "json")
         negative = benchmark(rows, lambda n, p: {"input_tokens": 100, "correct": True, "model": "installed"})

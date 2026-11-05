@@ -28,6 +28,12 @@
         "failure",
         "repair_hypothesis",
         "decision",
+        "lifecycle",
+        "checkpoint",
+        "retrieval",
+        "observation",
+        "invalidation",
+        "integration",
         "state_transition"
       ]
     },
@@ -83,7 +89,7 @@
           "maxProperties": 4096,
           "propertyNames": {
             "type": "string",
-            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)(?!.*:).+$"
+            "pattern": "^(?!/)(?![\\s\\S]*(?:^|/)\\.\\.(?:/|$))(?![\\s\\S]*\\\\)(?![\\s\\S]*:)[\\s\\S]+$"
           },
           "additionalProperties": {
             "type": "string",
@@ -104,6 +110,52 @@
         "omitted_file_count": {
           "type": "integer",
           "minimum": 0
+        },
+        "binding_kind": {
+          "enum": [
+            "whole_snapshot"
+          ]
+        },
+        "snapshot_algorithm": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "snapshot_ref": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "inventory_policy_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "scope_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "checkout_ref": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "checkout_root": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "inventory_complete": {
+          "type": "boolean"
+        },
+        "details_complete": {
+          "type": "boolean"
+        },
+        "details_omitted_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "details_ref": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 512
         }
       },
       "required": [
@@ -477,6 +529,127 @@
         "properties": {
           "kind": {
             "const": "decision"
+          }
+        },
+        "additionalProperties": true
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": [
+              "reason"
+            ]
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "lifecycle"
+          }
+        },
+        "additionalProperties": true
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": [
+              "reason"
+            ]
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "checkpoint"
+          }
+        },
+        "additionalProperties": true
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": [
+              "reason"
+            ]
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "retrieval"
+          }
+        },
+        "additionalProperties": true
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": [
+              "reason"
+            ]
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "observation"
+          }
+        },
+        "additionalProperties": true
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": [
+              "reason"
+            ]
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "invalidation"
+          }
+        },
+        "additionalProperties": true
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "required": [
+              "reason",
+              "supersedes"
+            ]
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "integration"
           }
         },
         "additionalProperties": true

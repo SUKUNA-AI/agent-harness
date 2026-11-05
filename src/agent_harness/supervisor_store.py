@@ -11,10 +11,11 @@ import json
 import os
 from pathlib import Path
 import stat
+import threading
 import uuid
 
 from .core import HarnessError, _os_lock, identity_alive, now, process_identity
-from .file_io import read_regular_file
+from .file_io import read_regular_file, ParentDirectory
 from . import strict_yaml
 
 MAX_JOURNAL_BYTES = 64 * 1024 * 1024
@@ -48,13 +49,18 @@ def _mkdir(path):
         try:
             _ordinary(item, directory=True)
         except FileNotFoundError:
-            try:
-                item.mkdir(mode=0o700)
-            except FileExistsError:
-                # Independent managed workers can create the same ordinary
-                # parent. Recheck its type; never accept a raced link or file.
-                pass
-            _ordinary(item, directory=True)
+            with ParentDirectory(item) as parent:
+                try:
+                    if parent.fd is not None:
+                        os.mkdir(item.name, mode=0o700, dir_fd=parent.fd)
+                    else:
+                        item.mkdir(mode=0o700)
+                except FileExistsError:
+                    # Another owner may have created this ordinary parent.
+                    pass
+                parent.sync()
+                parent.check()
+                _ordinary(item, directory=True)
 
 
 def _fsync_dir(path):
@@ -70,30 +76,34 @@ def atomic_write(path, data, *, exclusive=False):
     """Same-directory staging, fsync, replace; refuse links and special files."""
     path = Path(os.path.abspath(path))
     _mkdir(path.parent)
-    _parents(path)
-    before = _ordinary(path, missing_ok=True)
-    if exclusive and before is not None:
-        raise FileExistsError(path)
-    temp = path.with_name(".yaml-stage-" + uuid.uuid4().hex)
-    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
-    try:
-        with os.fdopen(fd, "wb") as output:
-            output.write(data)
-            output.flush()
-            os.fsync(output.fileno())
-        _parents(path)
-        current = _ordinary(path, missing_ok=True)
-        if before is None and current is not None or before is not None and (current is None or (before.st_dev, before.st_ino, before.st_mtime_ns, before.st_size) != (current.st_dev, current.st_ino, current.st_mtime_ns, current.st_size)):
-            raise HarnessError("Private target changed before atomic replacement")
-        if exclusive:
-            # Hard-link creation is atomic and refuses concurrent creation.
-            os.link(temp, path)
-            temp.unlink()
-        else:
-            os.replace(temp, path)
-        _fsync_dir(path.parent)
-    finally:
-        temp.unlink(missing_ok=True)
+    with ParentDirectory(path) as parent:
+        before = _ordinary(path, missing_ok=True)
+        if exclusive and before is not None:
+            raise FileExistsError(path)
+        temp = ".yaml-stage-" + uuid.uuid4().hex
+        fd = parent.open(os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), name=temp)
+        try:
+            with os.fdopen(fd, "wb") as output:
+                if output.write(data) != len(data):
+                    raise OSError("Short private record write")
+                output.flush()
+                os.fsync(output.fileno())
+            parent.check()
+            current = _ordinary(path, missing_ok=True)
+            if before is None and current is not None or before is not None and (current is None or (before.st_dev, before.st_ino, before.st_mtime_ns, before.st_size) != (current.st_dev, current.st_ino, current.st_mtime_ns, current.st_size)):
+                raise HarnessError("Private target changed before atomic replacement")
+            if exclusive:
+                # Publish once in the pinned directory, never a retargeted path.
+                if parent.fd is not None:
+                    os.link(temp, path.name, src_dir_fd=parent.fd, dst_dir_fd=parent.fd, follow_symlinks=False)
+                else:
+                    os.link(path.parent / temp, path)
+                parent.sync()
+                parent.check()
+            else:
+                parent.replace(temp)
+        finally:
+            parent.unlink(temp, missing_ok=True)
 
 
 def _canonical(value):
@@ -120,6 +130,7 @@ class SupervisorStore:
         _ordinary(self.root, directory=True)
         self.state_schema = state_schema
         self._lease = None
+        self._mutex = threading.RLock()
 
     def path(self, relative):
         relative = Path(relative)
@@ -177,11 +188,14 @@ class SupervisorStore:
 
     @contextmanager
     def _writing(self):
-        if self._lease is not None:
-            yield
-        else:
-            with self.lease():
+        # Worker callbacks share the foreground owner's process lease, but must
+        # still serialize journal sequence allocation inside that process.
+        with self._mutex:
+            if self._lease is not None:
                 yield
+            else:
+                with self.lease():
+                    yield
 
     def events(self):
         path = self.path("journal/events.jsonl")
@@ -271,14 +285,17 @@ class SupervisorStore:
             if len(data) > strict_yaml.MAX_BYTES or path.exists() and path.stat().st_size + len(data) > MAX_JOURNAL_BYTES:
                 raise HarnessError("Journal storage budget exhausted")
             flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
-            fd = os.open(path, flags, 0o600)
-            with os.fdopen(fd, "ab") as output:
-                if not stat.S_ISREG(os.fstat(output.fileno()).st_mode):
-                    raise HarnessError("Journal is not a regular file")
-                output.write(data)
-                output.flush()
-                os.fsync(output.fileno())
-            _fsync_dir(path.parent)
+            with ParentDirectory(path) as parent:
+                fd = parent.open(flags)
+                with os.fdopen(fd, "ab") as output:
+                    if not stat.S_ISREG(os.fstat(output.fileno()).st_mode):
+                        raise HarnessError("Journal is not a regular file")
+                    if output.write(data) != len(data):
+                        raise OSError("Short journal append")
+                    output.flush()
+                    os.fsync(output.fileno())
+                parent.sync()
+                parent.check()
             return record
 
     def commit(self, state, reason, owner="supervisor", attempt_id=None):

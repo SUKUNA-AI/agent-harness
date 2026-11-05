@@ -278,4 +278,9 @@ def snapshot(contract):
     value = invoke({"operation": "snapshot", "contract": contract})
     if value.get("schema_version") != 1 or value.get("kind") not in {"non_file", "directory", "git"} or not isinstance(value.get("files"), dict) or not isinstance(value.get("external_inputs"), dict):
         raise HarnessError("Native backend returned an invalid snapshot manifest")
+    if (value.get("snapshot_scheme_version") != 2
+            or value.get("topology_policy") != "nofollow-ancestors-literal-leaf-v1"
+            or not isinstance(value.get("content_digest"), str)
+            or contract.get("cwd") and not isinstance(value.get("root_binding"), dict)):
+        raise HarnessError("Native snapshot capability is stale; rebuild the backend for physical snapshot scheme v2")
     return value

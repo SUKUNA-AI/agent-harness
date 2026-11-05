@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "memory-evidence-head v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "generation": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  },
+  "required": [
+    "generation",
+    "digest"
+  ]
+}

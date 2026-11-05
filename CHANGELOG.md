@@ -257,3 +257,14 @@ native-квалификация Linux/macOS не заявляется.
 переименовываются. GitHub может показывать старое сообщение рядом с файлами,
 которые с тех пор не менялись. Версия source checkout указана в пакете и начале
 этого changelog; опубликованные releases определяются своими тегами.
+
+## Unreleased correction candidate
+
+- Durable DAG/invocation/completion/integration recovery и usage coverage v3.
+- Physical snapshot v2, anchored IO, JUnit consistency и bounded JSON equals.
+- Typed memory/evidence lifecycle, goal CAS, bounded retrievable context и inventory fixes.
+- Reversible hook installation, observer diagnostics и explicit state migration.
+- Strict format applicability и offline benchmark portfolio accounting.
+
+Это перечень изменений кода, не результаты platform/evaluation qualification.
+Оставшиеся gates и ограничения: [Стабилизация](docs/STABILIZATION_RU.md).

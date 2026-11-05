@@ -3,7 +3,110 @@
   "additionalProperties": false,
   "properties": {
     "schema_version": {
-      "const": 1
+      "enum": [
+        1,
+        2
+      ]
+    },
+    "measurement_kind": {
+      "enum": [
+        "unmeasured",
+        "synthetic",
+        "codex_observed"
+      ]
+    },
+    "execution_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "provider": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "reasoning_requested": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 512
+        },
+        "reasoning_observed": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 512
+        },
+        "config_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "provider_route_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "tool_config_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "client_version": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "client_binary_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "harness_build_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "tokenizer_revision": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 512
+        },
+        "revision_scope": {
+          "const": "observed_identity_only"
+        }
+      },
+      "required": [
+        "model",
+        "provider",
+        "reasoning_requested",
+        "reasoning_observed",
+        "config_digest",
+        "provider_route_digest",
+        "tool_config_digest",
+        "client_version",
+        "client_binary_digest",
+        "harness_build_digest",
+        "tokenizer_revision",
+        "revision_scope"
+      ]
+    },
+    "template_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "evaluator_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "evaluated_at": {
+      "type": "string",
+      "maxLength": 64
+    },
+    "validity_seconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 86400
     },
     "status": {
       "enum": [

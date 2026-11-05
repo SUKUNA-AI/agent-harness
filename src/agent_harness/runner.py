@@ -366,7 +366,7 @@ def _executable_hash(executable, cache):
     # Symlink spelling stays in the evidence's resolved executable field.
     key = (os.path.normcase(str(Path(executable).resolve())), tuple(stamp.items()))
     if key not in cache:
-        cache[key] = file_hash(executable)
+        cache[key] = file_hash(Path(executable).resolve())
     return cache[key]
 
 
@@ -811,6 +811,9 @@ def accepted_evidence_errors(run: Run, verdict_digest, *, _ancestors=(), _eviden
         verdict = read_json(path)
         supplied = verdict.pop("digest", None)
         errors = []
+        if verdict.get("dependency_commit_protocol") == "closure_v1":
+            from .dependency_commit import current_vector_errors
+            errors.extend(current_vector_errors(verdict["dependency_vector"]))
         if supplied != verdict_digest or digest(verdict) != verdict_digest or verdict.get("verdict") != "accepted":
             errors.append("accepted verdict integrity failed")
         for key, expected in {"run_id": contract["run_id"], "task_id": contract["task_id"], "attempt_id": contract["attempt_id"], "contract_digest": state["contract_digest"], "candidate_digest": candidate["digest"]}.items():
@@ -843,39 +846,67 @@ def accepted_evidence_errors(run: Run, verdict_digest, *, _ancestors=(), _eviden
 
 
 def gate(run: Run, *, actor="orchestrator"):
+    """Retry preparation only when a mutable dependency generation changed."""
     if actor != "orchestrator":
         raise HarnessError("Only the orchestrator accepts a result; owners submit ready_for_review")
-    with run.workspace_lock():
-        state = run.state()
-        contract = run.contract(state)
-        candidate = run.assert_current(state, contract)
-        toolchains = read_json(run.attempt_dir(state) / "toolchains.json")
-        if digest(toolchains) != state.get("toolchain_digest"):
-            raise HarnessError("Frozen toolchain manifest integrity failed")
-        baseline = read_json(run.path / "origin-baseline.json")
-        errors = scope_errors(contract, baseline, candidate)
-        receipts = []
-        shared_errors, shared_receipts = _shared_scope_errors(run, state, contract)
-        errors.extend(shared_errors)
-        receipts.extend(shared_receipts)
-        check_errors, check_receipts = _check_evidence_errors(run, state, contract, candidate, toolchains)
-        errors.extend(check_errors)
-        receipts.extend(check_receipts)
-        for dependency in contract.get("dependencies", []):
-            dependency_errors = accepted_evidence_errors(Run(dependency["run_dir"]), dependency["verdict_digest"])
-            errors.extend(f"dependency not accepted/current: {dependency['run_dir']}: {message}" for message in dependency_errors)
-        unresolved = [key for key, value in state.get("operations", {}).items() if value["status"] in {"planned", "unknown"}]
-        if unresolved:
-            errors.append("unknown operation outcomes: " + ", ".join(unresolved))
-        if snapshot(contract)["digest"] != candidate["digest"]:
-            errors.append("candidate changed during gate")
-        with run.edit() as current:
-            if not json_equal(current, state):
-                errors.append("run state changed during gate; repeat acceptance against current state")
-            verdict = {"schema_version": 1, "run_id": contract["run_id"], "task_id": contract["task_id"], "attempt_id": contract["attempt_id"], "contract_digest": state["contract_digest"], "candidate_digest": candidate["digest"], "verdict": "accepted" if not errors else "rejected", "errors": errors, "receipts": receipts, "assessor": actor, "created_at": now(), "limitations": "Cooperating-process locks and hashes are process controls, not a sandbox or protection from an actor with the same OS rights. Semantic and visual assessments remain identified as assessments."}
-            verdict["digest"] = digest(verdict)
-            target = run.attempt_dir(state) / "gates" / (uuid.uuid4().hex + ".json")
-            atomic_json(target, verdict, exclusive=True)
-            current["status"] = "accepted" if not errors else "failed"
-            current["accepted"] = {"verdict_digest": verdict["digest"], "candidate_digest": candidate["digest"], "verdict_path": target.relative_to(run.path).as_posix()} if not errors else None
-        return verdict
+    from .dependency_commit import DependencyChanged
+    remaining = remaining_budget_seconds(run.contract())
+    deadline = time.monotonic() + (max(0, remaining) if remaining is not None else 30)
+    for attempt in range(3):
+        if time.monotonic() >= deadline:
+            raise HarnessError("GATE_DEADLINE_EXHAUSTED: original acceptance deadline reached")
+        try:
+            return _gate_once(run, actor=actor, commit_deadline=deadline)
+        except DependencyChanged as error:
+            # _gate_once has unwound every closure lock before this handler.
+            # Re-read the full closure and repeat expensive preparation on the
+            # new inputs. Integrity, source and IO failures are never retried.
+            if attempt == 2:
+                raise HarnessError("DEPENDENCY_RETRY_EXHAUSTED: dependency generations changed in all three preparations") from error
+    raise AssertionError("unreachable bounded gate loop")
+
+
+def _gate_once(run: Run, *, actor, commit_deadline):
+    from .dependency_commit import closure, commit_guard, vector
+    observed = closure(run)
+    state = run.state()
+    contract = run.contract(state)
+    candidate = run.assert_current(state, contract)
+    toolchains = read_json(run.attempt_dir(state) / "toolchains.json")
+    if digest(toolchains) != state.get("toolchain_digest"):
+        raise HarnessError("Frozen toolchain manifest integrity failed")
+    baseline = read_json(run.path / "origin-baseline.json")
+    errors = scope_errors(contract, baseline, candidate)
+    receipts = []
+    shared_errors, shared_receipts = _shared_scope_errors(run, state, contract)
+    errors.extend(shared_errors)
+    receipts.extend(shared_receipts)
+    check_errors, check_receipts = _check_evidence_errors(run, state, contract, candidate, toolchains)
+    errors.extend(check_errors)
+    receipts.extend(check_receipts)
+    for dependency in contract.get("dependencies", []):
+        dependency_errors = accepted_evidence_errors(Run(dependency["run_dir"]), dependency["verdict_digest"])
+        errors.extend(f"dependency not accepted/current: {dependency['run_dir']}: {message}" for message in dependency_errors)
+    unresolved = [key for key, value in state.get("operations", {}).items() if value["status"] in {"planned", "unknown"}]
+    if unresolved:
+        errors.append("unknown operation outcomes: " + ", ".join(unresolved))
+    if snapshot(contract)["digest"] != candidate["digest"]:
+        errors.append("candidate changed during gate")
+    remaining = commit_deadline - time.monotonic()
+    if remaining <= 0:
+        raise HarnessError("GATE_DEADLINE_EXHAUSTED: original deadline reached during acceptance preparation")
+    with commit_guard(run, observed, timeout=min(30, remaining), allow_root_change=True) as committed:
+        current = run.state()
+        if not json_equal(current, state):
+            errors.append("run state changed during gate; repeat acceptance against current state")
+        verdict = {"schema_version": 1, "run_id": contract["run_id"], "task_id": contract["task_id"], "attempt_id": contract["attempt_id"], "contract_digest": state["contract_digest"], "candidate_digest": candidate["digest"], "verdict": "accepted" if not errors else "rejected", "errors": errors, "receipts": receipts, "assessor": actor, "created_at": now(), "limitations": "Cooperating-process locks and hashes are process controls, not a sandbox or protection from an actor with the same OS rights. Semantic and visual assessments remain identified as assessments."}
+        verdict.update(dependency_commit_protocol="closure_v1", accepted_as_of_generation=digest(state),
+            dependency_vector=vector(committed, exclude=run))
+        verdict["digest"] = digest(verdict)
+        target = run.attempt_dir(state) / "gates" / (uuid.uuid4().hex + ".json")
+        atomic_json(target, verdict, exclusive=True)
+        current["status"] = "accepted" if not errors else "failed"
+        current["accepted"] = {"verdict_digest": verdict["digest"], "candidate_digest": candidate["digest"], "verdict_path": target.relative_to(run.path).as_posix()} if not errors else None
+        current["updated_at"] = now()
+        atomic_json(run.state_path, current)
+    return verdict

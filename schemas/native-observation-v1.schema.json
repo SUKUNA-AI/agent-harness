@@ -1,0 +1,220 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "native-observation-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "record_type": {
+      "const": "native_observation"
+    },
+    "record_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "project_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "producer_kind": {
+      "const": "native_hook_observer"
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "created_at": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "payload_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "event": {
+      "enum": [
+        "PostModelRequest",
+        "PreModelRequest",
+        "SessionEnd",
+        "SessionStart",
+        "Stop",
+        "SubagentStop",
+        "ToolEnd",
+        "ToolStart"
+      ]
+    },
+    "event_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    },
+    "session_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    },
+    "parent_session_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    },
+    "agent_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    },
+    "agent_type": {
+      "enum": [
+        "root",
+        "child",
+        "unknown"
+      ]
+    },
+    "turn_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    },
+    "request_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    },
+    "attempt_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    },
+    "context_epoch": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "session_cwd": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "hook_process_cwd": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "tool_requested_cwd": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 512
+    },
+    "observed_checkout_ref": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "namespace": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "resolution_status": {
+      "enum": [
+        "observed",
+        "ambiguous",
+        "unavailable"
+      ]
+    },
+    "outcome": {
+      "enum": [
+        "cancelled",
+        "completed",
+        "failed",
+        "started",
+        "unknown"
+      ]
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "input_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000000
+        },
+        "cached_input_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000000
+        },
+        "output_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000000
+        },
+        "reasoning_output_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000000
+        },
+        "total_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000000
+        }
+      },
+      "required": []
+    },
+    "usage_binding": {
+      "enum": [
+        "stable_attempt",
+        "observed_unreconciled",
+        "unavailable"
+      ]
+    },
+    "acceptance": {
+      "const": "not_performed"
+    }
+  },
+  "required": [
+    "schema_version",
+    "record_type",
+    "record_id",
+    "project_id",
+    "producer_kind",
+    "generation",
+    "created_at",
+    "payload_digest",
+    "event",
+    "event_id",
+    "session_id",
+    "parent_session_id",
+    "agent_id",
+    "agent_type",
+    "turn_id",
+    "request_id",
+    "attempt_id",
+    "context_epoch",
+    "session_cwd",
+    "hook_process_cwd",
+    "tool_requested_cwd",
+    "observed_checkout_ref",
+    "namespace",
+    "resolution_status",
+    "outcome",
+    "usage",
+    "usage_binding",
+    "acceptance"
+  ]
+}

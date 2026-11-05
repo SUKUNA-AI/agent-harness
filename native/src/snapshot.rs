@@ -620,6 +620,59 @@ fn observed(path: &Path) -> Result<(Metadata, Stamp), std::io::Error> {
     Ok((metadata, identity.map_err(std::io::Error::other)?))
 }
 
+fn parent_topology(path: &Path) -> Result<Vec<(PathBuf, u64, u64)>, String> {
+    let mut result = Vec::new();
+    for parent in path.ancestors().skip(1) {
+        let (metadata, identity) = match observed(parent) {
+            Ok(value) => value,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.to_string()),
+        };
+        #[cfg(windows)]
+        let reparse = {
+            use std::os::windows::fs::MetadataExt;
+            metadata.file_attributes() & 0x400 != 0
+        };
+        #[cfg(unix)]
+        let reparse = false;
+        if metadata.file_type().is_symlink() || reparse {
+            return Err(format!(
+                "source ancestor is symlink/reparse: {}",
+                parent.display()
+            ));
+        }
+        if !metadata.is_dir() {
+            return Err(format!(
+                "source ancestor is not a directory: {}",
+                parent.display()
+            ));
+        }
+        result.push((parent.to_owned(), identity.device, identity.inode));
+    }
+    Ok(result)
+}
+
+fn lexical_absolute(path: &Path) -> Result<PathBuf, String> {
+    let absolute = if path.is_absolute() {
+        path.to_owned()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| e.to_string())?
+            .join(path)
+    };
+    let mut result = PathBuf::new();
+    for part in absolute.components() {
+        match part {
+            Component::ParentDir => {
+                result.pop();
+            }
+            Component::CurDir => {}
+            _ => result.push(part.as_os_str()),
+        }
+    }
+    Ok(result)
+}
+
 fn regular_open(path: &Path) -> Result<File, String> {
     let mut options = OpenOptions::new();
     options.read(true);
@@ -771,6 +824,7 @@ pub fn read_regular(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
 
 fn entry(path: &Path, deadline: Instant) -> Result<Value, String> {
     check_time(deadline)?;
+    let topology = parent_topology(path)?;
     let (metadata, before) = match observed(path) {
         Ok(value) => value,
         Err(error)
@@ -787,7 +841,7 @@ fn entry(path: &Path, deadline: Instant) -> Result<Value, String> {
         let target = text(fs::read_link(path).map_err(|e| e.to_string())?.as_os_str())?;
         json!({"kind":"symlink","sha256":format!("{:x}",Sha256::digest(target.as_bytes())),"target":target})
     } else if metadata.is_file() {
-        let mut file = regular_open(path)?;
+        let mut file = rooted_open(path)?;
         if stamp(&file.metadata().map_err(|e| e.to_string())?, Some(&file))? != before {
             return Err(format!(
                 "source changed during snapshot: {}",
@@ -815,7 +869,8 @@ fn entry(path: &Path, deadline: Instant) -> Result<Value, String> {
     } else {
         return Ok(json!({"kind":"directory"}));
     };
-    if observed(path).map_err(|e| e.to_string())?.1 != before {
+    if parent_topology(path)? != topology || observed(path).map_err(|e| e.to_string())?.1 != before
+    {
         return Err(format!(
             "source changed during snapshot: {}",
             path.display()
@@ -866,7 +921,11 @@ pub fn snapshot(contract: &Value) -> Result<Value, String> {
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
     {
-        let root = resolve(Path::new(cwd))?;
+        let root = lexical_absolute(Path::new(cwd))?;
+        let topology = parent_topology(&root.join(".harness-root-binding"))?;
+        let (_, root_identity) = observed(&root).map_err(|e| e.to_string())?;
+        result["root_binding"] =
+            json!({"device": root_identity.device, "inode": root_identity.inode});
         let mut excludes = vec![".git".to_owned(), ".git/**".to_owned()];
         if let Some(values) = contract.pointer("/scope/exclude") {
             for value in values.as_array().ok_or("scope.exclude must be an array")? {
@@ -907,10 +966,13 @@ pub fn snapshot(contract: &Value) -> Result<Value, String> {
                 .collect::<Result<_, _>>()
         })?;
         result["files"] = Value::Object(rows.into_iter().collect());
+        if parent_topology(&root.join(".harness-root-binding"))? != topology {
+            return Err("source root physical identity changed during snapshot".into());
+        }
     }
     if let Some(inputs) = contract.get("inputs") {
         for item in inputs.as_array().ok_or("inputs must be an array")? {
-            let path = resolve(Path::new(
+            let path = lexical_absolute(Path::new(
                 item.get("path")
                     .and_then(Value::as_str)
                     .ok_or("input requires path")?,
@@ -930,6 +992,13 @@ pub fn snapshot(contract: &Value) -> Result<Value, String> {
             result["external_inputs"][shown_path(&path)?] = observed;
         }
     }
+    result["snapshot_scheme_version"] = json!(2);
+    result["topology_policy"] = json!("nofollow-ancestors-literal-leaf-v1");
+    let mut content = result.clone();
+    content.as_object_mut().unwrap().remove("root_binding");
+    let mut content_encoded = Vec::new();
+    canonical(&content, &mut content_encoded)?;
+    result["content_digest"] = json!(format!("{:x}", Sha256::digest(&content_encoded)));
     let mut encoded = Vec::new();
     canonical(&result, &mut encoded)?;
     result["digest"] = json!(format!("{:x}", Sha256::digest(&encoded)));
