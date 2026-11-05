@@ -13,6 +13,7 @@ import random
 import statistics
 
 from .core import HarnessError, digest
+from . import benchmark_metrics
 from .execution_ledger import HASH, SHORT, object_schema, safe_private
 from .file_io import read_regular_file
 from .strict_yaml import load, loads, dump, validate
@@ -66,6 +67,9 @@ TRIAL = object_schema({"schema_version": {"const": 1}, "manifest_digest": HASH,
     ("schema_version", "manifest_digest", "measurement_kind", "trial_id", "outcome", "elapsed_seconds", "usage_coverage", "usage",
      "claimed_accepted", "mandatory_nodes_skipped", "duplicate_writes", "recovery", "time_to_accepted_seconds",
      "useful_retrieval", "stale_reuse", "hook_overhead_ms", "evaluator_receipt"))
+TRIAL_V1 = TRIAL
+TRIAL_V2 = benchmark_metrics.trial_schema(TRIAL_V1)
+TRIAL = {"oneOf": [TRIAL_V1, TRIAL_V2]}
 GRADE = object_schema({"schema_version": {"const": 1}, "record_type": {"const": "independent_grade"},
     "manifest_digest": HASH, "trial_id": HASH, "evaluator_digest": HASH,
     "outcome": {"enum": ["accepted", "failed", "cancelled", "timeout", "environment_error"]}},
@@ -74,9 +78,10 @@ GRADE = object_schema({"schema_version": {"const": 1}, "record_type": {"const": 
 
 def checked_ref(ref, root):
     """Resolve only ordinary local assets inside the approved bundle root."""
-    path = Path(ref["path"])
-    if path.is_absolute() or ".." in path.parts or not path.parts:
-        raise HarnessError("BENCH_UNSAFE_ASSET: asset refs must be relative to bundle root")
+    try:
+        path = benchmark_metrics.portable_relative_path(ref["path"])
+    except ValueError as error:
+        raise HarnessError("BENCH_UNSAFE_ASSET: portable relative asset refs required") from error
     target = safe_private(Path(root).absolute() / path)
     raw = read_regular_file(target, max_bytes=2 * 1024 * 1024)
     if hashlib.sha256(raw).hexdigest() != ref["sha256"]:
@@ -137,6 +142,8 @@ def summarize(manifest, trials, root):
     records, invocation_ids = {}, set()
     for trial in trials:
         validate(trial, TRIAL)
+        if trial["schema_version"] == 2:
+            benchmark_metrics.validate_measurements({name: trial[name] for name in ("schema_version", "metrics", "phase_seconds")}, root, trial_id=trial["trial_id"], manifest_digest=trial["manifest_digest"])
         key = trial["trial_id"]
         if key not in by_id or trial["manifest_digest"] != digest(manifest):
             raise HarnessError("BENCH_TRIAL_BINDING_MISMATCH")
@@ -175,24 +182,29 @@ def summarize(manifest, trials, root):
                 "accepted": sum(row["outcome"] == "accepted" for row in selected),
                 "failed_or_cancelled": sum(row["outcome"] != "accepted" for row in selected),
                 "false_acceptance": sum(row["claimed_accepted"] and row["outcome"] != "accepted" for row in selected),
-                "mandatory_nodes_skipped": sum(row["mandatory_nodes_skipped"] for row in selected),
-                "duplicate_writes": sum(row["duplicate_writes"] for row in selected),
-                "recovery_succeeded": sum(row["recovery"] == "succeeded" for row in selected),
-                "recovery_failed": sum(row["recovery"] == "failed" for row in selected),
-                "recovery_unknown": sum(row["recovery"] == "unknown" for row in selected),
+                "mandatory_nodes_skipped": _metric_sum(selected, "mandatory_nodes_skipped"),
+                "duplicate_writes": _metric_sum(selected, "duplicate_writes"),
+                "recovery_succeeded": sum(benchmark_metrics.metric_value(row, "recovery") == "succeeded" and not benchmark_metrics.metric_unknown(row, "recovery") for row in selected),
+                "recovery_failed": sum(benchmark_metrics.metric_value(row, "recovery") == "failed" and not benchmark_metrics.metric_unknown(row, "recovery") for row in selected),
+                "recovery_unknown": sum(benchmark_metrics.metric_unknown(row, "recovery") or benchmark_metrics.metric_value(row, "recovery") == "unknown" for row in selected),
+                "recovery_partial": sum(row["schema_version"] == 2 and row["metrics"]["recovery"]["coverage"] == "partial" for row in selected),
                 "observed_model_calls": sum(len(row["usage"]) for row in selected),
                 "observed_retries_repairs": sum(usage["phase"] in {"repair", "retry"} for row in selected for usage in row["usage"]),
-                "useful_retrieval_true": sum(row["useful_retrieval"] is True for row in selected),
-                "useful_retrieval_unknown": sum(row["useful_retrieval"] is None for row in selected),
-                "stale_reuse": sum(row["stale_reuse"] for row in selected),
-                "hook_overhead_ms": sum(row["hook_overhead_ms"] for row in selected if row["hook_overhead_ms"] is not None),
-                "hook_overhead_unknown": sum(row["hook_overhead_ms"] is None for row in selected),
+                "useful_retrieval_true": sum(benchmark_metrics.metric_value(row, "useful_retrieval") is True for row in selected),
+                "useful_retrieval_unknown": sum(benchmark_metrics.metric_unknown(row, "useful_retrieval") for row in selected),
+                "stale_reuse": _metric_sum(selected, "stale_reuse"),
+                "hook_overhead_ms": _metric_sum(selected, "hook_overhead_ms"),
+                "hook_overhead_unknown": sum(benchmark_metrics.metric_unknown(row, "hook_overhead_ms") for row in selected),
                 "time_to_accepted_seconds": [row["time_to_accepted_seconds"] for row in selected if row["outcome"] == "accepted"],
                 "censored_or_unaccepted": sum(row["outcome"] != "accepted" for row in selected),
                 "elapsed_seconds": sum(row["elapsed_seconds"] for row in selected),
                 "usage_coverage": "complete" if complete else "partial",
                 "observed_tokens": sum(value for row in selected for usage in row["usage"]
                                        for value in (usage["input_tokens"], usage["output_tokens"]) if value is not None)}
+            summaries[arm].update({name + "_unknown": sum(benchmark_metrics.metric_unknown(row, name) for row in selected)
+                                   for name in ("mandatory_nodes_skipped", "duplicate_writes", "stale_reuse", "manual_interventions")})
+            summaries[arm]["manual_interventions"] = _metric_sum(selected, "manual_interventions")
+            summaries[arm]["phase_seconds"] = {name: _phase_summary(selected, name) for name in benchmark_metrics.PHASES}
         paired, paired_report = _paired_cost_report(suite, suite_plan, records, arms, manifest["repeats"])
         interval = _interval(paired, manifest) if len(paired) >= 2 else None
         quality_delta = ((summaries[arms[1]]["accepted"] - summaries[arms[0]]["accepted"])
@@ -203,10 +215,16 @@ def summarize(manifest, trials, root):
             verdict = ("measured_negative" if quality_delta < manifest["minimum_quality_delta"] or interval["upper"] < 0
                        else "measured_positive" if interval["lower"] >= manifest["minimum_token_gain"]
                        else "no_clear_effect")
+        matched_unverified = manifest["comparison"] == "matched" and output["measurement_kind"] == "observed"
+        if matched_unverified:
+            # These receipt versions have no observed role-level setting map.
+            # Equal policy-file hashes cannot qualify a causal effort match.
+            verdict = "insufficient_data"
         output["suites"].append({"suite": suite["id"], "full_cohort": summaries,
             "quality_delta": quality_delta,
             "policy_result": verdict,
-            "claim_scope": "synthetic_accounting_only" if output["measurement_kind"] == "synthetic" else "supplied_qualified_observations_required",
+            "matched_effort_qualification": "not_verified" if matched_unverified else "not_applicable_to_observed_claim",
+            "claim_scope": "matched_role_mapping_unavailable" if matched_unverified else "synthetic_accounting_only" if output["measurement_kind"] == "synthetic" else "supplied_qualified_observations_required",
             "accepted_pairs": {**paired_report, "task_clusters": len(paired),
                 "median_relative_token_saving": statistics.median(paired) if paired else None,
                 "selection": "accepted_in_both_arms_with_complete_usage",
@@ -215,6 +233,21 @@ def summarize(manifest, trials, root):
                              "no aggregate score across different suites",
                              "sample byte savings are not task token savings"]
     return output
+
+
+def _metric_sum(rows, name):
+    values = [benchmark_metrics.metric_value(row, name) for row in rows]
+    known = [value for value in values if value is not None]
+    return sum(known) if known or not rows else None
+
+
+def _phase_summary(rows, name):
+    values = [row["phase_seconds"][name] for row in rows if row["schema_version"] == 2]
+    known = [item["value"] for item in values if item["value"] is not None]
+    return {"observed_seconds": sum(known) if known else None,
+            "observed_trials": sum(item["coverage"] == "observed" for item in values),
+            "partial_trials": sum(item["coverage"] == "partial" for item in values),
+            "unavailable_trials": len(rows) - len(values) + sum(item["coverage"] == "unavailable" for item in values)}
 
 
 def _paired_cost_report(suite, planned, records, arms, repeats):

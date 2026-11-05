@@ -1,0 +1,593 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "record_type": {
+      "const": "benchmark_upstream_materialized"
+    },
+    "trial_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "manifest_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "plan_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "record_type": {
+          "const": "benchmark_upstream_preparation"
+        },
+        "suite": {
+          "enum": [
+            "swe-bench-verified",
+            "terminal-bench-2.1",
+            "aider-polyglot"
+          ]
+        },
+        "task_id": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "dataset_revision": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}([a-f0-9]{24})?$"
+        },
+        "evaluator_revision": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}([a-f0-9]{24})?$"
+        },
+        "source_ref": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "path",
+            "sha256"
+          ]
+        },
+        "profile_ref": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "path",
+            "sha256"
+          ]
+        },
+        "profile_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "cohort_selection": {
+          "enum": [
+            "selected_full_pinned_index",
+            "custom_selection",
+            "synthetic_fixture"
+          ]
+        },
+        "protocol": {
+          "enum": [
+            "swebench-jsonl-v1",
+            "harbor-task-v1",
+            "aider-exercism-v1"
+          ]
+        },
+        "objective": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536
+        },
+        "solve_files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string",
+                "maxLength": 512
+              },
+              "asset": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                },
+                "required": [
+                  "path",
+                  "sha256"
+                ]
+              },
+              "mode": {
+                "enum": [
+                  "100644",
+                  "100755"
+                ]
+              }
+            },
+            "required": [
+              "path",
+              "asset"
+            ]
+          }
+        },
+        "protected_files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string",
+                "maxLength": 512
+              },
+              "asset": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                },
+                "required": [
+                  "path",
+                  "sha256"
+                ]
+              },
+              "mode": {
+                "enum": [
+                  "100644",
+                  "100755"
+                ]
+              }
+            },
+            "required": [
+              "path",
+              "asset"
+            ]
+          }
+        },
+        "writable_paths": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        "evaluator": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "schema_version": {
+              "const": 1
+            },
+            "record_type": {
+              "const": "benchmark_upstream_evaluator"
+            },
+            "suite": {
+              "enum": [
+                "swe-bench-verified",
+                "terminal-bench-2.1",
+                "aider-polyglot"
+              ]
+            },
+            "revision": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{40}([a-f0-9]{24})?$"
+            },
+            "protocol": {
+              "enum": [
+                "swebench-jsonl-v1",
+                "harbor-task-v1",
+                "aider-exercism-v1"
+              ]
+            },
+            "entrypoint": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              },
+              "required": [
+                "path",
+                "sha256"
+              ]
+            },
+            "helpers": {
+              "type": "array",
+              "maxItems": 16,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  "artifact": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "maxLength": 512
+                      },
+                      "sha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "sha256"
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "artifact"
+                ]
+              }
+            }
+          },
+          "required": [
+            "schema_version",
+            "record_type",
+            "suite",
+            "revision",
+            "protocol",
+            "entrypoint",
+            "helpers"
+          ]
+        },
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "language": {
+              "enum": [
+                null,
+                "python",
+                "rust",
+                "go",
+                "javascript",
+                "cpp",
+                "java"
+              ]
+            },
+            "base_commit": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "test_files": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 512
+              }
+            },
+            "solution_files": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 512
+              }
+            },
+            "agent_timeout_seconds": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "verifier_timeout_seconds": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "required": [
+            "language",
+            "base_commit",
+            "test_files",
+            "solution_files",
+            "agent_timeout_seconds",
+            "verifier_timeout_seconds"
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "record_type",
+        "suite",
+        "task_id",
+        "dataset_revision",
+        "evaluator_revision",
+        "source_ref",
+        "profile_ref",
+        "profile_digest",
+        "cohort_selection",
+        "protocol",
+        "objective",
+        "solve_files",
+        "protected_files",
+        "writable_paths",
+        "evaluator",
+        "parameters"
+      ]
+    },
+    "source_root": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "evaluator_root": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "source_binding": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "device": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "inode": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "path",
+          "device",
+          "inode"
+        ]
+      }
+    },
+    "evaluator_binding": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "device": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "inode": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "path",
+          "device",
+          "inode"
+        ]
+      }
+    },
+    "initial_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "path",
+          "sha256"
+        ]
+      }
+    },
+    "immutable_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "path",
+          "sha256"
+        ]
+      }
+    },
+    "protected_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "path",
+          "sha256"
+        ]
+      }
+    },
+    "fresh_git": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "record_type": {
+          "const": "benchmark_fresh_git"
+        },
+        "root": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "initial_head": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}([a-f0-9]{24})?$"
+        },
+        "initial_tree": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}([a-f0-9]{24})?$"
+        },
+        "git_binding": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string",
+                "maxLength": 512
+              },
+              "device": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "inode": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "path",
+              "device",
+              "inode"
+            ]
+          }
+        },
+        "root_binding": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string",
+                "maxLength": 512
+              },
+              "device": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "inode": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "path",
+              "device",
+              "inode"
+            ]
+          }
+        }
+      },
+      "required": [
+        "schema_version",
+        "record_type",
+        "root",
+        "initial_head",
+        "initial_tree",
+        "git_binding",
+        "root_binding"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "record_type",
+    "trial_id",
+    "manifest_digest",
+    "plan_digest",
+    "plan",
+    "source_root",
+    "evaluator_root",
+    "source_binding",
+    "evaluator_binding",
+    "initial_files",
+    "immutable_files",
+    "protected_files",
+    "fresh_git"
+  ]
+}

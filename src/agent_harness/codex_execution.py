@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import copy
 import json
 import os
 from pathlib import Path
@@ -15,8 +16,10 @@ import tempfile
 import threading
 import time
 import uuid
+from collections.abc import Mapping
+from types import MappingProxyType
 
-from .core import HarnessError, now, process_identity
+from .core import HarnessError, now, process_identity, digest
 from .file_io import read_regular_file
 from .runner import _contained_capture, _start_contained, _terminate, redact
 from .supervisor_store import _mkdir, _ordinary, _parents
@@ -168,10 +171,36 @@ def _read_stream(source, name, target, inbox):
         inbox.put(("eof", name))
 
 
-def configured_settings():
+def _explicit_environment(environment):
+    if environment is None:
+        return None
+    if not isinstance(environment, Mapping) or len(environment) > 512:
+        raise HarnessError("Explicit Codex environment must be a bounded string mapping")
+    copied = dict(environment)
+    if any(not isinstance(key, str) or not key or "=" in key or "\x00" in key
+           or not isinstance(value, str) or "\x00" in value for key, value in copied.items()):
+        raise HarnessError("Explicit Codex environment contains an invalid entry")
+    if len({key.casefold() for key in copied}) != len(copied):
+        raise HarnessError("Explicit Codex environment contains case-ambiguous keys")
+    if sum(len(key.encode("utf-8")) + len(value.encode("utf-8")) for key, value in copied.items()) > 1024 * 1024:
+        raise HarnessError("Explicit Codex environment exceeds its byte bound")
+    if not copied.get("CODEX_HOME") or not Path(copied["CODEX_HOME"]).is_absolute():
+        raise HarnessError("Explicit Codex environment requires an absolute CODEX_HOME")
+    return MappingProxyType(copied)
+
+
+def _codex_home(environment):
+    if environment is None:
+        return Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
+    if not environment.get("CODEX_HOME") or not Path(environment["CODEX_HOME"]).is_absolute():
+        raise HarnessError("Explicit Codex environment requires an absolute CODEX_HOME")
+    return Path(environment["CODEX_HOME"])
+
+
+def configured_settings(*, environment=None):
     """Safe file projection, explicitly distinct from effective session config."""
     import tomllib
-    path = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "config.toml"
+    path = _codex_home(environment) / "config.toml"
     if not path.exists():
         return {}
     value = tomllib.loads(read_regular_file(path, max_bytes=2 * 1024 * 1024).decode("utf-8-sig"))
@@ -180,15 +209,32 @@ def configured_settings():
 
 
 class CodexAdapter:
-    def __init__(self, executable=("codex",)):
+    def __init__(self, executable=("codex",), *, environment=None):
+        self.environment = _explicit_environment(environment)
         if isinstance(executable, (str, Path)):
             executable = (str(executable),)
         if not isinstance(executable, (tuple, list)) or not executable or any(not isinstance(x, str) or not x or "\x00" in x for x in executable):
             raise HarnessError("Codex executable must be a nonempty argv sequence")
-        resolved = shutil.which(executable[0])
+        resolved = shutil.which(executable[0], **({"path": self.environment.get("PATH", os.defpath)} if self.environment is not None else {}))
         if resolved is None:
             raise HarnessError("Codex executable unavailable")
         self.executable = (str(Path(resolved).resolve()), *executable[1:])
+
+    def with_environment(self, environment):
+        """Copy this transport with a separate environment and the same binary.
+
+        This inherited implementation supports the exact concrete transport.
+        Subclasses must implement their own clone contract; that implementation
+        may itself be inherited normally. No delegation introspection is proof.
+        The original adapter, global environment and resolved binary are unchanged.
+        """
+        if type(self) is not CodexAdapter:
+            raise HarnessError("ENVIRONMENT_CLONE_CONTRACT_REQUIRED: subclass must implement its own clone")
+        if any(name in self.__dict__ for name in ("run", "capabilities", "argv")):
+            raise HarnessError("ENVIRONMENT_CLONE_CONTRACT_REQUIRED: instance transport override")
+        clone = copy.copy(self)
+        clone.environment = _explicit_environment(environment)
+        return clone
 
     def capabilities(self, *, deadline=None):
         """Probe flags only. Tool-inventory suppression needs a separate receipt."""
@@ -205,14 +251,15 @@ class CodexAdapter:
                     if remaining <= 0:
                         return {"status": "unavailable", "reason": "deadline_exhausted", "native_children_disabled": False}
                     timeout = min(timeout, remaining)
-                result = _contained_capture([*self.executable, *args], timeout=timeout)
+                result = _contained_capture([*self.executable, *args], timeout=timeout,
+                    **({"env": self.environment} if self.environment is not None else {}))
                 output = result.stdout.decode("utf-8", errors="replace")
                 if result.returncode or len(output.encode("utf-8")) > 262144:
                     raise HarnessError("Capability probe failed")
                 values[name] = output
             except (OSError, ValueError, subprocess.TimeoutExpired, HarnessError) as error:
                 return {"status": "unavailable", "reason": type(error).__name__, "native_children_disabled": False}
-        return {"status": "observed", "version": values["version"].strip(), "binary_sha256": _binary_hash(self.executable[0]), "json": "--json" in values["exec"], "resume": "SESSION_ID" in values["resume"], "output_schema": "--output-schema" in values["exec"], "resume_output_schema": "--output-schema" in values["resume"], "configured_settings": configured_settings(), "native_children_disabled": False, "suppression_proof": "Separate observed tool inventory bound to this binary/version is required"}
+        return {"status": "observed", "version": values["version"].strip(), "binary_sha256": _binary_hash(self.executable[0]), "json": "--json" in values["exec"], "resume": "SESSION_ID" in values["resume"], "output_schema": "--output-schema" in values["exec"], "resume_output_schema": "--output-schema" in values["resume"], "configured_settings": configured_settings(environment=self.environment), "native_children_disabled": False, "suppression_proof": "Separate observed tool inventory bound to this binary/version is required"}
 
     def argv(self, prompt, *, session_id=None, output_schema=None, native_children=False, read_only=False, write_authorized=False, allow_non_git=False):
         if not isinstance(prompt, str) or not prompt or len(prompt.encode("utf-8")) > MAX_PROMPT_BYTES or "\x00" in prompt:
@@ -228,7 +275,7 @@ class CodexAdapter:
             argv += ["-c", 'sandbox_mode="read-only"']
         elif write_authorized:
             import tomllib
-            config_path = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "config.toml"
+            config_path = _codex_home(self.environment) / "config.toml"
             configured = None
             if config_path.exists():
                 configured = tomllib.loads(read_regular_file(config_path, max_bytes=2 * 1024 * 1024).decode("utf-8-sig")).get("sandbox_mode")
@@ -273,6 +320,8 @@ class CodexAdapter:
         readers = []
         started = time.monotonic()
         result = {"status": "unknown_outcome", "thread_id": session_id, "process": None, "usage": None, "events": 0, "observable_tool_calls": 0, "logs": {"stdout": str(stdout_path), "stderr": str(stderr_path)}, "error": None, "exit_code": None, "started_at": now(), "outcome_known": False, "process_tree_stopped": False}
+        if self.environment is not None:
+            result["environment_digest"] = digest(dict(self.environment))
         terminal = None
         seen_thread = False
         turn_started = False
@@ -342,7 +391,8 @@ class CodexAdapter:
                         return result
                     timeout = min(timeout, remaining)
                 spawn_started = time.monotonic()
-                process, job = _start_contained(argv, str(cwd))
+                process, job = _start_contained(argv, str(cwd),
+                    **({"env": self.environment} if self.environment is not None else {}))
                 result["spawn_seconds"] = time.monotonic() - spawn_started
                 identity = process_identity(process.pid)
                 result["process"] = {"identity": identity, "tree_control": "windows_suspended_job_kill_on_close" if os.name == "nt" else "private_process_group", "started_at": now(), "cwd": str(cwd), "argv_digest": hashlib.sha256(json.dumps(argv, ensure_ascii=False).encode("utf-8")).hexdigest()}

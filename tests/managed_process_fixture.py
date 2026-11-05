@@ -8,6 +8,7 @@ and releases it after the real callback returns (also on error for cleanup).
 from pathlib import Path
 
 from agent_harness.codex_execution import CodexAdapter
+from agent_harness.supervisor_store import atomic_write
 
 
 def bound_fake_script(script):
@@ -47,7 +48,8 @@ class BoundFixtureCodexAdapter(CodexAdapter):
                 # The synthetic Python script is the second executable argv.
                 # This marker is outside the task worktree and cannot affect
                 # its candidate snapshot or ownership/scope rejection checks.
-                Path(self.executable[1]).with_suffix('.bind-'+str(identity['pid'])).write_text('bound')
+                atomic_write(Path(self.executable[1]).with_suffix('.bind-'+str(identity['pid'])),
+                    b'bound', exclusive=True)
         result = super().run(prompt, on_process=bind_then_release, **options)
         trace.update({key: result.get(key) for key in ('status', 'error', 'usage', 'turn_started',
             'turn_completed', 'outcome_known', 'process_tree_stopped', 'exit_code', 'logs',

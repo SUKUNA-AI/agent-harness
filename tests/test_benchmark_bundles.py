@@ -212,7 +212,31 @@ class BundleTests(unittest.TestCase):
                            ('benchmark-grade-input',GRADE_INPUT)]:
             exported=json.loads((Path(__file__).parents[1]/'schemas'/(name+'.schema.json')).read_text())
             self.assertEqual(exported,value)
-            self.assertFalse(value['additionalProperties'])
+            self.assertTrue(all(not branch.get('additionalProperties',False) for branch in value.get('oneOf',[value])))
+
+    def test_typed_git_materialization_preserves_project_docs_and_legacy_refusal(self):
+        from agent_harness.benchmark_bundles import MATERIALIZED_V1
+        bundle=strict_yaml.load(self.assets/self.task['source']['path'])
+        project=self.assets/'project-agents.md';project.write_text('Project-local instruction stays visible.\n')
+        bundle['files'].append({'path':'AGENTS.md','source':{'path':project.name,'sha256':_hash(project.read_bytes())}})
+        raw=self.assets/'git-bundle.yaml';strict_yaml.dump(raw,bundle,BUNDLE)
+        ref={'path':raw.name,'sha256':_hash(raw.read_bytes())}
+        value=materialize_task_bundle(ref,assets_root=self.assets,trial_root=self.root/'git-trial',row=self.row,manifest_digest='2'*64,fresh_git=True)
+        receipt=self.root/'git-trial/materialized.yaml'
+        self.assertEqual(value['schema_version'],2)
+        self.assertEqual((Path(value['source_root'])/'AGENTS.md').read_bytes(),project.read_bytes())
+        with self.assertRaises(ValueError):strict_yaml.validate(value,MATERIALIZED_V1)
+        verify_materialized(receipt,initial=True)
+        self.fill(value)
+        observer=MilestoneObserver(receipt,self.root/'git-controller')
+        self.assertEqual(observer.observe()['milestone_id'],'inputs-verified')
+        git=Path(value['source_root'])/'.git';git.rename(git.with_name('replaced-git'));git.mkdir()
+        with self.assertRaises(ValueError):verify_materialized(receipt)
+
+    def test_legacy_materialization_does_not_trust_added_git_metadata(self):
+        value=self.materialize();source=Path(value['source_root']);(source/'.git').mkdir();(source/'.git/config').write_text('untrusted')
+        with self.assertRaisesRegex(HarnessError,'UNDECLARED_OUTPUT'):
+            verify_materialized(self.root/'trial/materialized.yaml')
 
     def test_interrupted_materialization_preserves_partial_without_replay(self):
         from agent_harness import benchmark_bundles

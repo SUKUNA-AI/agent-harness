@@ -1,0 +1,144 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "record_type": {
+      "const": "benchmark_upstream_source"
+    },
+    "suite": {
+      "enum": [
+        "swe-bench-verified",
+        "terminal-bench-2.1",
+        "aider-polyglot"
+      ]
+    },
+    "task_id": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "dataset_revision": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}([a-f0-9]{24})?$"
+    },
+    "evaluator_revision": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}([a-f0-9]{24})?$"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "path",
+        "sha256"
+      ]
+    },
+    "files": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "asset": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string",
+                "maxLength": 512
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": [
+              "path",
+              "sha256"
+            ]
+          },
+          "mode": {
+            "enum": [
+              "100644",
+              "100755"
+            ]
+          }
+        },
+        "required": [
+          "path",
+          "asset"
+        ]
+      }
+    },
+    "checkout": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "revision": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{40}([a-f0-9]{24})?$"
+            },
+            "tree": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{40}([a-f0-9]{24})?$"
+            },
+            "inventory_digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "revision",
+            "tree",
+            "inventory_digest"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "language": {
+      "enum": [
+        null,
+        "python",
+        "rust",
+        "go",
+        "javascript",
+        "cpp",
+        "java"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "record_type",
+    "suite",
+    "task_id",
+    "dataset_revision",
+    "evaluator_revision",
+    "metadata",
+    "files",
+    "checkout",
+    "language"
+  ]
+}

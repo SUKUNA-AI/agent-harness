@@ -41,6 +41,10 @@ class MilestoneObserver:
         rows = []
         for path in sorted(root.rglob("*")):
             _deadline(deadline)
+            # verify_materialized above has already checked the controller's
+            # typed v2 physical Git binding. Legacy v1 has no such exclusion.
+            if self.value['schema_version']==2 and path.relative_to(root).parts[0]=='.git':
+                continue
             _ordinary(path, directory=path.is_dir())
             if path.is_file():
                 rows.append([path.relative_to(root).as_posix(), _hash(read_regular_file(path))])

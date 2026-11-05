@@ -155,9 +155,9 @@ def _terminate(process, job):
         raise HarnessError("Owned process did not terminate; inspect retained process identity")
 
 
-def _start_contained(argv, cwd=None):
+def _start_contained(argv, cwd=None, *, env=None):
     flags = subprocess.CREATE_NEW_PROCESS_GROUP | 0x00000004 if os.name == "nt" else 0
-    process = subprocess.Popen(argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, shell=False, creationflags=flags, start_new_session=(os.name != "nt"))
+    process = subprocess.Popen(argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, shell=False, creationflags=flags, start_new_session=(os.name != "nt"), env=env)
     job = None
     try:
         job = WindowsJob(process)
@@ -174,9 +174,9 @@ def _start_contained(argv, cwd=None):
         raise
 
 
-def _contained_capture(argv, *, cwd=None, timeout=10):
+def _contained_capture(argv, *, cwd=None, timeout=10, env=None):
     """Use the same tree containment for version probes and scope adapters."""
-    process, job = _start_contained(argv, cwd)
+    process, job = _start_contained(argv, cwd, **({"env": env} if env is not None else {}))
     try:
         try:
             stdout, stderr = process.communicate(timeout=timeout)

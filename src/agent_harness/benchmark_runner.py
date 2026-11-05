@@ -23,7 +23,7 @@ import subprocess
 import time
 import uuid
 
-from . import __version__, evaluation
+from . import __version__, evaluation, benchmark_metrics
 from .codex_execution import CodexAdapter
 from .core import HarnessError, digest, identity_alive, now, snapshot
 from .execution_ledger import HASH, SHORT, object_schema
@@ -65,6 +65,8 @@ MEASUREMENTS = object_schema({"mandatory_nodes_skipped": NATURAL, "duplicate_wri
     "useful_retrieval": {"type": ["boolean", "null"]}, "stale_reuse": NATURAL,
     "hook_overhead_ms": {"type": ["number", "null"], "minimum": 0}},
     ("mandatory_nodes_skipped", "duplicate_writes", "recovery", "useful_retrieval", "stale_reuse", "hook_overhead_ms"))
+MEASUREMENTS_V1 = MEASUREMENTS
+MEASUREMENTS = {"oneOf": [MEASUREMENTS_V1, benchmark_metrics.MEASUREMENTS_V2]}
 SOLVE = object_schema({"outcome": {"enum": ["completed", "failed", "cancelled", "timeout", "environment_error", "unknown"]},
     "claimed_accepted": {"type": "boolean"}, "elapsed_seconds": {"type": "number", "minimum": 0},
     "usage_coverage": {"enum": ["complete", "partial", "unknown"]},
@@ -180,11 +182,12 @@ def production_status():
 
 
 class BenchmarkRunner:
-    def __init__(self, run_dir, adapter):
+    def __init__(self, run_dir, adapter, *, fault_controller=None):
         if not isinstance(adapter, CodexBenchmarkAdapter):
             raise HarnessError("BENCH_ADAPTER_API_REQUIRED")
         self.store = SupervisorStore(run_dir, STATE, create=False)
         self.adapter = adapter
+        self.fault_controller = fault_controller
         self.state = self.store.read("state.yaml", STATE)
         self.manifest = self.store.read("manifest.yaml", evaluation.MANIFEST_SCHEMA)
         self.rows = evaluation.schedule(self.manifest)
@@ -193,7 +196,7 @@ class BenchmarkRunner:
         self._authorization_end = time.monotonic() + max(0, self._remaining())
 
     @classmethod
-    def create(cls, manifest, *, assets_root, run_dir, adapter, authorization):
+    def create(cls, manifest, *, assets_root, run_dir, adapter, authorization, fault_controller=None):
         if not isinstance(adapter, CodexBenchmarkAdapter):
             raise HarnessError("BENCH_ADAPTER_API_REQUIRED")
         if not isinstance(authorization, BudgetAuthorization):
@@ -223,7 +226,7 @@ class BenchmarkRunner:
                 "assets_root": str(assets_root), "created_at": now(), "trial_token_bounds": bounds,
                 "harness_version": __version__, "harness_build_digest": build_digest()}
             store.commit(state, "frozen complete cohort and explicit caller budget")
-        return cls(run_dir, adapter)
+        return cls(run_dir, adapter, fault_controller=fault_controller)
 
     def _record(self, kind, trial_id, payload, *, record_id=None):
         validate(payload, PAYLOADS[kind])
@@ -504,6 +507,12 @@ class BenchmarkRunner:
         dispatch = next(r for r in self.records() if r["kind"] == "dispatch" and r["trial_id"] == row["trial_id"])
         started_at = datetime.fromisoformat(dispatch["created_at"].replace("Z", "+00:00"))
         deadline = self._earliest_deadline((started_at + timedelta(seconds=contract["budgets"]["max_wall_seconds"])).isoformat())
+        if self.fault_controller is not None:
+            self._require_remaining(deadline)
+            self.fault_controller.before_solve(manifest_digest=self.state["manifest_digest"],
+                trial_id=row["trial_id"], execution_id=execution_id, prepared=prepared,
+                dispatch_digest=digest(dispatch["payload"]), deadline=deadline)
+            self._require_remaining(deadline)
         backend = self._call_phase(self.adapter.codex, prepared, deadline=deadline)
         if not isinstance(backend, CodexAdapter):
             raise HarnessError("BENCH_CODEX_ADAPTER_REQUIRED")
@@ -562,6 +571,16 @@ class BenchmarkRunner:
         artifact = {"schema_version": 1, "manifest_digest": self.state["manifest_digest"], "trial_id": row["trial_id"],
             "execution_id": execution_id, "prepared_digest": digest(prepared), "result": result}
         self.store.write(result_path.relative_to(self.store.root).as_posix(), artifact, SOLVE_ARTIFACT, exclusive=True)
+        if self.fault_controller is not None:
+            try:
+                self._require_remaining(deadline)
+            except HarnessError as error:
+                if not str(error).startswith("BENCH_DEADLINE_EXHAUSTED"):
+                    raise
+                # Publish the completed usage through the normal caller path;
+                # an expired grant cannot authorize another fault action.
+                return result
+            self.fault_controller.after_solve(result_path)
         return result
 
     def _solve_artifact(self, row, prepared, execution_id):
@@ -613,21 +632,31 @@ class BenchmarkRunner:
             "solve_digest": HASH, "cwd": SHORT, "solve_outcome": SHORT}, "required": list(inputs)}, exclusive=True)
         ref = {"path": relative, "sha256": hashlib.sha256(read_regular_file(self.store.path(relative))).hexdigest()}
         self._record("grade_intent", trial_id, {"execution_id": uuid.uuid4().hex, "solve_digest": digest(solve), "input_ref": ref}, record_id=trial_id + "-grade-intent")
-        argv = self._call_phase(self.adapter.evaluator_argv, row, prepared, self.store.path(relative))
         evaluator = evaluation.checked_ref(suite["evaluator"], self.state["assets_root"])
         evaluator_path = Path(self.state["assets_root"]) / suite["evaluator"]["path"]
-        if not argv or str(evaluator_path) not in argv:
-            raise HarnessError("BENCH_EVALUATOR_COMMAND_NOT_PINNED")
         self._call_phase(self._binding, prepared, solve["result_snapshot_digest"])
-        result = self._capture(argv, 30)
-        if result.returncode:
-            raise HarnessError("BENCH_UNKNOWN_GRADE_OUTCOME: evaluator failed; preserve intent and diagnostics")
-        grade = loads(result.stdout, evaluation.GRADE)
+        independent = getattr(self.adapter, "independent_grade", None)
+        if independent is not None:
+            if not callable(independent):
+                raise HarnessError("BENCH_EVALUATOR_API_REQUIRED")
+            # A callback is the sole dispatch path once selected. An unknown
+            # external outcome must never fall back to a second argv run.
+            grade = self._call_phase(independent, row, prepared, self.store.path(relative))
+            validate(grade, evaluation.GRADE)
+        else:
+            argv = self._call_phase(self.adapter.evaluator_argv, row, prepared, self.store.path(relative))
+            if not argv or str(evaluator_path) not in argv:
+                raise HarnessError("BENCH_EVALUATOR_COMMAND_NOT_PINNED")
+            result = self._capture(argv, 30)
+            if result.returncode:
+                raise HarnessError("BENCH_UNKNOWN_GRADE_OUTCOME: evaluator failed; preserve intent and diagnostics")
+            grade = loads(result.stdout, evaluation.GRADE)
         if any(grade[key] != inputs[key] for key in ("manifest_digest", "trial_id", "evaluator_digest")):
             raise HarnessError("BENCH_GRADE_BINDING_MISMATCH")
         forced = {"timeout", "cancelled", "environment_error"}
         if solve["outcome"] in forced and grade["outcome"] != solve["outcome"]:
             raise HarnessError("BENCH_GRADE_ERASED_TERMINAL_FAILURE")
+        self._call_phase(self._fresh_inputs)
         self._call_phase(self._binding, prepared, solve["result_snapshot_digest"])
         self._record("grade", trial_id, grade, record_id=trial_id + "-grade")
         return grade
@@ -696,6 +725,9 @@ class BenchmarkRunner:
                 if measured is None:
                     # Nonessential telemetry cannot erase durable model usage.
                     measured = self._call_phase(self.adapter.measurements, row, prepared, solve)
+                    if isinstance(measured, dict) and measured.get("schema_version") == 2:
+                        benchmark_metrics.validate_measurements(measured, self.store.root,
+                            trial_id=row["trial_id"], manifest_digest=self.state["manifest_digest"])
                     self._record("measurements", row["trial_id"], measured, record_id=row["trial_id"] + "-measurements")
                 grade = self._grade(row, prepared, solve, self.records())
                 grade_ref = "grades/" + row["trial_id"] + ".yaml"

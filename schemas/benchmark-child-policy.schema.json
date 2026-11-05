@@ -1,0 +1,86 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "record_type": {
+      "const": "benchmark_child_policy"
+    },
+    "roles": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "role": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "model": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "provider": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "reasoning_effort": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "max_tokens": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "max_compaction_tokens": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "role",
+          "model",
+          "provider",
+          "reasoning_effort",
+          "max_tokens",
+          "max_compaction_tokens"
+        ]
+      }
+    },
+    "observed_role_mapping_ref": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "path",
+            "sha256"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "record_type",
+    "roles",
+    "observed_role_mapping_ref"
+  ]
+}

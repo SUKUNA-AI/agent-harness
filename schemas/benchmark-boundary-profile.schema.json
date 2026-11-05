@@ -1,0 +1,38 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "record_type": {
+      "const": "benchmark_boundary_profile"
+    },
+    "backend_id": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "backend_build_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "filesystem": {
+      "const": "deny_peer_and_controller"
+    },
+    "network": {
+      "const": "deny_agent_egress"
+    },
+    "evaluator": {
+      "const": "separate_from_solve"
+    }
+  },
+  "required": [
+    "schema_version",
+    "record_type",
+    "backend_id",
+    "backend_build_digest",
+    "filesystem",
+    "network",
+    "evaluator"
+  ]
+}

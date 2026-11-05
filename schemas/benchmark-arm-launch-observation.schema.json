@@ -1,0 +1,224 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "record_type": {
+      "const": "benchmark_arm_launch_observation"
+    },
+    "trial_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "manifest_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "profile_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "environment_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "environment_binding": {
+      "enum": [
+        "observed_explicit_transport_argument_mapping",
+        "declared_mapping_not_launched"
+      ]
+    },
+    "process": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "identity": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "pid": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "created": {
+                  "type": "string",
+                  "maxLength": 512
+                }
+              },
+              "required": [
+                "pid",
+                "created"
+              ]
+            },
+            "tree_control": {
+              "enum": [
+                "private_process_group",
+                "windows_suspended_job_kill_on_close"
+              ]
+            },
+            "started_at": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "cwd": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "argv_digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "identity",
+            "tree_control",
+            "started_at",
+            "cwd",
+            "argv_digest"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "status": {
+      "enum": [
+        "completed",
+        "failed",
+        "timed_out",
+        "cancelled",
+        "unknown_outcome"
+      ]
+    },
+    "outcome_known": {
+      "type": "boolean"
+    },
+    "transport_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "path",
+        "sha256"
+      ]
+    },
+    "arm_home_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "path",
+        "sha256"
+      ]
+    },
+    "ancestry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workspace": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 4096
+        },
+        "git_root_observed": {
+          "type": "boolean"
+        },
+        "ancestor_documents": {
+          "type": "array",
+          "maxItems": 512,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": [
+              "path",
+              "sha256"
+            ]
+          }
+        },
+        "client_document_boundary": {
+          "enum": [
+            "unavailable",
+            "declared_git_root_not_runtime_qualified"
+          ]
+        },
+        "qualification": {
+          "const": "unavailable"
+        }
+      },
+      "required": [
+        "workspace",
+        "git_root_observed",
+        "ancestor_documents",
+        "client_document_boundary",
+        "qualification"
+      ]
+    },
+    "policy_blockers": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "maxLength": 512
+      }
+    },
+    "effective_client_configuration_observed": {
+      "const": false
+    }
+  },
+  "required": [
+    "schema_version",
+    "record_type",
+    "trial_id",
+    "manifest_digest",
+    "profile_digest",
+    "environment_digest",
+    "environment_binding",
+    "process",
+    "status",
+    "outcome_known",
+    "transport_ref",
+    "arm_home_ref",
+    "ancestry",
+    "policy_blockers",
+    "effective_client_configuration_observed"
+  ]
+}

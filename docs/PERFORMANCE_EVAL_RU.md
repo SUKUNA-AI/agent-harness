@@ -173,3 +173,23 @@ Contained synthetic controls проверяют driver interface и не ква�
 реальный filesystem/network/evaluator boundary. Для actual cohort нужен отдельно
 проверенный поддержанный environment adapter; пустой registry нельзя заполнять
 caller flag или текстовым заверением. Budget/hard-cap guarantees остаются разными.
+
+Trial receipts v2 содержат nullable `metrics` и `phase_seconds`; v1 читаются
+по прежней закрытой схеме. Ненаблюдаемые manual interventions, пропущенные узлы,
+duplicate writes и overhead имеют null/unavailable. Ненулевое значение и
+наблюдённый ноль требуют отдельного metric receipt с trial/manifest binding,
+producer scope и hashes исходных instrumentation records. Report проверяет эти
+ссылки и показывает unknown/partial coverage отдельно. Байтовая целостность
+метрик не квалифицирует producer или изоляцию среды.
+
+Текущие trial v1/v2 не содержат наблюдённую role-level model/effort map клиента.
+Поэтому observed matched comparison сохраняет descriptive costs, но возвращает
+`insufficient_data`/`matched_role_mapping_unavailable`. Равные policy hashes не
+доказывают одинаковое фактическое распределение reasoning. Synthetic accounting
+не является реальным causal comparison; package comparison имеет отдельный scope.
+
+Adapter может предоставить `independent_grade` для закрытой evaluator boundary.
+Этот callback — единственный путь данного grade dispatch: после его неизвестного
+исхода нет fallback на argv или повторного evaluator call. Старый pinned argv
+протокол сохранён для adapters без callback. Fault-controller hooks вызываются
+перед solve и после сохранения точного solve artifact; default их не создаёт.

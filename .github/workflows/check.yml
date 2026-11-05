@@ -55,6 +55,9 @@ jobs:
               "test_execution_durability.ExecutionDurabilityTests.test_integration_faults_reconcile_pre_post_and_completion_without_replay",
               "test_managed_scheduling.ManagedSchedulingTests.test_recovery_rejects_foreign_worker_or_staging_before_any_model_spawn",
               "test_managed_scheduling.ManagedSchedulingTests.test_all_recovery_variants_keep_child_live_during_delayed_bind",
+              "test_managed_process_fixture.ManagedFixturePublicationTests.test_real_child_consumes_only_a_closed_binding_marker",
+              "test_work_cli.WorkCLITests.test_cli_stop_cancels_live_owned_process_and_watch_reports_failure",
+              "test_work_cli.WorkCLITests.test_cli_cancellation_fixture_remains_live_during_a_slow_stop_request",
           ]
           result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromNames(names))
           raise SystemExit(not result.wasSuccessful())

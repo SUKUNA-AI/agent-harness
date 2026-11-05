@@ -1,0 +1,44 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "record_type": {
+      "const": "benchmark_model_route"
+    },
+    "provider": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "channel": {
+      "const": "separate_controlled_transport"
+    },
+    "backend_identity_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "path",
+        "sha256"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "record_type",
+    "provider",
+    "channel",
+    "backend_identity_ref"
+  ]
+}

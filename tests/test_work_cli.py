@@ -11,6 +11,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from agent_harness.strict_yaml import dump
 from test_work_supervisor import FAKE
+from unittest.mock import patch
 
 
 class WorkCLITests(unittest.TestCase):
@@ -22,7 +23,11 @@ class WorkCLITests(unittest.TestCase):
         self.source.mkdir()
         (self.source / "calc.py").write_text("VALUE = 0\n")
         self.fake = self.root / "fake.py"
-        self.fake.write_text(FAKE)
+        slow = "if mode=='slow':time.sleep(3)"
+        self.assertEqual(FAKE.count(slow), 1)
+        # This scenario cancels a live owned child. Natural completion after
+        # three seconds races slower Windows CLI startup and cancellation IO.
+        self.fake.write_text(FAKE.replace(slow, "if mode=='slow':\n while True:time.sleep(0.05)"), encoding="utf-8")
         self.run_dir = self.root / "private" / "run"
         self.environment = {**os.environ, "CODEX_HOME": str(self.root / "codex-home")}
         self.tool = Path(__file__).resolve().parents[1] / "tools" / "harness.py"
@@ -69,10 +74,19 @@ class WorkCLITests(unittest.TestCase):
             self.command("stop", "--reason", "contained CLI cancellation test")
             stdout, stderr = process.communicate(timeout=30)
             self.assertEqual(process.returncode, 1, stdout + stderr)
-            self.assertEqual(json.loads(stdout)["status"], "CANCELLED")
+            self.assertEqual(json.loads(stdout)["status"], "CANCELLED", stdout + stderr)
             self.assertEqual(self.command("watch", "--timeout", "2", expected=1)["status"], "CANCELLED")
             self.assertEqual((self.source / "calc.py").read_text(), "VALUE = 0\n")
         finally:
             if process.poll() is None:
                 process.terminate()
                 process.communicate(timeout=10)
+
+    def test_cli_cancellation_fixture_remains_live_during_a_slow_stop_request(self):
+        original = self.command
+        def delayed_stop(action, *args, **options):
+            if action == "stop":
+                time.sleep(4)
+            return original(action, *args, **options)
+        with patch.object(self, "command", delayed_stop):
+            self.test_cli_stop_cancels_live_owned_process_and_watch_reports_failure()

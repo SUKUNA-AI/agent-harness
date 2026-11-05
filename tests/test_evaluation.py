@@ -172,6 +172,17 @@ class EvaluationTests(unittest.TestCase):
         with self.assertRaises(HarnessError):
             summarize(self.manifest, [first, second], self.root)
 
+    def test_observed_matched_comparison_cannot_infer_role_effort_from_manifest(self):
+        self.manifest["comparison"] = "matched"
+        trials = [dict(self.trial(row, 100 if row["arm"] == "plain_matched" else 70),
+                       measurement_kind="observed") for row in schedule(self.manifest)]
+        report = summarize(self.manifest, trials, self.root)
+        for suite in report["suites"]:
+            self.assertEqual(suite["policy_result"], "insufficient_data")
+            self.assertEqual(suite["matched_effort_qualification"], "not_verified")
+            self.assertEqual(suite["claim_scope"], "matched_role_mapping_unavailable")
+            self.assertAlmostEqual(suite["accepted_pairs"]["median_relative_token_saving"], .3)
+
 
 if __name__ == "__main__":
     unittest.main()

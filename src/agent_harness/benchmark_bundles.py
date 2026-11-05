@@ -21,6 +21,8 @@ from .execution_receipts import build_digest
 from .file_io import read_regular_file, parent_binding, verify_parent_binding
 from .supervisor_store import SupervisorStore, atomic_write, _ordinary
 from .validation import json_equal
+from .benchmark_git import FRESH_GIT
+from copy import deepcopy
 
 OWN_SUITES = ("harness-recovery", "harness-retrieval-long-task")
 PATH = {"type": "string", "minLength": 1, "maxLength": 240}
@@ -62,6 +64,12 @@ MATERIALIZED = object_schema({"schema_version": {"const": 1}, "record_type": {"c
     "writable_paths": {"type": "array", "items": PATH},
     "milestones": {"type": "array", "items": MILESTONE}},
     ("schema_version", "record_type", "manifest_digest", "trial_id", "suite", "task_id", "bundle_digest", "bundle_ref", "source_root", "evaluator_root", "source_binding", "evaluator_binding", "immutable_files", "initial_files", "protected_files", "writable_paths", "milestones"))
+MATERIALIZED_V1=MATERIALIZED
+MATERIALIZED_V2=deepcopy(MATERIALIZED_V1)
+MATERIALIZED_V2['properties']['schema_version']={'const':2}
+MATERIALIZED_V2['properties']['fresh_git']=FRESH_GIT
+MATERIALIZED_V2['required'].append('fresh_git')
+MATERIALIZED={'oneOf':[MATERIALIZED_V1,MATERIALIZED_V2]}
 
 
 def _deadline(deadline):
@@ -140,8 +148,9 @@ def load_bundle(ref, assets_root, *, suite=None, task_id=None, deadline=None):
     return bundle, source, assets, milestones
 
 
-def materialize_task_bundle(ref, *, assets_root, trial_root, row, manifest_digest, deadline=None):
+def materialize_task_bundle(ref, *, assets_root, trial_root, row, manifest_digest, deadline=None,fresh_git=False):
     """Prepare bytes only; no process, inference, permissions or isolation claim."""
+    if type(fresh_git)is not bool:raise HarnessError('BENCH_INVALID_FRESH_GIT_REQUEST')
     bundle, sources, protected, milestones = load_bundle(ref, assets_root, suite=row["suite"], task_id=row["task_id"], deadline=deadline)
     root = Path(trial_root).absolute()
     store = SupervisorStore(root)
@@ -165,6 +174,9 @@ def materialize_task_bundle(ref, *, assets_root, trial_root, row, manifest_diges
             "initial_files": initial, "immutable_files": [item for item in initial if item["path"] not in bundle["writable_paths"]],
             "protected_files": [{"path": name, "sha256": _hash(raw)} for name, raw in sorted(protected.items())],
             "writable_paths": bundle["writable_paths"], "milestones": milestones}
+        if fresh_git:
+            from .benchmark_git import initialize_fresh_git
+            value.update(schema_version=2,fresh_git=initialize_fresh_git(source,deadline=deadline))
         store.write("materialized.yaml", value, MATERIALIZED, exclusive=True)
     verify_materialized(root / "materialized.yaml", initial=True, deadline=deadline)
     return value
@@ -179,6 +191,12 @@ def verify_materialized(receipt_path, *, initial=False, deadline=None):
         raise HarnessError("BENCH_MATERIALIZED_ROOT_BINDING")
     verify_parent_binding(source / "binding", value["source_binding"])
     verify_parent_binding(evaluator / "binding", value["evaluator_binding"])
+    if value['schema_version']==1 and ((source/'.git').exists() or (source/'.git').is_symlink()):
+        raise HarnessError('BENCH_UNDECLARED_OUTPUT')
+    if value['schema_version']==2:
+        from .benchmark_git import verify_fresh_git
+        if value['fresh_git']['root']!=str(source):raise HarnessError('BENCH_FRESH_GIT_ROOT_CONFLICT')
+        verify_fresh_git(value['fresh_git'],initial=initial,deadline=deadline)
     for base, inventory in ((source, value["initial_files"] if initial else value["immutable_files"]), (evaluator, value["protected_files"])):
         for item in inventory:
             _deadline(deadline)
@@ -186,6 +204,7 @@ def verify_materialized(receipt_path, *, initial=False, deadline=None):
                 raise HarnessError("BENCH_MATERIALIZED_INPUT_CHANGED")
     known = {item["path"] for item in value["initial_files"]} | (set() if initial else set(value["writable_paths"]))
     for index, path in enumerate(source.rglob("*")):
+        if value['schema_version']==2 and path.relative_to(source).parts[0]=='.git':continue
         _deadline(deadline)
         if index >= 2048:
             raise HarnessError("BENCH_BUNDLE_TOO_LARGE")
@@ -260,8 +279,9 @@ class TaskBundleBoundary:
 
 class LocalTaskBundleAdapter(CodexBenchmarkAdapter):
     """Concrete pinned materialization and evaluator bridge over Codex runtime."""
-    def __init__(self, boundary=None):
+    def __init__(self, boundary=None,*,fresh_git=False):
         self.boundary = boundary or TaskBundleBoundary()
+        self.fresh_git=fresh_git
 
     def identity(self):
         identity = self.boundary.identity()
@@ -281,7 +301,7 @@ class LocalTaskBundleAdapter(CodexBenchmarkAdapter):
     def prepare(self, row, manifest, assets_root, trial_root, *, deadline=None):
         self.boundary.require_available(deadline=deadline)
         value = materialize_task_bundle(self._task(row, manifest)["source"], assets_root=assets_root, trial_root=trial_root,
-            row=row, manifest_digest=digest(manifest), deadline=deadline)
+            row=row, manifest_digest=digest(manifest), deadline=deadline,fresh_git=self.fresh_git)
         bundle, _, _, _ = load_bundle(value["bundle_ref"], assets_root, deadline=deadline)
         suite = next(item for item in manifest["suites"] if item["id"] == row["suite"])
         evaluation.checked_ref(suite["evaluator"], assets_root)
