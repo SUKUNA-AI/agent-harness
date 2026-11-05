@@ -88,6 +88,23 @@ fn resolve(path: &Path) -> Result<PathBuf, String> {
     Ok(resolved)
 }
 
+/// Compare the Git-reported top against the workspace without changing its
+/// lexical binding. Windows canonicalize returns a verbatim path, while the
+/// snapshot root intentionally retains the caller's ordinary absolute spelling.
+fn git_root_matches(top: &[u8], root: &Path) -> Result<bool, String> {
+    let top = resolve(Path::new(git_path_record(bytes_text(top)?)))?;
+    #[cfg(windows)]
+    {
+        // Match pathlib's Windows case semantics after giving both operands the
+        // same canonical/prefix representation. Do not trim filename whitespace.
+        Ok(shown_path(&top)?.to_lowercase() == shown_path(&resolve(root)?)?.to_lowercase())
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(top == root)
+    }
+}
+
 /// Python fnmatchcase semantics: '*' crosses '/', backslash is a literal.
 #[derive(Clone, Debug)]
 enum Token {
@@ -440,7 +457,7 @@ fn inventory(
     };
     let top = git(root, &["rev-parse", "--show-toplevel"], deadline)?;
     let is_git = match top {
-        Some(top) => resolve(Path::new(git_path_record(bytes_text(&top)?)))? == root,
+        Some(top) => git_root_matches(&top, root)?,
         None => false,
     };
     let mut names = Names::default();
@@ -1144,6 +1161,55 @@ mod tests {
         assert_eq!(git_path_record("/project\r\n"), "/project\r");
         #[cfg(windows)]
         assert_eq!(git_path_record("C:/project\r\n"), "C:/project");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn git_root_comparison_normalizes_verbatim_prefix_and_drive_case() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("Проект with spaces");
+        fs::create_dir(&root).unwrap();
+        let ordinary = shown_path(&fs::canonicalize(&root).unwrap()).unwrap();
+        let verbatim = fs::canonicalize(&root).unwrap();
+        let top = format!("{}\n", ordinary.replace('\\', "/"));
+        assert_ne!(
+            resolve(Path::new(git_path_record(&top))).unwrap(),
+            Path::new(&ordinary)
+        );
+        for spelling in [
+            PathBuf::from(&ordinary),
+            verbatim,
+            PathBuf::from(ordinary.to_lowercase()),
+        ] {
+            assert!(git_root_matches(top.as_bytes(), &spelling).unwrap());
+        }
+        let child = root.join("nested");
+        fs::create_dir(&child).unwrap();
+        assert!(!git_root_matches(top.as_bytes(), &child).unwrap());
+        assert!(!git_root_matches(top.as_bytes(), temporary.path()).unwrap());
+    }
+
+    #[test]
+    fn git_inventory_keeps_tracked_deletion_and_rejects_subdirectory_root() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = PathBuf::from(shown_path(&fs::canonicalize(temporary.path()).unwrap()).unwrap());
+        let deadline = Instant::now() + Duration::from_secs(30);
+        // No commit or user identity is required to qualify the cached inventory.
+        assert!(git(&root, &["init", "-q"], deadline).unwrap().is_some());
+        fs::write(root.join("deleted.txt"), b"tracked bytes").unwrap();
+        assert!(git(&root, &["add", "deleted.txt"], deadline)
+            .unwrap()
+            .is_some());
+        fs::remove_file(root.join("deleted.txt")).unwrap();
+        let inventory = inventory(&root, &[], true, false, deadline).unwrap();
+        assert!(inventory.is_git);
+        assert!(inventory.git.is_some());
+        assert!(inventory.names.contains(&"deleted.txt".to_owned()));
+        let nested = root.join("nested");
+        fs::create_dir(&nested).unwrap();
+        let inventory = super::inventory(&nested, &[], true, false, deadline).unwrap();
+        assert!(!inventory.is_git);
+        assert!(inventory.git.is_none());
     }
 
     #[test]

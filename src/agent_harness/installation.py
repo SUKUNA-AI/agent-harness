@@ -314,11 +314,20 @@ def atomic(path: Path, data: bytes) -> dict:
                     output.write(data)
                     output.flush()
                     os.fsync(output.fileno())
-                staged_path = _bound_path(parent, name)
-                copy_metadata(staged_path, desired)
-                with os.fdopen(parent.open(os.O_RDONLY, name=name), "rb") as staged_file:
-                    os.fsync(staged_file.fileno())
+                    staged_path = _bound_path(parent, name)
+                    written_identity = _stamp(os.fstat(output.fileno()))[:2]
+                    copy_metadata(staged_path, desired)
+                    # Windows FlushFileBuffers requires GENERIC_WRITE. Keep the
+                    # original writable descriptor across metadata preservation;
+                    # a preserved DACL/mode may forbid reopening it for writing.
+                    os.fsync(output.fileno())
+                    if _stamp(os.fstat(output.fileno()))[:2] != written_identity:
+                        raise InstallError("Staging identity changed before publication")
+                # Windows finalizes last-write timestamps on writer close. Bind
+                # the receipt afterwards, still requiring the inode we wrote.
                 staged = _metadata(staged_path)
+                if staged is None or staged["identity"][:2] != written_identity:
+                    raise InstallError("Staging identity changed before publication")
                 receipt = {"identity": staged["identity"][:-1],
                            "security": desired["security"] if desired is not None else staged["security"]}
                 if metadata(path) != original:

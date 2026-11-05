@@ -46,6 +46,12 @@ class ExecutionReceipts:
         self.store = supervisor.store
 
     def records(self, *, repair=False):
+        # The journal and its immutable projections form one publication. Keep
+        # readers outside the append/link/unlink window of worker callbacks.
+        with self.supervisor.mutex:
+            return self._records_locked(repair=repair)
+
+    def _records_locked(self, *, repair=False):
         records = {}
         for event in self.store.events():
             payload = event["payload"]

@@ -1,0 +1,70 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "record_type": {
+      "const": "benchmark_milestone"
+    },
+    "kind": {
+      "enum": [
+        "observed",
+        "fault_intent",
+        "fault_completion"
+      ]
+    },
+    "trial_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "manifest_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "materialized_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "milestone_id": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "candidate_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "operation_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "fault": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "outcome": {
+      "enum": [
+        "not_applicable",
+        "applied",
+        "not_applied",
+        "unknown"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "record_type",
+    "kind",
+    "trial_id",
+    "manifest_digest",
+    "materialized_digest",
+    "milestone_id",
+    "candidate_digest",
+    "operation_id",
+    "fault",
+    "outcome"
+  ]
+}

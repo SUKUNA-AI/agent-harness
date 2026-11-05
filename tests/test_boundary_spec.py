@@ -169,7 +169,9 @@ class SourceBoundaryTests(unittest.TestCase):
         self.link(self.outside / 'file', link)
         result = core.snapshot_python({'cwd': str(self.root)})
         self.assertEqual('symlink', result['files']['leaf']['kind'])
-        self.assertEqual(str(self.outside / 'file'), result['files']['leaf']['target'])
+        # Windows may expose the stored target with its verbatim \\?\ prefix.
+        # The snapshot contract preserves os.readlink's literal target.
+        self.assertEqual(os.readlink(link), result['files']['leaf']['target'])
         self.assertEqual(2, result['snapshot_scheme_version'])
         alias = self.base / 'alias'
         self.link(self.root, alias)

@@ -225,7 +225,14 @@ def _regular(info, path):
 
 
 def _stamp(info, *, cross_api=False):
-    value = (info.st_dev, info.st_ino, info.st_mode, info.st_size,
+    mode = info.st_mode
+    # CPython Windows path stat synthesizes execute bits from executable
+    # suffixes; fstat has no filename and reports only the attribute-derived
+    # mode. These bits are not ACL permissions. Keep all other fields, and
+    # compare the complete mode between observations from the same API.
+    if cross_api and os.name == "nt":
+        mode &= ~0o111
+    value = (info.st_dev, info.st_ino, mode, info.st_size,
              info.st_mtime_ns, info.st_nlink, info.st_uid, info.st_gid)
     # Windows stat() can expose birth time as ctime, while fstat() exposes
     # change time. Compare ctime only between observations using the same API.

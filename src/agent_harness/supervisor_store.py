@@ -198,12 +198,15 @@ class SupervisorStore:
                     yield
 
     def events(self):
-        path = self.path("journal/events.jsonl")
-        if not path.exists():
-            return []
-        _parents(path)
-        raw = read_regular_file(path, max_bytes=MAX_JOURNAL_BYTES)
-        return self._decode_events(raw)
+        # A strict read checks the leaf before and after opening. An append by
+        # this store is legitimate only outside that entire read/validation.
+        with self._mutex:
+            path = self.path("journal/events.jsonl")
+            if not path.exists():
+                return []
+            _parents(path)
+            raw = read_regular_file(path, max_bytes=MAX_JOURNAL_BYTES)
+            return self._decode_events(raw)
 
     @staticmethod
     def _decode_events(raw):

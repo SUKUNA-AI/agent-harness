@@ -100,6 +100,12 @@ PAYLOADS = {
 _SUPPORTED_OBSERVED_ADAPTERS = ()
 
 
+def _trial_descendant(root, path):
+    # Windows resolve may return an extended-length canonical spelling. Both
+    # operands must use that spelling; ancestors are separately link-checked.
+    return path.is_absolute() and root.resolve(strict=True) in path.resolve(strict=True).parents
+
+
 class _DeadlineCodexAdapter(CodexAdapter):
     """Preserve the prepared transport while bounding every external action."""
     def __init__(self, backend, runner, deadline):
@@ -439,7 +445,7 @@ class BenchmarkRunner:
             path = Path(prepared[key])
             _parents(path)
             _ordinary(path, directory=key == "cwd")
-            if not path.is_absolute() or root not in path.resolve(strict=True).parents:
+            if not _trial_descendant(root, path):
                 raise HarnessError("BENCH_CROSS_TRIAL_STATE: prepared paths must be separate ordinary trial descendants")
         contract = self._contract(prepared)
         estimate = next(r["tokens"] for r in self.state["trial_token_bounds"] if r["trial_id"] == row["trial_id"])

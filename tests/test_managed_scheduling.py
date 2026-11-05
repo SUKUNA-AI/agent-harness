@@ -217,7 +217,7 @@ class ManagedSchedulingTests(unittest.TestCase):
 
     def test_managed_recovery_resumes_exact_workers_and_reconciles_already_applied_patch(self):
         from unittest.mock import patch
-        from agent_harness.agent_lifecycle import Worktrees
+        from agent_harness.agent_lifecycle import Worktrees, ModelLease
         class FakeManaged(CodexAdapter):
             def capabilities(self):
                 return {**super().capabilities(), "native_children_disabled": True}
@@ -232,7 +232,18 @@ class ManagedSchedulingTests(unittest.TestCase):
             for args in (["init"], ["add", "."], ["-c", "user.name=Fixture", "-c", "user.email=fixture@localhost", "commit", "-m", "fixture"]):
                 subprocess.run(["git", *args], cwd=source, check=True, capture_output=True)
             fake = root / "fake.py"
-            fake.write_text(FAKE)
+            # Keep each fixture child alive until the exact process identity
+            # has been durably bound. A fast natural exit is correctly unknown
+            # in production and must not randomly bypass this recovery fault.
+            handshake = """prompt=args[-1]
+import os
+bound=pathlib.Path(__file__).parent/('bound-'+str(os.getpid()))
+end=time.monotonic()+30
+while not bound.exists():
+ if time.monotonic()>=end: raise RuntimeError('fixture bind handshake timed out')
+ time.sleep(0.01)
+"""
+            fake.write_text(FAKE.replace('prompt=args[-1]', handshake))
             task, plan = root / "task.yaml", root / "plan.yaml"
             dump(task, self.contract); dump(plan, self.plan)
             adapter = FakeManaged((sys.executable, str(fake)))
@@ -243,11 +254,28 @@ class ManagedSchedulingTests(unittest.TestCase):
             def crash_after_write(trees, staging, patch_bytes):
                 original(trees, staging, patch_bytes)
                 raise ControllerCrash()
-            with patch.object(Worktrees, "integrate", crash_after_write):
-                with self.assertRaises(ControllerCrash):
-                    supervisor.start()
-            recovered = Supervisor(supervisor.path, adapter=adapter)
-            result = recovered.resume()
+            original_bind = ModelLease.bind
+            bound_children = []
+            def bind_then_release(lease, process):
+                identity = process.get("identity", process)
+                try:
+                    original_bind(lease, process)
+                    bound_children.append(identity)
+                finally:
+                    # Also release on failure so diagnostics cannot leave a
+                    # blocked fixture; production retains its fail-closed result.
+                    (root / ('bound-' + str(identity['pid']))).write_text('bound')
+            with patch.object(ModelLease, "bind", bind_then_release):
+                with patch.object(Worktrees, "integrate", crash_after_write):
+                    try:
+                        unexpected = supervisor.start()
+                    except ControllerCrash:
+                        pass
+                    else:
+                        self.fail('Integration fault was not reached: ' + repr(unexpected))
+                recovered = Supervisor(supervisor.path, adapter=adapter)
+                result = recovered.resume()
+            self.assertGreaterEqual(len(bound_children), 4)
             self.assertEqual(result["status"], "ACCEPTED", result)
             self.assertTrue(result["evidence_current"])
             agents = [recovered.store.read("agents/" + name + ".yaml", "agent-state.schema.json") for name in ("left", "right")]
