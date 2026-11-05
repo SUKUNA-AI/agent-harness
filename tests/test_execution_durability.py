@@ -272,15 +272,34 @@ class ExecutionDurabilityTests(unittest.TestCase):
             with patch.dict(os.environ, {"CODEX_HOME": str(root / "codex-home")}):
                 supervisor, fake = self.fixture(root)
                 run = supervisor.adapter.run
+                completed = []
                 def unresolved(*args, **kwargs):
                     result = run(*args, **kwargs)
-                    result["process_tree_stopped"] = False
-                    return result
+                    diagnostic = dict(result)
+                    diagnostic["log_tails"] = {
+                        name: Path(path).read_text(encoding="utf-8", errors="replace")[-1500:]
+                        for name, path in result.get("logs", {}).items() if Path(path).is_file()
+                    }
+                    self.assertEqual(result["status"], "completed",
+                        "Cleanup scenario requires a real completed turn before injection: " + repr(diagnostic))
+                    self.assertTrue(result["turn_completed"], diagnostic)
+                    self.assertEqual(result["usage"], {"input_tokens": 10, "output_tokens": 3}, diagnostic)
+                    self.assertTrue(result["process_tree_stopped"], diagnostic)
+                    self.assertEqual(fake.with_suffix(".calls").read_text(encoding="utf-8").splitlines(), ["exec"])
+                    completed.append(result)
+                    return {**result, "process_tree_stopped": False}
                 with patch.object(supervisor.adapter, "run", unresolved):
                     result = supervisor.start()
                 self.assertEqual(result["status"], "UNKNOWN_OUTCOME")
-                self.assertEqual(fake.with_suffix(".calls").read_text().splitlines(), ["exec"])
+                self.assertEqual(len(completed), 1, result)
+                self.assertEqual(fake.with_suffix(".calls").read_text(encoding="utf-8").splitlines(), ["exec"])
                 self.assertFalse(supervisor.plan_progress()["execution_complete"])
+
+    def test_cleanup_fixture_does_not_mask_pre_exec_failure(self):
+        with patch("agent_harness.codex_execution._start_contained",
+                   side_effect=HarnessError("synthetic pre-exec failure")):
+            with self.assertRaisesRegex(AssertionError, "Cleanup scenario requires a real completed turn"):
+                self.test_successful_terminal_event_without_process_tree_cleanup_cannot_integrate()
 
     def test_join_read_only_node_has_real_completion_without_fictitious_commit(self):
         from agent_harness.strict_yaml import load

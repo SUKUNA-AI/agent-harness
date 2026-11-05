@@ -22,7 +22,7 @@ class HookAdoptionTests(unittest.TestCase):
         user = {'matcher': 'startup', 'hooks': [{'type': 'command', 'command': 'printf user-handler'}]}
         groups = [user, handler] if foreign else [handler]
         path = self.home / 'hooks.json'
-        path.write_text(json.dumps({'hooks': {'SessionStart': groups}}, ensure_ascii=False))
+        path.write_text(json.dumps({'hooks': {'SessionStart': groups}}, ensure_ascii=False), encoding="utf-8")
         return handler, user, install.digest(install.canonical(handler))
 
     def plan(self, expected=None):
@@ -78,13 +78,13 @@ class HookAdoptionTests(unittest.TestCase):
         legacy, user, expected = self.legacy()
         path = self.home / 'hooks.json'
         for groups in ([user], [legacy, deepcopy(legacy)]):
-            path.write_text(json.dumps({'hooks': {'SessionStart': groups}}))
+            path.write_text(json.dumps({'hooks': {'SessionStart': groups}}), encoding="utf-8")
             before = self.target_bytes()
             with self.assertRaises(install.InstallError):
                 self.plan(expected)
             self.assertEqual(before, self.target_bytes())
             self.assertFalse(self.state.exists())
-        path.write_text(json.dumps({'hooks': {'SessionStart': [legacy]}}))
+        path.write_text(json.dumps({'hooks': {'SessionStart': [legacy]}}), encoding="utf-8")
         config = self.home / 'config.toml'
         config.write_text(self.original_config + '\n[hooks]\nSessionStart = [{command = "python session.py hook"}]\n')
         before = self.target_bytes()
@@ -113,7 +113,7 @@ class HookAdoptionTests(unittest.TestCase):
         _, user, expected = self.legacy()
         self.apply(expected)
         path = self.home / 'hooks.json'
-        value = json.loads(path.read_text())
+        value = json.loads(path.read_text(encoding="utf-8"))
         value['hooks']['SessionStart'][1]['hooks'].append(user['hooks'][0])
         path.write_bytes(install.canonical(value))
         path.chmod(0o640)
@@ -132,7 +132,7 @@ class HookAdoptionTests(unittest.TestCase):
         path = self.home / 'hooks.json'
         original = install.read
         calls = 0
-        changed = json.loads(path.read_text())
+        changed = json.loads(path.read_text(encoding="utf-8"))
         changed['hooks']['SessionStart'].append({'matcher': 'clear', 'hooks': [
             {'type': 'command', 'command': 'printf concurrent-user'}]})
         content = json.dumps(changed).encode()
@@ -153,7 +153,7 @@ class HookAdoptionTests(unittest.TestCase):
 
     def test_ordinary_rollback_restores_legacy_group_and_exact_original_bytes(self):
         self.legacy()
-        expected = install.digest(install.canonical(json.loads((self.home / 'hooks.json').read_text())['hooks']['SessionStart'][1]))
+        expected = install.digest(install.canonical(json.loads((self.home / 'hooks.json').read_text(encoding="utf-8"))['hooks']['SessionStart'][1]))
         original = (self.home / 'hooks.json').read_bytes()
         self.apply(expected)
         manifest = install.active_manifest(self.state)
@@ -164,19 +164,51 @@ class HookAdoptionTests(unittest.TestCase):
         self.assertEqual(original, (self.home / 'hooks.json').read_bytes())
         self.assertFalse((self.home / 'agent-harness-hook.py').exists())
 
+    def test_hook_rollback_edit_under_non_utf8_default_locale(self):
+        # Model the Windows3.11/3.13 default without changing process locale or
+        # relying on this host's UTF-8 mode. Product JSON is explicitly UTF-8.
+        original_read = Path.read_text
+        def legacy_read(path, encoding=None, errors=None, **kwargs):
+            return original_read(path, encoding=encoding or "cp1252", errors=errors, **kwargs)
+        with patch.object(Path, "read_text", new=legacy_read):
+            self.test_addressed_rollback_preserves_new_user_group_and_restores_legacy()
+
     def test_addressed_rollback_preserves_new_user_group_and_restores_legacy(self):
         legacy, user, expected = self.legacy()
         self.apply(expected)
         path = self.home / 'hooks.json'
-        value = json.loads(path.read_text())
+        value = json.loads(path.read_text(encoding="utf-8"))
         added = {'matcher': 'clear', 'hooks': [{'type': 'command', 'command': 'printf new-user'}]}
         value['hooks']['SessionStart'].append(added)
-        path.write_text(json.dumps(value))
+        path.write_text(json.dumps(value), encoding="utf-8")
         manifest = install.active_manifest(self.state)
         before = install.read(self.state / 'active.json')
         install.apply_rollback(install.rollback_plan(manifest), self.state, manifest,
                                json.loads(before), 'rollback', before)
-        self.assertEqual([user, legacy, added], json.loads(path.read_text())['hooks']['SessionStart'])
+        self.assertEqual([user, legacy, added], json.loads(path.read_text(encoding="utf-8"))['hooks']['SessionStart'])
+
+    def test_windows_command_unicode_ownership_remains_exact(self):
+        command = subprocess.list2cmdline([
+            r"C:\Program Files\Python313\python.exe",
+            r"C:\Fixture Space\профиль .codex\agent-harness-hook.py"])
+        owned = {'matcher': 'startup', 'hooks': [{'type': 'command', 'command': command}]}
+        foreign = {'matcher': 'clear', 'hooks': [{'type': 'command', 'command': 'printf user-handler'}]}
+        legacy = {'matcher': 'startup', 'hooks': [{'type': 'command', 'command': 'python session.py hook'}]}
+        meta = {'handler_after': owned, 'handler_before': legacy}
+        document = {'hooks': {'SessionStart': [foreign, owned]}}
+        raw = install.canonical(document)
+        self.assertEqual([foreign, legacy], install._revert_hooks(raw, meta)['hooks']['SessionStart'])
+        # Locale corruption actually changes the owned command. The installer
+        # must continue to refuse it rather than repairing or normalizing it.
+        corrupted = json.loads(raw.decode('cp1252'))
+        self.assertNotEqual(owned, corrupted['hooks']['SessionStart'][1])
+        edited = deepcopy(document)
+        edited['hooks']['SessionStart'][1]['hooks'][0]['command'] += ' --edited'
+        duplicated = {'hooks': {'SessionStart': [foreign, owned, deepcopy(owned)]}}
+        for value in (corrupted, edited, duplicated):
+            with self.subTest(kind=value), self.assertRaisesRegex(install.InstallError, 'changed or duplicated'):
+                install._revert_hooks(install.canonical(value), meta)
+        self.assertEqual(owned, meta['handler_after'])
 
     def test_byte_identical_adoption_still_records_ownership(self):
         _, _, handler = install.hook_payload(self.package, self.home)

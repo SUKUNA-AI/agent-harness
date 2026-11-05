@@ -250,19 +250,28 @@ class InstallationBoundaryTests(unittest.TestCase):
             installation.rollback_plan(future)
 
 
+    def test_hook_rollback_edit_under_non_utf8_default_locale(self):
+        # Model the Windows3.11/3.13 default without changing process locale or
+        # relying on this host's UTF-8 mode. Product JSON is explicitly UTF-8.
+        original_read = Path.read_text
+        def legacy_read(path, encoding=None, errors=None, **kwargs):
+            return original_read(path, encoding=encoding or "cp1252", errors=errors, **kwargs)
+        with patch.object(Path, "read_text", new=legacy_read):
+            self.test_hooks_foreign_handler_idempotence_and_rollback()
+
     def test_hooks_foreign_handler_idempotence_and_rollback(self):
         foreign = {'matcher': 'startup', 'hooks': [{'type': 'command', 'command': 'printf user-handler'}]}
         path = self.home / 'hooks.json'
-        path.write_text(json.dumps({'hooks': {'SessionStart': [foreign]}}))
+        path.write_text(json.dumps({'hooks': {'SessionStart': [foreign]}}), encoding="utf-8")
         self.apply()
-        groups = json.loads(path.read_text())['hooks']['SessionStart']
+        groups = json.loads(path.read_text(encoding="utf-8"))['hooks']['SessionStart']
         self.assertEqual(foreign, groups[0])
         self.assertEqual(2, len(groups))
         self.assertEqual('unchanged', self.apply()['status'])
         # New user handlers survive an addressed rollback.
         added = {'matcher': 'clear', 'hooks': [{'type': 'command', 'command': 'printf another-user'}]}
         groups.append(added)
-        path.write_text(json.dumps({'hooks': {'SessionStart': groups}}))
+        path.write_text(json.dumps({'hooks': {'SessionStart': groups}}), encoding="utf-8")
         plans = installation.rollback_plan(installation.active_manifest(self.state))
         hooks_plan = next(plan for plan in plans if plan['path'] == path)
         self.assertEqual([foreign, added], json.loads(hooks_plan['after'])['hooks']['SessionStart'])

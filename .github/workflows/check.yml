@@ -38,6 +38,20 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.13'
+      - name: Early hook rollback and process cleanup contracts
+        shell: python {0}
+        run: |
+          import sys
+          import unittest
+          sys.path[:0] = ["src", "tests"]
+          names = [
+              "test_boundary_spec.InstallationBoundaryTests.test_hooks_foreign_handler_idempotence_and_rollback",
+              "test_hook_adoption.HookAdoptionTests.test_addressed_rollback_preserves_new_user_group_and_restores_legacy",
+              "test_execution_durability.ExecutionDurabilityTests.test_successful_terminal_event_without_process_tree_cleanup_cannot_integrate",
+              "test_execution_durability.ExecutionDurabilityTests.test_cleanup_fixture_does_not_mask_pre_exec_failure",
+          ]
+          result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromNames(names))
+          raise SystemExit(not result.wasSuccessful())
       - run: rustup toolchain install 1.90.0 --profile minimal
       - run: cargo +1.90.0 test --release --manifest-path native/Cargo.toml --locked
         working-directory: .
