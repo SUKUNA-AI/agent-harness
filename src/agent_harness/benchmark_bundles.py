@@ -44,6 +44,10 @@ CHECK = object_schema({"path": PATH, "expected": ASSET}, ("path", "expected"))
 ORACLE = object_schema({"schema_version": {"const": 1}, "record_type": {"const": "artifact_json_oracle"},
     "checks": {"type": "array", "minItems": 1, "maxItems": 64, "items": CHECK}},
     ("schema_version", "record_type", "checks"))
+GRADE_INPUT = object_schema({"schema_version": {"const": 1}, "manifest_digest": HASH,
+    "trial_id": HASH, "evaluator_digest": HASH, "solve_digest": HASH, "cwd": SHORT,
+    "solve_outcome": {"enum": ["completed", "failed", "cancelled", "timeout", "environment_error", "unknown"]}},
+    ("schema_version", "manifest_digest", "trial_id", "evaluator_digest", "solve_digest", "cwd", "solve_outcome"))
 INVENTORY = object_schema({"path": PATH, "sha256": HASH}, ("path", "sha256"))
 BINDING_ITEM = object_schema({"path": SHORT, "device": {"type": "integer", "minimum": 0},
     "inode": {"type": "integer", "minimum": 0}}, ("path", "device", "inode"))
@@ -196,12 +200,14 @@ def evaluate_materialized(receipt_path, grade_input, *, receipt_digest=None, dea
     if receipt_digest is not None and _hash(read_regular_file(receipt_path)) != receipt_digest:
         raise HarnessError("BENCH_MATERIALIZED_RECEIPT_CHANGED")
     value = verify_materialized(receipt_path, deadline=deadline)
-    inputs = strict_yaml.load(grade_input)
+    inputs = strict_yaml.load(grade_input, GRADE_INPUT)
     if inputs["trial_id"] != value["trial_id"] or inputs["manifest_digest"] != value["manifest_digest"] or inputs["cwd"] != value["source_root"]:
         raise HarnessError("BENCH_EVALUATOR_SUBJECT_MISMATCH")
     outcome = inputs["solve_outcome"]
+    if outcome == "unknown":
+        raise HarnessError("BENCH_UNKNOWN_SOLVE_OUTCOME")
     if outcome in {"completed", "failed"}:
-        outcome = "accepted"
+        checks_passed = True
         oracle = strict_yaml.load(Path(value["evaluator_root"]) / "oracle.yaml", ORACLE)
         for check in oracle["checks"]:
             _deadline(deadline)
@@ -209,9 +215,12 @@ def evaluate_materialized(receipt_path, grade_input, *, receipt_digest=None, dea
                 actual = _json(read_regular_file(Path(value["source_root"]) / check["path"]))
                 expected = _json(evaluation.checked_ref(check["expected"], value["evaluator_root"]))
                 if not json_equal(actual, expected):
-                    outcome = "failed"
+                    checks_passed = False
             except (FileNotFoundError, ValueError):
-                outcome = "failed"
+                checks_passed = False
+        # Acceptance is exclusively the independent oracle's result; a caller
+        # cannot supply an already-accepted execution state or bypass checks.
+        outcome = "accepted" if checks_passed else "failed"
     grade = {"schema_version": 1, "record_type": "independent_grade", "manifest_digest": value["manifest_digest"],
         "trial_id": value["trial_id"], "evaluator_digest": inputs["evaluator_digest"], "outcome": outcome}
     strict_yaml.validate(grade, evaluation.GRADE)

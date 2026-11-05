@@ -39,10 +39,14 @@ def reduce(records, *, category="tool_result", max_bytes=None, required=None, cu
     # Strict UTF-8 encoding happens before any caller can publish state.
     recordset = digest(records)
     selection = digest({"category": category, "required": required or {}, "view": view, "ordering": 1})
+    cursor_binding = digest({"recordset": recordset, "selection": selection})
     start = 0
     if cursor is not None:
-        if (not isinstance(cursor, dict) or set(cursor) != {"recordset", "selection", "position"}
-                or cursor["recordset"] != recordset or cursor["selection"] != selection
+        legacy_matches = (isinstance(cursor, dict) and set(cursor) == {"recordset", "selection", "position"}
+                          and cursor["recordset"] == recordset and cursor["selection"] == selection)
+        compact_matches = (isinstance(cursor, dict) and set(cursor) == {"binding", "position"}
+                           and cursor["binding"] == cursor_binding)
+        if (not (legacy_matches or compact_matches)
                 or type(cursor["position"]) is not int or cursor["position"] < 0):
             raise HarnessError("STALE_CURSOR: immutable recordset or selection changed")
         start = cursor["position"]
@@ -116,7 +120,17 @@ def reduce(records, *, category="tool_result", max_bytes=None, required=None, cu
                 "status": payload.get("status", record.get("status", "unknown")),
                 "failure_signature": payload.get("signature"), "pointer": record.get("pointer"),
                 "content_digest": digest(record), "excerpt_omitted": True, "occurrences": group["occurrences"]}
+            # Preserve the useful bounded claim when reducing a Memory row,
+            # rather than spending its entire summary on generic metadata.
+            # Full input bytes remain in the immutable retained recordset.
+            memory_record = payload.get("record") if record.get("kind") == "memory" else None
+            if isinstance(memory_record, dict):
+                claim = memory_record.get("claim")
+                if isinstance(claim, str) and _size(claim) <= 512:
+                    summary["claim"] = claim
             base["items"].append(summary); selected.append(position)
+            if _size(base) > limit:
+                summary.pop("claim", None)
             if (not record.get("pointer") and reference is None) or _size(base) > limit:
                 base["items"].pop(); selected.pop(); omit(position, "byte_budget")
     reconcile()
@@ -125,17 +139,34 @@ def reduce(records, *, category="tool_result", max_bytes=None, required=None, cu
     while True:
         while _size(base) > limit and len(base["omission_pointers"]) > 1:
             base["omission_pointers"].pop()
+        if _size(base) > limit and reference is not None:
+            # The immutable top-level reference already binds every original
+            # record. Avoid duplicating long escaped absolute paths/digests in
+            # the omission manifest; this index addresses its raw records list.
+            base["omission_pointers"] = [
+                {"recordset_index": item.get("recordset_index", item.get("offset")), "reason": item["reason"]}
+                for item in base["omission_pointers"]]
+            if base["next_cursor"] is not None:
+                # One hash binds the same recordset/selection as the legacy
+                # cursor, without duplicating both digests in a small packet.
+                base["next_cursor"] = {"binding": cursor_binding, "position": base["next_cursor"]["position"]}
         if _size(base) <= limit:
             break
         if not selected:
+            if reference is not None and base["next_cursor"] is not None:
+                base["next_cursor"] = None
+                base["continuation_requires_source_read"] = True
+                if _size(base) <= limit:
+                    break
             raise HarnessError("BUDGET_TOO_SMALL: envelope and continuation need explicit chunking")
         position = selected.pop(); base["items"].pop(); omit(position, "byte_budget"); reconcile()
-    # If a single eligible item cannot fit even as a summary, callers must read
-    # its referenced source. Avoid a non-progressing cursor masquerading as paging.
+    # A source-only response has an explicit read path, not a cursor that can
+    # repeat the same empty page forever at the same accepted byte budget.
     if not base["items"] and base["next_cursor"] and base["next_cursor"]["position"] == start:
+        base["next_cursor"] = None
         base["continuation_requires_source_read"] = True
         if _size(base) > limit:
-            base.pop("continuation_requires_source_read")
+            raise HarnessError("BUDGET_TOO_SMALL: source-read continuation exceeds budget")
     if recordset_store is not None:
         retain_recordset(recordset_store, records, project_id=reference["project_id"])
     return base

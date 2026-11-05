@@ -18,7 +18,7 @@ from agent_harness.benchmark_bundles import (BUNDLE, MATERIALIZED, LocalTaskBund
     TaskBundleBoundary, materialize_task_bundle, verify_materialized, evaluate_materialized, load_bundle, _hash)
 from agent_harness.benchmark_corpora import CORPUS, REVISION, export_own_corpus
 from agent_harness.benchmark_milestones import MilestoneObserver, EVENT
-from agent_harness.benchmark_bundles import ORACLE
+from agent_harness.benchmark_bundles import ORACLE, GRADE_INPUT
 from agent_harness.benchmark_runner import BenchmarkRunner, BudgetAuthorization, production_status
 from agent_harness.codex_execution import CodexAdapter
 from agent_harness.core import HarnessError, digest
@@ -90,7 +90,7 @@ class BundleTests(unittest.TestCase):
     def grade_input(self, value):
         path=self.root/'grade.yaml'
         strict_yaml.dump(path,{'schema_version':1,'manifest_digest':value['manifest_digest'],'trial_id':value['trial_id'],
-            'evaluator_digest':self.corpus['evaluator']['sha256'],'cwd':value['source_root'],'solve_outcome':'completed'})
+            'evaluator_digest':self.corpus['evaluator']['sha256'],'solve_digest':'3'*64,'cwd':value['source_root'],'solve_outcome':'completed'})
         return path
 
     def fill(self, value, task_id=None):
@@ -154,6 +154,24 @@ class BundleTests(unittest.TestCase):
         with self.assertRaisesRegex(HarnessError,'UNDECLARED_OUTPUT'):
             verify_materialized(receipt)
 
+    def test_grade_input_cannot_supply_acceptance_or_skip_artifact_checks(self):
+        value=self.materialize();receipt=self.root/'trial/materialized.yaml';inputs=self.grade_input(value)
+        self.assertEqual(evaluate_materialized(receipt,inputs)['outcome'],'failed')
+        original=strict_yaml.load(inputs)
+        for mutation in ({'solve_outcome':'accepted'},{'solve_outcome':True},{'unknown':True},{'schema_version':2}):
+            strict_yaml.dump(inputs,{**original,**mutation})
+            with self.subTest(mutation=mutation),self.assertRaises(ValueError):
+                evaluate_materialized(receipt,inputs)
+        strict_yaml.dump(inputs,{**original,'solve_outcome':'unknown'})
+        with self.assertRaisesRegex(HarnessError,'UNKNOWN_SOLVE_OUTCOME'):
+            evaluate_materialized(receipt,inputs)
+        strict_yaml.dump(inputs,original)
+        self.fill(value)
+        self.assertEqual(evaluate_materialized(receipt,inputs)['outcome'],'accepted')
+        answer=next(item['answer'] for item in CORPUS if item['id']==value['task_id'])
+        (Path(value['source_root'])/'answer.json').write_text(json.dumps({**answer,'input_tokens':True}))
+        self.assertEqual(evaluate_materialized(receipt,inputs)['outcome'],'failed')
+
     def test_no_blind_rematerialization_and_original_deadline(self):
         self.materialize()
         with self.assertRaisesRegex(HarnessError,'MATERIALIZATION_EXISTS_OR_UNKNOWN'):
@@ -190,7 +208,8 @@ class BundleTests(unittest.TestCase):
 
     def test_exported_schemas_match_runtime_closed_contracts(self):
         for name,value in [('benchmark-task-bundle',BUNDLE),('benchmark-artifact-oracle',ORACLE),
-                           ('benchmark-materialized-task',MATERIALIZED),('benchmark-milestone',EVENT)]:
+                           ('benchmark-materialized-task',MATERIALIZED),('benchmark-milestone',EVENT),
+                           ('benchmark-grade-input',GRADE_INPUT)]:
             exported=json.loads((Path(__file__).parents[1]/'schemas'/(name+'.schema.json')).read_text())
             self.assertEqual(exported,value)
             self.assertFalse(value['additionalProperties'])

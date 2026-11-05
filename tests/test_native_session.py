@@ -1,6 +1,7 @@
 """Проверки bounded native bootstrap настоящими API в изолированном состоянии."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -10,6 +11,7 @@ import unittest
 from agent_harness import native_session as session
 from agent_harness.core import HarnessError, canonical, now
 from agent_harness.memory import Memory
+from agent_harness.context_reducer import retrieve_recordset
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -153,6 +155,68 @@ class NativeSessionTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertNotIn(b"do-not-echo", result.stderr)
             self.assertEqual(result.stdout, b"")
+
+
+class EscapedPathNativeBudgetTests(unittest.TestCase):
+    """Exercise real native APIs with Windows-like serialized path costs on POSIX."""
+
+    start = NativeSessionTests.start
+    test_evidence_hash_and_budget_omissions_are_retrievable = NativeSessionTests.test_evidence_hash_and_budget_omissions_are_retrievable
+    test_source_change_prevents_stale_recall = NativeSessionTests.test_source_change_prevents_stale_recall
+
+    def setUp(self):
+        NativeSessionTests.setUp(self)
+        # Windows already uses the long, escaped runner temp profile. On POSIX
+        # a literal backslash directory gives the same JSON escaping cost while
+        # remaining a real local path for immutable-recordset retrieval.
+        if os.name != "nt":
+            self.base = self.base / r"Users\runneradmin\AppData\Local\Temp\tmp01234567"
+            self.base.mkdir()
+            self.root = self.base / "project"
+            self.root.mkdir()
+            (self.root / "input.txt").write_text("first\n")
+            self.state = self.base / "state"
+
+    def test_small_cli_packet_keeps_outer_utf8_byte_budget(self):
+        for _ in range(3):
+            self.start()
+        result = subprocess.run([sys.executable, str(ROOT / "tools/session.py"), "--state", str(self.state),
+            "--max-bytes", "2048", "start", "--root", str(self.root), "--goal", "Inspect fixture"],
+            capture_output=True, env={**os.environ, "PYTHONIOENCODING": "ascii"}, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertLessEqual(len(result.stdout) + 1, 2048)
+        output = json.loads(result.stdout)
+        self.assertEqual(output["root"], str(self.root))
+        self.assertTrue(output["packet"]["recordset_ref"])
+
+    def test_small_packet_preserves_all_omitted_inputs_via_recordset(self):
+        receipt = self.base / "receipt.json"
+        receipt.write_text('{"status":"observed"}\n')
+        for _ in range(3):
+            self.start()
+        packet = self.start(evidence=receipt, max_bytes=2048)
+        required = packet["required"]
+        outer = {"session": required["session"], "root": required["root"],
+                 "evidence": required["packet_pointer"], "packet": packet}
+        self.assertLessEqual(len(canonical(outer)) + 2, 2048)
+        raw = json.loads(Path(required["raw_pointer"]).read_text())
+        self.assertEqual(raw["evidence"]["sha256"], hashlib.sha256(receipt.read_bytes()).hexdigest())
+        store = Path(required["packet_pointer"]).parent / "recordsets"
+        parts, offset = [], 0
+        for _ in range(100):
+            page = retrieve_recordset(store, packet["recordset_ref"], offset=offset, limit=1024)
+            parts.append(page["content"])
+            if page["next_offset"] is None:
+                break
+            self.assertGreater(page["next_offset"], offset)
+            offset = page["next_offset"]
+        retained = json.loads("".join(parts))
+        self.assertTrue(retained["records"])
+        from agent_harness.core import digest
+        self.assertEqual(digest(retained["records"]), packet["recordset_digest"])
+        for omission in packet["omission_pointers"]:
+            index = omission["recordset_index"] if "recordset_index" in omission else omission["offset"]
+            self.assertLess(index, len(retained["records"]))
 
 
 if __name__ == "__main__":

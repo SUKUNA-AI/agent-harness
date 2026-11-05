@@ -59,6 +59,27 @@ fn shown_path(path: &Path) -> Result<String, String> {
     Ok(value)
 }
 
+/// Windows spelling key for equality only: never resolve links, trim names,
+/// collapse '..', or accept an ancestor-prefix match in an ownership check.
+#[cfg(any(windows, test))]
+fn windows_path_key(value: &str) -> String {
+    // Git names use '/', while GetFinalPathNameByHandleW uses '\\'.
+    // Normalize separators before recognizing DOS/UNC verbatim prefixes.
+    let value = value.replace('/', "\\").to_lowercase();
+    if let Some(value) = value.strip_prefix(r"\\?\unc\") {
+        return format!(r"\\{value}");
+    }
+    value.strip_prefix(r"\\?\").unwrap_or(&value).to_owned()
+}
+
+#[cfg(any(windows, test))]
+fn verify_windows_opened_path(actual: &str, requested: &str) -> Result<(), String> {
+    if windows_path_key(actual) != windows_path_key(requested) {
+        return Err("opened source escaped requested path".into());
+    }
+    Ok(())
+}
+
 fn resolve(path: &Path) -> Result<PathBuf, String> {
     let absolute = if path.is_absolute() {
         path.to_owned()
@@ -97,7 +118,8 @@ fn git_root_matches(top: &[u8], root: &Path) -> Result<bool, String> {
     {
         // Match pathlib's Windows case semantics after giving both operands the
         // same canonical/prefix representation. Do not trim filename whitespace.
-        Ok(shown_path(&top)?.to_lowercase() == shown_path(&resolve(root)?)?.to_lowercase())
+        Ok(windows_path_key(&text(top.as_os_str())?)
+            == windows_path_key(&text(resolve(root)?.as_os_str())?))
     }
     #[cfg(not(windows))]
     {
@@ -863,9 +885,7 @@ fn rooted_open(path: &Path) -> Result<File, String> {
     let actual = PathBuf::from(
         String::from_utf16(&buffer[..length as usize]).map_err(|_| "invalid source handle path")?,
     );
-    if shown_path(&actual)?.to_lowercase() != shown_path(path)?.to_lowercase() {
-        return Err("opened source escaped requested path".into());
-    }
+    verify_windows_opened_path(&text(actual.as_os_str())?, &text(path.as_os_str())?)?;
     Ok(file)
 }
 
@@ -1161,6 +1181,98 @@ mod tests {
         assert_eq!(git_path_record("/project\r\n"), "/project\r");
         #[cfg(windows)]
         assert_eq!(git_path_record("C:/project\r\n"), "C:/project");
+    }
+
+    #[test]
+    fn windows_opened_path_comparison_handles_nested_separators_without_escape() {
+        for (actual, requested) in [
+            (
+                r"\\?\C:\Root\submodule\child.py",
+                r"C:\Root\submodule/child.py",
+            ),
+            (
+                r"\\?\C:\Проект\nested\child.py",
+                r"c:/проект/nested/child.py",
+            ),
+            (
+                r"\\?\UNC\Host\Share\Root\nested\child.py",
+                r"//host/share/root/nested/child.py",
+            ),
+        ] {
+            verify_windows_opened_path(actual, requested).unwrap();
+        }
+        for (actual, requested) in [
+            (r"\\?\C:\Outside\child.py", r"C:\Root/child.py"),
+            (r"\\?\C:\Root-other\child.py", r"C:\Root/child.py"),
+            (r"\\?\C:\Root\other.py", r"C:\Root/child.py"),
+            (r"\\?\D:\Root\child.py", r"C:\Root/child.py"),
+            (r"\\?\C:\Root\child.py", r"C:\Root/child.py "),
+            (r"\\?\C:\Outside\child.py", r"C:\Root/../Outside/child.py"),
+            (r"\\?\C:\Root\child.py", r"C:Root/child.py"),
+            (r"\\?\UNC\Host\Other\child.py", r"//host/share/child.py"),
+        ] {
+            assert!(
+                verify_windows_opened_path(actual, requested).is_err(),
+                "{actual:?} {requested:?}"
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_read_accepts_git_style_nested_and_verbatim_paths() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = PathBuf::from(shown_path(&fs::canonicalize(temporary.path()).unwrap()).unwrap());
+        fs::create_dir(root.join("submodule")).unwrap();
+        fs::write(
+            root.join("submodule").join("child.py"),
+            b"nested source bytes",
+        )
+        .unwrap();
+        let ordinary_mixed = root.join("submodule/child.py");
+        let canonical = fs::canonicalize(root.join("submodule").join("child.py")).unwrap();
+        for path in [ordinary_mixed, canonical] {
+            assert_eq!(read_regular(&path, 64).unwrap(), b"nested source bytes");
+        }
+    }
+
+    #[test]
+    fn snapshot_reads_actual_gitlink_tree_with_nested_names() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = PathBuf::from(shown_path(&fs::canonicalize(temporary.path()).unwrap()).unwrap());
+        let deadline = Instant::now() + Duration::from_secs(30);
+        assert!(git(&root, &["init", "-q"], deadline).unwrap().is_some());
+        fs::create_dir(root.join("submodule")).unwrap();
+        fs::write(
+            root.join("submodule").join("child.py"),
+            b"nested source bytes",
+        )
+        .unwrap();
+        fs::write(
+            root.join("submodule").join(".git"),
+            b"fixture metadata excluded",
+        )
+        .unwrap();
+        assert!(git(
+            &root,
+            &[
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                "160000,1111111111111111111111111111111111111111,submodule"
+            ],
+            deadline
+        )
+        .unwrap()
+        .is_some());
+        let observed = snapshot(&json!({"cwd":shown_path(&root).unwrap()})).unwrap();
+        assert_eq!(observed["kind"], "git");
+        assert_eq!(observed["files"]["submodule/child.py"]["kind"], "file");
+        assert_eq!(
+            observed["files"]["submodule/child.py"]["sha256"],
+            format!("{:x}", Sha256::digest(b"nested source bytes"))
+        );
+        assert!(observed["files"].get("submodule/.git").is_none());
     }
 
     #[cfg(windows)]
