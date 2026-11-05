@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from agent_harness.codex_execution import CodexAdapter
+from managed_process_fixture import BoundFixtureCodexAdapter as CodexAdapter, bound_fake_script
 from agent_harness.strict_yaml import dump
 from agent_harness.supervisor import Supervisor
 from agent_harness.core import HarnessError
@@ -32,7 +32,7 @@ class ExecutionDurabilityTests(unittest.TestCase):
         for args in (["init"], ["add", "."], ["-c", "user.name=Fixture", "-c", "user.email=fixture@localhost", "commit", "-m", "fixture"]):
             subprocess.run(["git", *args], cwd=source, check=True, capture_output=True)
         fake = root / "fake.py"
-        fake.write_text(FAKE)
+        fake.write_text(bound_fake_script(FAKE))
         budgets = {"max_concurrent_managed_agents": 1, "max_wall_seconds": 120}
         if cap is not None:
             budgets["max_tokens"] = cap

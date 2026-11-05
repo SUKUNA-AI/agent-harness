@@ -10,7 +10,7 @@ from unittest.mock import patch as environment_patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from agent_harness.core import HarnessError
-from agent_harness.codex_execution import CodexAdapter
+from managed_process_fixture import BoundFixtureCodexAdapter as CodexAdapter, bound_fake_script
 from agent_harness.strict_yaml import dump
 from agent_harness.work_contract import normalize
 from agent_harness.scheduling import Scheduler, validate_plan
@@ -82,7 +82,7 @@ class ManagedSchedulingTests(unittest.TestCase):
             for args in (["init"], ["add", "."], ["-c", "user.name=Fixture", "-c", "user.email=fixture@localhost", "commit", "-m", "fixture"]):
                 subprocess.run(["git", *args], cwd=source, check=True, capture_output=True)
             fake = root / "fake.py"
-            fake.write_text(FAKE)
+            fake.write_text(bound_fake_script(FAKE))
             task, plan = root / "task.yaml", root / "plan.yaml"
             dump(task, self.contract)
             dump(plan, self.plan)
@@ -154,7 +154,7 @@ class ManagedSchedulingTests(unittest.TestCase):
             for args in (["init"], ["add", "."], ["-c", "user.name=Fixture", "-c", "user.email=fixture@localhost", "commit", "-m", "fixture"]):
                 subprocess.run(["git", *args], cwd=source, check=True, capture_output=True)
             fake = root / "fake.py"
-            fake.write_text(FAKE)
+            fake.write_text(bound_fake_script(FAKE))
             contract = deepcopy(self.contract)
             contract["budgets"]["max_tokens"] = 10000
             task, plan = root / "task.yaml", root / "plan.yaml"
@@ -164,8 +164,12 @@ class ManagedSchedulingTests(unittest.TestCase):
                 state_dir=root / "state", adapter=adapter)
             supervisor.plan_input = str(plan)
             with patch.object(Worktrees, "integrate", side_effect=ControllerCrash):
-                with self.assertRaises(ControllerCrash):
-                    supervisor.start()
+                try:
+                    unexpected = supervisor.start()
+                except ControllerCrash:
+                    pass
+                else:
+                    self.fail('Integration fault was not reached: ' + repr(unexpected))
             calls = fake.with_suffix(".calls").read_bytes()
             result = Supervisor(supervisor.path, adapter=adapter).resume()
             self.assertEqual(result["status"], "ACCEPTED", result)
@@ -217,7 +221,7 @@ class ManagedSchedulingTests(unittest.TestCase):
 
     def test_managed_recovery_resumes_exact_workers_and_reconciles_already_applied_patch(self):
         from unittest.mock import patch
-        from agent_harness.agent_lifecycle import Worktrees, ModelLease
+        from agent_harness.agent_lifecycle import Worktrees
         class FakeManaged(CodexAdapter):
             def capabilities(self):
                 return {**super().capabilities(), "native_children_disabled": True}
@@ -232,18 +236,7 @@ class ManagedSchedulingTests(unittest.TestCase):
             for args in (["init"], ["add", "."], ["-c", "user.name=Fixture", "-c", "user.email=fixture@localhost", "commit", "-m", "fixture"]):
                 subprocess.run(["git", *args], cwd=source, check=True, capture_output=True)
             fake = root / "fake.py"
-            # Keep each fixture child alive until the exact process identity
-            # has been durably bound. A fast natural exit is correctly unknown
-            # in production and must not randomly bypass this recovery fault.
-            handshake = """prompt=args[-1]
-import os
-bound=pathlib.Path(__file__).parent/('bound-'+str(os.getpid()))
-end=time.monotonic()+30
-while not bound.exists():
- if time.monotonic()>=end: raise RuntimeError('fixture bind handshake timed out')
- time.sleep(0.01)
-"""
-            fake.write_text(FAKE.replace('prompt=args[-1]', handshake))
+            fake.write_text(bound_fake_script(FAKE))
             task, plan = root / "task.yaml", root / "plan.yaml"
             dump(task, self.contract); dump(plan, self.plan)
             adapter = FakeManaged((sys.executable, str(fake)))
@@ -254,28 +247,16 @@ while not bound.exists():
             def crash_after_write(trees, staging, patch_bytes):
                 original(trees, staging, patch_bytes)
                 raise ControllerCrash()
-            original_bind = ModelLease.bind
-            bound_children = []
-            def bind_then_release(lease, process):
-                identity = process.get("identity", process)
+            with patch.object(Worktrees, "integrate", crash_after_write):
                 try:
-                    original_bind(lease, process)
-                    bound_children.append(identity)
-                finally:
-                    # Also release on failure so diagnostics cannot leave a
-                    # blocked fixture; production retains its fail-closed result.
-                    (root / ('bound-' + str(identity['pid']))).write_text('bound')
-            with patch.object(ModelLease, "bind", bind_then_release):
-                with patch.object(Worktrees, "integrate", crash_after_write):
-                    try:
-                        unexpected = supervisor.start()
-                    except ControllerCrash:
-                        pass
-                    else:
-                        self.fail('Integration fault was not reached: ' + repr(unexpected))
-                recovered = Supervisor(supervisor.path, adapter=adapter)
-                result = recovered.resume()
-            self.assertGreaterEqual(len(bound_children), 4)
+                    unexpected = supervisor.start()
+                except ControllerCrash:
+                    pass
+                else:
+                    self.fail('Integration fault was not reached: ' + repr(unexpected))
+            recovered = Supervisor(supervisor.path, adapter=adapter)
+            result = recovered.resume()
+            self.assertGreaterEqual(len(adapter.bound_children), 4)
             self.assertEqual(result["status"], "ACCEPTED", result)
             self.assertTrue(result["evidence_current"])
             agents = [recovered.store.read("agents/" + name + ".yaml", "agent-state.schema.json") for name in ("left", "right")]
@@ -306,8 +287,8 @@ while not bound.exists():
                 # Exact session selection does not itself authorize a cwd. This
                 # fake honors the supplied ID, like a restored session adapter;
                 # the supervisor must prevent foreign writes before invocation.
-                fake.write_text(FAKE.replace("if 'resume' in args: assert args[args.index('resume')+1]==sid",
-                                             "if 'resume' in args: sid=args[args.index('resume')+1]"))
+                fake.write_text(bound_fake_script(FAKE.replace("if 'resume' in args: assert args[args.index('resume')+1]==sid",
+                                             "if 'resume' in args: sid=args[args.index('resume')+1]")))
                 task, plan = root / "task.yaml", root / "plan.yaml"
                 dump(task, self.contract); dump(plan, self.plan)
                 adapter = FakeManaged((sys.executable, str(fake)))
@@ -335,3 +316,35 @@ while not bound.exists():
                     Supervisor(supervisor.path, adapter=adapter).resume()
                 self.assertEqual(fake.with_suffix(".calls").read_bytes(), calls_before)
                 self.assertEqual((foreign / "left.py").read_text(), "VALUE = 0\n")
+
+    def test_all_recovery_variants_keep_child_live_during_delayed_bind(self):
+        import time
+        from agent_harness.agent_lifecycle import ModelLease
+        from agent_harness.core import identity_alive
+        original = ModelLease.bind
+        delayed = []
+        def delayed_left_bind(lease, process):
+            if lease.value['task_id'] == 'left':
+                delayed.append(process['identity'])
+                # On the old raw fake this waits for natural exit, then the
+                # real bind correctly refuses it. The handshake child remains
+                # live through the entire delay and real ownership callback.
+                end = time.monotonic() + 2
+                while identity_alive(process['identity']) and time.monotonic() < end:
+                    time.sleep(0.001)
+            return original(lease, process)
+        methods = (
+            'test_interrupted_wave_with_completion_receipts_preserves_configured_token_budget',
+            'test_managed_recovery_resumes_exact_workers_and_reconciles_already_applied_patch',
+            'test_recovery_rejects_foreign_worker_or_staging_before_any_model_spawn',
+        )
+        with environment_patch.object(ModelLease, 'bind', delayed_left_bind):
+            for method in methods:
+                with self.subTest(recovery=method):
+                    case = ManagedSchedulingTests(method)
+                    try:
+                        case.setUp()
+                        getattr(case, method)()
+                    finally:
+                        case.doCleanups()
+        self.assertEqual(len(delayed), 5)
