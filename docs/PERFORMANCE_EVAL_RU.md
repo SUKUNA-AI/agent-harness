@@ -139,6 +139,16 @@ operational isolation, approved total budget и реальные runs остаю
 незавершённым этапом; synthetic report не подтверждает экономию.
 [Полные ограничения](STABILIZATION_RU.md).
 
+Report сохраняет `accepted_pairs.per_task`: каждый task/repeat, исходы обеих
+ветвей, наблюдённые и полные tokens, absolute/relative savings и причину
+неопределимого процента. Failed/missing/partial observations остаются видны.
+`costs` отдельно суммирует наблюдённые затраты принятых в обеих ветвях пар с
+coverage; `complete_usage_costs` содержит сопоставимые полные затраты.
+Нулевой baseline сохраняется в этих totals, его индивидуальный процент — null.
+Отношение totals обозначено `relative_token_saving_of_totals`; среднее repeats
+по task и median task clusters имеют отдельные поля. `full_cohort` включает
+также неудачные запуски и не заменяется выборкой accepted pairs.
+
 Format resolver подтверждает только закрытый профиль isolated table lookup.
 Unknown config sections, dynamic hooks/MCP/plugins, ambient AGENTS или explicit
 project cwd не имеют здесь доказанной полной closure и отключают automatic

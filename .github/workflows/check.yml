@@ -38,7 +38,7 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.13'
-      - name: Early hook rollback and process cleanup contracts
+      - name: Early rollback, recovery and benchmark contracts
         shell: python {0}
         run: |
           import sys
@@ -49,6 +49,8 @@ jobs:
               "test_hook_adoption.HookAdoptionTests.test_addressed_rollback_preserves_new_user_group_and_restores_legacy",
               "test_execution_durability.ExecutionDurabilityTests.test_successful_terminal_event_without_process_tree_cleanup_cannot_integrate",
               "test_execution_durability.ExecutionDurabilityTests.test_cleanup_fixture_does_not_mask_pre_exec_failure",
+              "test_benchmark_runner.BenchmarkRunnerTests.test_full_cohort_executes_existing_engines_and_never_replays_completed_trials",
+              "test_managed_scheduling.ManagedSchedulingTests.test_managed_recovery_resumes_exact_workers_and_reconciles_already_applied_patch",
           ]
           result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromNames(names))
           raise SystemExit(not result.wasSuccessful())

@@ -97,6 +97,70 @@ class EvaluationTests(unittest.TestCase):
             self.assertEqual(suite["policy_result"], "measured_positive")
             self.assertEqual(suite["claim_scope"], "synthetic_accounting_only")
 
+    def test_pair_distribution_preserves_zero_baseline_and_separate_cohort_costs(self):
+        trials = []
+        for row in schedule(self.manifest):
+            if row["task_id"] == "first":
+                costs = (0, 7) if row["repeat"] == 0 else (100, 50)
+                outcome = "accepted"
+            else:
+                costs = (900, 600)
+                outcome = "failed" if row["arm"] == "harness_full" else "accepted"
+            trials.append(self.trial(row, costs[row["arm"] == "harness_full"], outcome))
+        report = summarize(self.manifest, trials, self.root)
+        for suite in report["suites"]:
+            pairs = suite["accepted_pairs"]
+            self.assertEqual(pairs["accepted_repeat_pairs"], 2)
+            self.assertEqual(pairs["complete_usage_repeat_pairs"], 2)
+            self.assertEqual(pairs["costs"]["plain_stock"]["observed_tokens"], 100)
+            self.assertEqual(pairs["costs"]["harness_full"]["observed_tokens"], 57)
+            self.assertEqual(suite["full_cohort"]["plain_stock"]["observed_tokens"], 1900)
+            self.assertEqual(suite["full_cohort"]["harness_full"]["observed_tokens"], 1257)
+            first, second = pairs["per_task"]
+            self.assertEqual((first["task_id"], second["task_id"]), ("first", "second"))
+            zero, nonzero = first["repeats"]
+            self.assertEqual((zero["baseline_tokens"], zero["harness_tokens"]), (0, 7))
+            self.assertEqual(zero["absolute_token_saving"], -7)
+            self.assertIsNone(zero["relative_token_saving"])
+            self.assertEqual(zero["relative_token_saving_status"], "zero_baseline")
+            self.assertEqual(nonzero["relative_token_saving"], .5)
+            self.assertEqual(first["mean_relative_token_saving"], .5)
+            self.assertEqual(pairs["complete_usage_costs"]["absolute_token_saving"], 43)
+            self.assertEqual(pairs["complete_usage_costs"]["relative_token_saving_of_totals"], .43)
+            self.assertTrue(all(row["relative_token_saving_status"] == "not_accepted_in_both" for row in second["repeats"]))
+
+    def test_pair_distribution_keeps_missing_and_unknown_usage_explicit(self):
+        rows = [row for row in schedule(self.manifest)
+                if row["suite"] == SUITES[0] and row["task_id"] == "first" and row["repeat"] == 0]
+        trials = [self.trial(row, 10, coverage="partial" if row["arm"] == "harness_full" else "complete") for row in rows]
+        pairs = summarize(self.manifest, trials, self.root)["suites"][0]["accepted_pairs"]
+        self.assertEqual(pairs["accepted_repeat_pairs"], 1)
+        self.assertEqual(pairs["complete_usage_repeat_pairs"], 0)
+        self.assertEqual(pairs["costs"]["harness_full"]["usage_coverage"], "partial")
+        partial, missing = pairs["per_task"][0]["repeats"]
+        self.assertEqual(partial["relative_token_saving_status"], "incomplete_usage")
+        self.assertIsNone(partial["harness_tokens"])
+        self.assertEqual(partial["harness_observed_tokens"], 10)
+        self.assertEqual(missing["relative_token_saving_status"], "not_run")
+        self.assertIsNone(missing["baseline_observed_tokens"])
+        self.assertIsNone(pairs["complete_usage_costs"]["relative_token_saving_of_totals"])
+
+    def test_pair_distribution_preserves_unavailable_usage_as_unknown(self):
+        rows = [row for row in schedule(self.manifest)
+                if row["suite"] == SUITES[0] and row["task_id"] == "first" and row["repeat"] == 0]
+        trials = [self.trial(row, 10) for row in rows]
+        unknown = next(row for row in trials if row["trial_id"] == next(item["trial_id"] for item in rows if item["arm"] == "harness_full"))
+        unknown["usage_coverage"] = "unknown"
+        unknown["usage"][0].update(status="unavailable", input_tokens=None, output_tokens=None)
+        pairs = summarize(self.manifest, trials, self.root)["suites"][0]["accepted_pairs"]
+        record = pairs["per_task"][0]["repeats"][0]
+        self.assertEqual(record["harness_usage_coverage"], "unknown")
+        self.assertEqual(record["harness_observed_tokens"], 0)
+        self.assertIsNone(record["harness_tokens"])
+        self.assertEqual(record["relative_token_saving_status"], "incomplete_usage")
+        self.assertEqual(pairs["costs"]["harness_full"]["usage_coverage"], "unknown")
+        self.assertEqual(pairs["costs"]["harness_full"]["unknown_usage_trials"], 1)
+
     def test_duplicate_delivery_idempotent_but_conflicting_or_overlap_rejected(self):
         planned = schedule(self.manifest)
         first, second = [self.trial(row) for row in planned[:2]]

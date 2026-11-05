@@ -193,19 +193,7 @@ def summarize(manifest, trials, root):
                 "usage_coverage": "complete" if complete else "partial",
                 "observed_tokens": sum(value for row in selected for usage in row["usage"]
                                        for value in (usage["input_tokens"], usage["output_tokens"]) if value is not None)}
-        paired = []
-        for task in suite["tasks"]:
-            differences = []
-            for repeat in range(manifest["repeats"]):
-                pair = [next((records.get(row["trial_id"]) for row in suite_plan
-                              if row["task_id"] == task["id"] and row["repeat"] == repeat and row["arm"] == arm), None)
-                        for arm in arms]
-                if all(row and row["outcome"] == "accepted" and _complete(row) for row in pair):
-                    costs = [_tokens(row) for row in pair]
-                    if costs[0] > 0:
-                        differences.append((costs[0] - costs[1]) / costs[0])
-            if differences:
-                paired.append(statistics.mean(differences))
+        paired, paired_report = _paired_cost_report(suite, suite_plan, records, arms, manifest["repeats"])
         interval = _interval(paired, manifest) if len(paired) >= 2 else None
         quality_delta = ((summaries[arms[1]]["accepted"] - summaries[arms[0]]["accepted"])
                          / summaries[arms[0]]["planned"])
@@ -219,7 +207,7 @@ def summarize(manifest, trials, root):
             "quality_delta": quality_delta,
             "policy_result": verdict,
             "claim_scope": "synthetic_accounting_only" if output["measurement_kind"] == "synthetic" else "supplied_qualified_observations_required",
-            "accepted_pairs": {"task_clusters": len(paired),
+            "accepted_pairs": {**paired_report, "task_clusters": len(paired),
                 "median_relative_token_saving": statistics.median(paired) if paired else None,
                 "selection": "accepted_in_both_arms_with_complete_usage",
                 "uncertainty": "not_estimable" if interval is None else interval}})
@@ -227,6 +215,77 @@ def summarize(manifest, trials, root):
                              "no aggregate score across different suites",
                              "sample byte savings are not task token savings"]
     return output
+
+
+def _paired_cost_report(suite, planned, records, arms, repeats):
+    indexed = {(row["task_id"], row["repeat"], row["arm"]): records.get(row["trial_id"])
+               for row in planned}
+    accepted_count = complete_count = 0
+    complete_totals = [0, 0]
+    selected = {arm: [] for arm in arms}
+    per_task, clusters = [], []
+    for task in suite["tasks"]:
+        distribution, differences = [], []
+        for repeat in range(repeats):
+            pair = [indexed[(task["id"], repeat, arm)] for arm in arms]
+            totals = [_tokens(row) if row and _complete(row) else None for row in pair]
+            accepted = all(row and row["outcome"] == "accepted" for row in pair)
+            complete = accepted and all(value is not None for value in totals)
+            if accepted:
+                accepted_count += 1
+                for arm, row in zip(arms, pair):
+                    selected[arm].append(row)
+            if complete:
+                complete_count += 1
+                for index, value in enumerate(totals):
+                    complete_totals[index] += value
+            status = ("not_run" if any(row is None for row in pair) else
+                      "not_accepted_in_both" if not accepted else
+                      "incomplete_usage" if not complete else
+                      "zero_baseline" if totals[0] == 0 else "estimable")
+            relative = (totals[0] - totals[1]) / totals[0] if status == "estimable" else None
+            if relative is not None:
+                differences.append(relative)
+            distribution.append({"repeat": repeat,
+                "baseline_outcome": pair[0]["outcome"] if pair[0] else "not_run",
+                "harness_outcome": pair[1]["outcome"] if pair[1] else "not_run",
+                "baseline_tokens": totals[0], "harness_tokens": totals[1],
+                "baseline_observed_tokens": _observed_tokens(pair[0]) if pair[0] else None,
+                "harness_observed_tokens": _observed_tokens(pair[1]) if pair[1] else None,
+                "baseline_usage_coverage": _coverage(pair[0]),
+                "harness_usage_coverage": _coverage(pair[1]),
+                "absolute_token_saving": totals[0] - totals[1] if complete else None,
+                "relative_token_saving": relative, "relative_token_saving_status": status})
+        mean = statistics.mean(differences) if differences else None
+        if mean is not None:
+            clusters.append(mean)
+        per_task.append({"task_id": task["id"], "repeats": distribution,
+                         "mean_relative_token_saving": mean})
+    costs = {arm: {"observed_tokens": sum(_observed_tokens(row) for row in rows),
+                   "elapsed_seconds": sum(row["elapsed_seconds"] for row in rows),
+                   "usage_coverage": "unknown" if not rows or any(_coverage(row) == "unknown" for row in rows) else "complete" if all(_complete(row) for row in rows) else "partial",
+                   "unknown_usage_trials": sum(_coverage(row) == "unknown" for row in rows),
+                   "partial_usage_trials": sum(_coverage(row) == "partial" for row in rows)}
+             for arm, rows in selected.items()}
+    baseline, treatment = complete_totals
+    return clusters, {"accepted_repeat_pairs": accepted_count, "complete_usage_repeat_pairs": complete_count,
+        "cost_scope": "accepted_in_both_arms_including_partial_usage", "costs": costs,
+        "complete_usage_costs": {"baseline_tokens": baseline, "harness_tokens": treatment,
+            "absolute_token_saving": baseline - treatment,
+            "relative_token_saving_of_totals": (baseline - treatment) / baseline if baseline > 0 else None,
+            "relative_token_saving_status": "estimable" if baseline > 0 else "zero_baseline" if complete_count else "not_estimable"},
+        "per_task": per_task}
+
+
+def _observed_tokens(row):
+    return sum(value for usage in row["usage"]
+               for value in (usage["input_tokens"], usage["output_tokens"]) if value is not None)
+
+
+def _coverage(row):
+    if row is None or row["usage_coverage"] == "unknown":
+        return "unknown"
+    return "complete" if _complete(row) else "partial"
 
 
 def _complete(row):

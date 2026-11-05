@@ -15,8 +15,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from agent_harness import evaluation
 from agent_harness.benchmark_runner import BenchmarkRunner, BudgetAuthorization, CodexBenchmarkAdapter, production_status
 from agent_harness.codex_execution import CodexAdapter
-from agent_harness.core import HarnessError, digest
-from agent_harness.strict_yaml import dump, dumps
+from agent_harness.core import HarnessError, digest, identity_alive
+from managed_process_fixture import BoundFixtureCodexAdapter, bound_fake_script
+from agent_harness.strict_yaml import dump, dumps, load
+from agent_harness.agent_lifecycle import ModelLease
 from agent_harness import benchmark_runner
 from agent_harness.supervisor import Supervisor
 
@@ -29,6 +31,7 @@ if '--control' in args:
  value=json.loads(args[-1]); value['controls']={k:'synthetic_denied' for k in ('filesystem','network','evaluator','peer_state')}
  print(json.dumps(value));raise SystemExit
 def event(t,**v): print(json.dumps(dict(type=t,**v)),flush=True)
+prompt=args[-1]
 with pathlib.Path(__file__).with_suffix('.calls').open('a') as f:f.write('model\n')
 event('thread.started',thread_id='synthetic-'+uuid.uuid4().hex);event('turn.started')
 mode=pathlib.Path('mode.txt').read_text()
@@ -48,20 +51,46 @@ print(json.dumps({'schema_version':1,'record_type':'independent_grade','manifest
 '''
 
 
+class FixtureCodexAdapter(BoundFixtureCodexAdapter):
+    def __init__(self, executable, observations):
+        super().__init__(executable)
+        self.observations = observations
+
+    def run(self, prompt, *, on_process=None, **options):
+        observation = {"cwd": str(options["cwd"]), "managed_callback": on_process is not None}
+        def observed(process):
+            try:
+                if on_process is not None:
+                    on_process(process)  # The real lease + supervisor callback.
+                elif not identity_alive(process["identity"]):
+                    # Plain arms have no ModelLease. Release only after the
+                    # real transport has observed this exact live child.
+                    raise AssertionError("Plain fixture child identity is not live")
+            except BaseException as error:
+                observation["callback_error"] = type(error).__name__ + ": " + str(error)
+                raise
+        result = super().run(prompt, on_process=observed, **options)
+        observation["transport"] = result
+        self.observations.append(observation)
+        return result
+
+
 class FixtureAdapter(CodexBenchmarkAdapter):
     def __init__(self, root, *, kind="synthetic"):
         self.root, self.kind, self.modes, self.bound = root, kind, {}, 4
         self.wall = 10
+        self.turn_timeout = 10  # Successful fixture includes bounded spawn + real bind overhead.
         self.phase_deadlines = []
+        self.observations = []
         self.fake = root / "fake.py"
-        self.fake.write_text(FAKE)
+        self.fake.write_text(bound_fake_script(FAKE))
         self.grader = root / "grader.py"
         self.grader.write_text(GRADER)
         self.prepared_calls = []
 
     def identity(self):
         return {"adapter_id": "contained-fixture", "build_digest": hashlib.sha256(self.fake.read_bytes()).hexdigest(),
-            "boundary_digest": digest([str(self.fake), self.kind, self.modes, self.bound, self.wall]), "measurement_kind": self.kind,
+            "boundary_digest": digest([str(self.fake), self.kind, self.modes, self.bound, self.wall, self.turn_timeout]), "measurement_kind": self.kind,
             "model": "fixture-model", "provider": "fixture-route", "client_version": "fixture-client"}
 
     def control_argv(self, challenge, *, deadline=None):
@@ -81,7 +110,7 @@ class FixtureAdapter(CodexBenchmarkAdapter):
         task = trial_root / "task.yaml"
         dump(task, {"schema_version": 1, "task": {"id": "fixture", "objective": "Solve this synthetic fixture", "allowed_write_scopes": ["answer.txt"]},
             "mode": "native", "memory": True, "ledger": "inform", "budgets": {"max_attempts": 1, "max_wall_seconds": self.wall,
-                "turn_timeout_seconds": 1 if self.modes.get(row["trial_id"]) == "timeout" else 2},
+                "turn_timeout_seconds": 1 if self.modes.get(row["trial_id"]) == "timeout" else self.turn_timeout},
             "acceptance": [{"id": "answer", "kind": "command", "required": True,
                 "argv": [sys.executable, "-c", "from pathlib import Path; assert Path('answer.txt').read_text()=='42'"], "timeout": 2}]})
         return {"schema_version": 1, "trial_id": row["trial_id"], "cwd": str(source), "contract_path": str(task),
@@ -90,7 +119,7 @@ class FixtureAdapter(CodexBenchmarkAdapter):
 
     def codex(self, prepared, *, deadline=None):
         self.phase_deadlines.append(("backend", deadline))
-        return CodexAdapter((sys.executable, str(self.fake)))
+        return FixtureCodexAdapter((sys.executable, str(self.fake)), self.observations)
 
     def evaluator_argv(self, row, prepared, grade_input, *, deadline=None):
         self.phase_deadlines.append(("evaluator", deadline))
@@ -138,10 +167,90 @@ class BenchmarkRunnerTests(unittest.TestCase):
         path = self.adapter.fake.with_suffix(".calls")
         return path.read_text().splitlines() if path.exists() else []
 
+    def solve_diagnostic(self, runner, result):
+        if not result.get("unknown_outcome_trial_ids"):
+            return result
+        rows = []
+        for trial in result["unknown_outcome_trial_ids"][:2]:
+            root = runner.store.path("trials/" + trial)
+            scheduled = next(item for item in evaluation.schedule(self.manifest) if item["trial_id"] == trial)
+            row = {"trial_id": trial, "arm": scheduled["arm"]}
+            for name in ("solve.yaml", "supervisor/state.yaml"):
+                path = root / name
+                if path.exists() and path.stat().st_size <= 65536:
+                    value = load(path)
+                    row[name] = value if name == "solve.yaml" else {key: value.get(key) for key in (
+                        "status", "process_status", "reason", "current_failure", "deadline", "attempts_used")}
+                elif path.exists():
+                    row[name] = {"omitted_bytes": path.stat().st_size}
+            rows.append(row)
+        transports = []
+        for value in sorted(self.adapter.observations[-10:], key=lambda value: bool(value["transport"].get("outcome_known"))):
+            raw = value["transport"]
+            row = {key: raw.get(key) for key in ("status", "error", "usage", "outcome_known", "exit_code",
+                "turn_started", "turn_completed", "process_tree_stopped", "elapsed_seconds", "spawn_seconds")}
+            row.update({key: value.get(key) for key in ("cwd", "managed_callback", "callback_error")})
+            row["log_tails"] = {}
+            for stream, name in raw.get("logs", {}).items():
+                path = Path(name)
+                if path.is_file():
+                    with path.open("rb") as source:
+                        source.seek(max(0, path.stat().st_size - 1024))
+                        row["log_tails"][stream] = source.read(1024).decode("utf-8", errors="replace")
+            transports.append(row)
+        value = json.dumps({"transports": transports, "trials": rows, "cohort": result}, ensure_ascii=True)
+        return value[:24000] + ("... diagnostic truncated" if len(value) > 24000 else "")
+
+    def test_delayed_real_bind_keeps_fast_fake_alive(self):
+        self.first_harness()
+        runner = self.runner()
+        original = ModelLease.bind
+        def delayed(lease, process):
+            time.sleep(.3)
+            return original(lease, process)
+        with patch.object(ModelLease, "bind", delayed):
+            result = runner.advance()
+        self.assertEqual(result["completed_trials"], 1, self.solve_diagnostic(runner, result))
+        self.assertEqual(len(self.calls()), 1)
+        self.assertEqual(result["usage"]["observed_tokens"], 4)
+
+    def test_slow_real_binding_has_a_declared_happy_path_budget(self):
+        self.first_harness()
+        runner = self.runner()
+        original = ModelLease.bind
+        def delayed(lease, process):
+            time.sleep(2.2)  # Deterministically exceed the old happy timeout2s.
+            return original(lease, process)
+        with patch.object(ModelLease, "bind", delayed):
+            result = runner.advance()
+        self.assertEqual(result["completed_trials"], 1, self.solve_diagnostic(runner, result))
+        self.assertEqual(result["usage"]["observed_tokens"], 4)
+        raw = self.adapter.observations[0]["transport"]
+        self.assertEqual(raw["status"], "completed", json.dumps({key: raw.get(key) for key in (
+            "status", "error", "usage", "outcome_known", "turn_completed", "process_tree_stopped", "elapsed_seconds")}))
+        self.assertTrue(raw["outcome_known"])
+
+    def test_real_bind_refusal_stays_unknown_and_is_not_replayed(self):
+        self.first_harness()
+        runner = self.runner()
+        with patch.object(ModelLease, "bind", side_effect=HarnessError("injected ownership refusal")) as binding:
+            result = runner.advance()
+        self.assertEqual(binding.call_count, 1)
+        self.assertEqual(result["reason_code"], "BENCH_UNKNOWN_SOLVE_OUTCOME")
+        self.assertEqual(len(result["unknown_outcome_trial_ids"]), 1)
+        self.assertIn("injected ownership refusal", self.adapter.observations[0]["callback_error"])
+        self.assertTrue(self.adapter.observations[0]["transport"]["process_tree_stopped"])
+        diagnostic = self.solve_diagnostic(runner, result)
+        self.assertIn("injected ownership refusal", diagnostic)
+        self.assertLessEqual(len(diagnostic.encode("ascii")), 24032)
+        calls = self.calls()
+        self.assertEqual(runner.advance()["reason_code"], "BENCH_UNKNOWN_SOLVE_OUTCOME")
+        self.assertEqual(calls, self.calls())
+
     def test_full_cohort_executes_existing_engines_and_never_replays_completed_trials(self):
         runner = self.runner()
         result = runner.run()
-        self.assertEqual(result["status"], "complete", result)
+        self.assertEqual(result["status"], "complete", self.solve_diagnostic(runner, result))
         self.assertEqual((result["planned_trials"], result["completed_trials"]), (10, 10))
         self.assertEqual(result["usage"]["observed_tokens"], 40)
         self.assertEqual(len(self.calls()), 10)
@@ -153,7 +262,7 @@ class BenchmarkRunnerTests(unittest.TestCase):
         report = runner.report()
         self.assertEqual(report["measurement_kind"], "synthetic")
         self.assertEqual(report["status"], "complete")
-        self.adapter.fake.write_text(FAKE + "\n# changed after completion\n")
+        self.adapter.fake.write_text(bound_fake_script(FAKE) + "\n# changed after completion\n")
         self.assertEqual(runner.status()["status"], "blocked")
         self.assertEqual(len(self.calls()), 10)
 
@@ -228,7 +337,7 @@ class BenchmarkRunnerTests(unittest.TestCase):
             return original({**challenge, "nonce": "old-delivery"})
         with patch.object(self.adapter, "control_argv", stale):
             self.assertEqual(runner.advance()["reason_code"], "BENCH_STALE_QUALIFICATION")
-        self.adapter.fake.write_text(FAKE + "\n# changed backend\n")
+        self.adapter.fake.write_text(bound_fake_script(FAKE) + "\n# changed backend\n")
         self.assertEqual(runner.advance()["reason_code"], "BENCH_STALE_ASSET")
         self.assertEqual(self.calls(), [])
 

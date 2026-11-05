@@ -256,8 +256,14 @@ class ManagedSchedulingTests(unittest.TestCase):
                     self.fail('Integration fault was not reached: ' + repr(unexpected))
             recovered = Supervisor(supervisor.path, adapter=adapter)
             result = recovered.resume()
-            self.assertGreaterEqual(len(adapter.bound_children), 4)
-            self.assertEqual(result["status"], "ACCEPTED", result)
+            # Report the recovery verdict before callback counts so a blocked
+            # Windows run exposes its actual cause, not a secondary count.
+            reason = str(result.get("reason", ""))
+            recovery_detail = {"status": result.get("status"), "reason": reason[:1536],
+                "reason_truncated": len(reason) > 1536, "attempt": result.get("attempt"),
+                "bound_children": len(adapter.bound_children)}
+            self.assertEqual(result["status"], "ACCEPTED", recovery_detail)
+            self.assertGreaterEqual(len(adapter.bound_children), 4, recovery_detail)
             self.assertTrue(result["evidence_current"])
             agents = [recovered.store.read("agents/" + name + ".yaml", "agent-state.schema.json") for name in ("left", "right")]
             self.assertTrue(all(row["attempts_used"] == 1 for row in agents))
