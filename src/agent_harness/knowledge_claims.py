@@ -77,13 +77,17 @@ def _policies(symbol):
 
 def _declarations(tree, prefix=()):
     rows = []
-    for child in ast.iter_child_nodes(tree):
+    pending = [(tree, prefix)]
+    visited = 0
+    while pending:
+        child, prefix = pending.pop()
+        visited += 1
+        if visited > 100000:
+            raise HarnessError("CLAIM_AST_NODE_BOUND")
         if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            name = (*prefix, child.name)
-            rows.append((".".join(name), child))
-            rows.extend(_declarations(child, name))
-        else:
-            rows.extend(_declarations(child, prefix))
+            prefix = (*prefix, child.name)
+            rows.append((".".join(prefix), child))
+        pending.extend((node, prefix) for node in reversed(list(ast.iter_child_nodes(child))))
     return rows
 
 
@@ -115,7 +119,7 @@ def _build(root, path, current, symbol):
             raise HarnessError("Unsupported parser language; use whole-snapshot observation")
         try:
             tree = ast.parse(data.decode("utf-8"), type_comments=True, feature_version=sys.version_info[:2])
-        except (UnicodeDecodeError, SyntaxError, ValueError) as exc:
+        except (UnicodeDecodeError, SyntaxError, ValueError, RecursionError, MemoryError) as exc:
             raise HarnessError("CLAIM_PARSER_UNAVAILABLE") from exc
         matches = [node for name, node in _declarations(tree) if name == symbol]
         if len(matches) != 1:
@@ -165,5 +169,8 @@ def verify_fact(record, current):
         if rebuilt != closure or location != record["location"] or expected_kind != record["claim_kind"]:
             return {"source_validity": "changed", "reason_code": "CLAIM_CLOSURE_CHANGED"}
         return {"source_validity": "current", "reason_code": "DETERMINISTIC_CLAIM_VERIFIED"}
-    except (OSError, ValueError, KeyError, TypeError, HarnessError):
+    except Exception:
+        # This is an optional, untrusted claim verifier. Any implementation or
+        # parser failure means unknown, never a verified fact or failed bootstrap.
+        # Required own-checkpoint validation lives outside this boundary.
         return {"source_validity": "unknown", "reason_code": "CLAIM_REVALIDATION_UNAVAILABLE"}

@@ -2,6 +2,7 @@
 from copy import deepcopy
 from datetime import datetime,timedelta,timezone
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -60,8 +61,11 @@ class ProfileFixture(unittest.TestCase):
             return {'path':name,'sha256':_hash(raw)}
         self.put=put
         repository=self.root/'repository';repository.mkdir();(repository/'calc.py').write_text('VALUE = 0\n');(repository/'empty.py').write_bytes(b'')
+        # Fixture blobs must not depend on the operator's global EOL/attributes.
+        environment={key:value for key,value in os.environ.items() if not key.startswith('GIT_')}
+        environment.update(GIT_CONFIG_GLOBAL=os.devnull,GIT_CONFIG_NOSYSTEM='1')
         for command in [['init'],['add','.'],['-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-m','fixture']]:
-            subprocess.run(['git',*command],cwd=repository,check=True,capture_output=True)
+            subprocess.run(['git','-c','core.autocrlf=false','-c','core.attributesFile='+os.devnull,*command],cwd=repository,env=environment,check=True,capture_output=True)
         self.repo=repository
         revision=subprocess.check_output(['git','rev-parse','HEAD'],cwd=repository,text=True).strip()
         files,checkout=capture_local_git_checkout(repository,revision,self.assets,prefix='swe/base')

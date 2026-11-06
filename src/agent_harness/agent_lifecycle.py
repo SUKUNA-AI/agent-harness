@@ -88,6 +88,9 @@ class GlobalSlots:
             completion = accounting["completions"].get(invocation)
             if not row["unresolved"] or completion is None or row["child_alive"]:
                 continue
+            if (completion["payload"]["dispatch_state"] not in {"finished_observed", "not_dispatched_proven"}
+                    or completion["payload"]["process_tree_stopped"] is not True):
+                continue
             if row.get("tree_cleanup_required") and completion["payload"]["process_tree_stopped"] is not True:
                 continue
             name = "slot-" + str(row["slot"]) + ".yaml"

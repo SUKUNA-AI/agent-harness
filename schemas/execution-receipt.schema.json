@@ -13,7 +13,10 @@
         "completion",
         "integration_intent",
         "integration",
-        "review"
+        "review",
+        "node_check",
+        "node_acceptance",
+        "coverage"
       ]
     },
     "record_id": {
@@ -121,7 +124,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "maxLength": 16384
+            "maxLength": 128
           },
           "maxItems": 128
         },
@@ -150,7 +153,8 @@
             "completed",
             "failed",
             "cancelled",
-            "unknown"
+            "unknown",
+            "timed_out"
           ]
         },
         "usage_scope": {
@@ -166,7 +170,8 @@
             "unavailable",
             "invalid",
             "conflicting",
-            "unverified_legacy"
+            "unverified_legacy",
+            "not_applicable"
           ]
         },
         "input_tokens": {
@@ -392,6 +397,97 @@
             "null"
           ],
           "minimum": 0
+        },
+        "error": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "phase": {
+          "enum": [
+            "local",
+            "integration"
+          ]
+        },
+        "verification_run": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "verification_digest": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "verification_definition_digest": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "requirement_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+            "maxLength": 128
+          }
+        },
+        "check_ref": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "local_ref": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "integrated_ref": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "mission_digest": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "coverage": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+                "maxLength": 128
+              },
+              "status": {
+                "enum": [
+                  "accepted",
+                  "pending",
+                  "stale",
+                  "blocked"
+                ]
+              },
+              "evidence_ids": {
+                "type": "array",
+                "maxItems": 128,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "id",
+              "status",
+              "evidence_ids"
+            ]
+          }
+        },
+        "integration_ref": {
+          "type": "string",
+          "maxLength": 128
         }
       }
     }

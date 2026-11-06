@@ -230,6 +230,8 @@ class ArmHomeBuilderTests(unittest.TestCase):
         for arm in ('plain_stock','plain_matched','harness_full','harness_matched'):
             with self.subTest(arm=arm):
                 receipt=self.prepare(arm,arm)
+                manifest=json.loads((Path(receipt['homes']['environment'])/'files.json').read_text(encoding='utf-8'))
+                self.assertTrue(all('\\' not in name for name in manifest['closed_namespaces']))
                 strict_yaml.validate(receipt,json.loads((self.package/'schemas/benchmark-arm-home-receipt.schema.json').read_text(encoding='utf-8')))
                 self.assertEqual('prepared',receipt['status'])
                 home=Path(receipt['homes']['codex_home']);homes.append(home)

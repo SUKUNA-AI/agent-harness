@@ -55,6 +55,8 @@ def _patch(value, *, deadline=None):
         new_mode=(index_modes.get(name,old_mode if before_exists else '100644') if os.name=='nt' else
             '100755' if after_exists and _ordinary(root/name).st_mode&0o111 else '100644')
         if before_exists==after_exists and before==after and old_mode==new_mode:continue
+        if b'\0' in before or b'\0' in after:
+            raise HarnessError('BENCH_BINARY_PREDICTION_PATCH_UNSUPPORTED')
         try:old,new=before.decode('utf-8'),after.decode('utf-8')
         except UnicodeDecodeError as error:raise HarnessError('BENCH_BINARY_PREDICTION_PATCH_UNSUPPORTED')from error
         chunks.append('diff --git a/'+name+' b/'+name+'\n')
@@ -62,8 +64,14 @@ def _patch(value, *, deadline=None):
         elif not after_exists:chunks.append('deleted file mode '+old_mode+'\n')
         elif old_mode!=new_mode:chunks.extend(['old mode '+old_mode+'\n','new mode '+new_mode+'\n'])
         if before!=after or before_exists!=after_exists:
-            chunks.append('index '+(blob(before) if before_exists else '0'*len(blob(b'')))+'..'+(blob(after) if after_exists else '0'*len(blob(b'')))+'\n')
-        for line in difflib.unified_diff(old.splitlines(keepends=True),new.splitlines(keepends=True),
+            chunks.append('index '+(blob(before) if before_exists else '0'*len(blob(b'')))+'..'+(blob(after) if after_exists else '0'*len(blob(b'')))+
+                (' '+old_mode if before_exists and after_exists and old_mode==new_mode else '')+'\n')
+        # Git's text records end only at LF. Unicode separators and CR are
+        # ordinary bytes; str.splitlines would silently change patch hunks.
+        def lf_lines(text):
+            parts=text.split('\n')
+            return [part+'\n' for part in parts[:-1]]+([parts[-1]] if parts[-1] else [])
+        for line in difflib.unified_diff(lf_lines(old),lf_lines(new),
             fromfile='a/'+name if name in baseline else '/dev/null',tofile='b/'+name if name in current else '/dev/null'):
             chunks.append(line if line.endswith('\n') else line+'\n\\ No newline at end of file\n')
     return ''.join(chunks)

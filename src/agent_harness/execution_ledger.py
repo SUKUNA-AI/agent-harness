@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import time
 import uuid
 
 from .core import HarnessError, canonical, digest, lock, now
@@ -391,10 +392,52 @@ class Ledger:
             self.rebuild_index(locked=True)
         return event
 
+    def _inventory(self):
+        """Bound authoritative enumeration before trusting a derived index."""
+        paths, total = {}, 0
+        started = time.monotonic()
+        with os.scandir(self.events) as entries:
+            for entry in entries:
+                if time.monotonic() - started > 5:
+                    raise HarnessError("LEDGER_SCAN_BOUND: deadline")
+                if not entry.name.endswith(".yaml"):
+                    continue
+                identifier = entry.name[:-5]
+                if not re.fullmatch(ID, identifier) or not entry.is_file(follow_symlinks=False):
+                    raise HarnessError("LEDGER_EVENT_CORRUPT: invalid authoritative event path")
+                total += entry.stat(follow_symlinks=False).st_size
+                if len(paths) >= 10000 or total > 32 * 1024 * 1024:
+                    raise HarnessError("LEDGER_SCAN_BOUND: event count or bytes")
+                paths[identifier] = safe_private(Path(entry.path))
+        return paths
+
+    @staticmethod
+    def _load_event(path, identifier, budget=None):
+        from .strict_yaml import loads
+        try:
+            remaining = 2 * 1024 * 1024
+            if budget is not None:
+                if time.monotonic() - budget["started"] > 5:
+                    raise HarnessError("LEDGER_SCAN_BOUND: deadline")
+                remaining = min(remaining, 32 * 1024 * 1024 - budget["bytes"])
+            raw = read_regular_file(path, max_bytes=remaining)
+            if budget is not None:
+                budget["bytes"] += len(raw)
+            row = loads(raw, EVENT_SCHEMA)
+            if row["event_id"] != identifier:
+                raise HarnessError("filename and event ID differ")
+            return row
+        except (OSError, ValueError, HarnessError) as exc:
+            if str(exc).startswith("LEDGER_SCAN_BOUND"):
+                raise
+            raise HarnessError("LEDGER_EVENT_CORRUPT: authoritative event " + identifier) from exc
+
     def rebuild_index(self, *, locked=False):
         from .strict_yaml import dump, load
         def rebuild():
-            rows = [load(safe_private(path), EVENT_SCHEMA) for path in self.events.glob("*.yaml")]
+            paths = self._inventory()
+            budget = {"started": time.monotonic(), "bytes": 0}
+            rows = [self._load_event(path, identifier, budget) for identifier, path in paths.items()]
             rows.sort(key=lambda row: (row["timestamp"], row["event_id"]))
             dump(self.root / "index.yaml", {"schema_version": 1, "events": [r["event_id"] for r in rows]}, INDEX_SCHEMA)
             return rows
@@ -405,20 +448,24 @@ class Ledger:
 
     def _records(self):
         from .strict_yaml import load
-        try:
-            index = load(safe_private(self.root / "index.yaml"), INDEX_SCHEMA)
-            records = [load(safe_private(self.events / (event_id + ".yaml")), EVENT_SCHEMA) for event_id in index["events"]]
-            if len(records) != len(list(self.events.glob("*.yaml"))):
-                return self.rebuild_index()
-            return records
-        except (OSError, ValueError, HarnessError):
-            return self.rebuild_index()
+        with lock(self.root / ".lock", purpose="execution ledger read"):
+            paths = self._inventory()
+            try:
+                index = load(safe_private(self.root / "index.yaml"), INDEX_SCHEMA)
+                ids = index["events"]
+                if len(ids) != len(set(ids)) or set(ids) != set(paths):
+                    raise HarnessError("Derived ledger membership mismatch")
+            except (OSError, ValueError, HarnessError):
+                return self.rebuild_index(locked=True)
+            # Authoritative corruption is never treated as a disposable index.
+            budget = {"started": time.monotonic(), "bytes": 0}
+            return [self._load_event(paths[identifier], identifier, budget) for identifier in ids]
 
     def show(self, event_id, *, offset=0, limit=8192):
         from .strict_yaml import load
         if not re.fullmatch(ID, event_id):
             raise HarnessError("Invalid ledger event identifier")
-        value = load(safe_private(self.events / (event_id + ".yaml")), EVENT_SCHEMA)
+        value = self._load_event(safe_private(self.events / (event_id + ".yaml")), event_id)
         return paginate(value, offset=offset, limit=limit)
 
     @staticmethod

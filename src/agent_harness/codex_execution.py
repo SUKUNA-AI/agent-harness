@@ -299,14 +299,22 @@ class CodexAdapter:
             raise HarnessError("Windows argv budget exceeded; use a smaller referenced context packet")
         return argv
 
+    def preflight(self, prompt, **options):
+        """Validate this transport without starting a process; decorators delegate it."""
+        return self.argv(prompt, **options)
+
     def run(self, prompt, *, cwd, session_id=None, timeout=600, cancel_file=None, on_process=None, on_event=None, output_schema=None, native_children=False, read_only=False, log_dir=None, deadline=None, write_authorized=False, allow_non_git=False):
+        from .task_packets import NotDispatched
         if type(timeout) not in (int, float) or not 0 < timeout <= 86400:
-            raise HarnessError("Codex turn timeout must be finite and between 0 and 86400 seconds")
+            raise NotDispatched("Codex turn timeout must be finite and between 0 and 86400 seconds")
         cwd = Path(cwd)
         if not cwd.is_absolute() or not cwd.is_dir():
-            raise HarnessError("Codex cwd must be an existing absolute directory")
-        argv = self.argv(prompt, session_id=session_id, output_schema=output_schema, native_children=native_children, read_only=read_only,
-                         write_authorized=write_authorized, allow_non_git=allow_non_git)
+            raise NotDispatched("Codex cwd must be an existing absolute directory")
+        try:
+            argv = self.argv(prompt, session_id=session_id, output_schema=output_schema, native_children=native_children, read_only=read_only,
+                             write_authorized=write_authorized, allow_non_git=allow_non_git)
+        except (HarnessError, OSError, ValueError) as error:
+            raise NotDispatched(str(error)) from error
         log_dir = Path(log_dir) if log_dir else Path(tempfile.mkdtemp(prefix="harness-codex-"))
         _mkdir(log_dir)
         _parents(log_dir)
@@ -382,12 +390,13 @@ class CodexAdapter:
                 if cancel_file is not None and Path(cancel_file).exists():
                     result["status"], result["error"] = "cancelled", "Cancelled before process start"
                     result["outcome_known"] = True
+                    result["dispatch_state"] = "not_dispatched_proven"
                     return result
                 if deadline is not None:
                     from datetime import datetime, timezone
                     remaining = (datetime.fromisoformat(deadline.replace("Z", "+00:00")) - datetime.now(timezone.utc)).total_seconds()
                     if remaining <= 0:
-                        result.update(status="timed_out", error="Absolute task deadline expired before process start", outcome_known=True)
+                        result.update(status="timed_out", error="Absolute task deadline expired before process start", outcome_known=True, dispatch_state="not_dispatched_proven")
                         return result
                     timeout = min(timeout, remaining)
                 spawn_started = time.monotonic()
@@ -437,7 +446,7 @@ class CodexAdapter:
                     if not fatal and completed and seen_thread and process.returncode == 0:
                         result["status"], result["outcome_known"] = "completed", True
                     elif terminal == "failed":
-                        result["status"] = "failed"
+                        result["status"], result["outcome_known"] = "failed", True
                     else:
                         result["status"] = "unknown_outcome"
                         result["error"] = result["error"] or "Missing completion/session or unexpected process exit"

@@ -134,6 +134,15 @@ python tools/harness.py work resume --run-dir /absolute/private/run --repair-jou
 `--repair-journal` предназначен только для доказанно оборванного последнего
 append: архив сохраняется, complete corrupt record не отбрасывается молча.
 
+`SupervisorStore` сохраняет в RAM только проверенный head: sequence, hash и число
+checkpoints. Append/commit повторно используют его под writer lock, если dev/inode,
+mode, nlink, size, mtime и ctime журнала не изменились. Смена stamp сбрасывает cache
+и требует полного bounded replay с проверкой schema/hash chain. Новый instance,
+явный `events()` и `recover()` всегда читают весь журнал заново; persisted cache
+доверия нет. Cache не хранит растущую копию событий. Лимит журнала 64 MiB остаётся
+явным; recovery читает только этот bounded журнал и связанные checkpoints.
+Это кооперативная сериализация, не защита от произвольного процесса того же user.
+
 Terminal task не переоткрывается автоматически. Явная новая попытка использует
 `work resume --new-attempt "причина"` и сохраняет прежние пределы. Accepted
 candidate повторно проверьте через `work status --verify-evidence`.
@@ -203,3 +212,7 @@ verdict воспроизводится как negative. Неизменённый
 лишь из-за отсутствия approval. Reviewer также входит в первоначальный budget.
 Dependency closure/generation race может повторить preparation до трёх раз в
 исходном deadline; source/integrity/physical-store ошибки не ретраятся.
+
+## Verified contract v2
+
+Для длинной managed-задачи доступен [verified task flow](VERIFIED_TASK_FLOW_RU.md): immutable mission, required packets, local/integrated node checks и current frontier. Contract/plan v1 сохраняют legacy integration-only semantics. Команды work start/resume/status прежние; новый mode выбирается version2 контракта, не увеличением concurrency.

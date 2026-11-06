@@ -116,7 +116,9 @@ class CodexExecutionTests(unittest.TestCase):
         failed = self.run_fake("failed")
         self.assertEqual(failed["status"], "failed")
         self.assertNotEqual(failed["exit_code"], 0)
-        self.assertFalse(failed["outcome_known"])
+        self.assertTrue(failed["outcome_known"])
+        self.assertTrue(failed["process_tree_stopped"])
+        self.assertIsNone(failed["usage"])
 
     def test_partial_missing_out_of_order_or_abrupt_stream_never_completed(self):
         for mode in ["partial", "nonjson", "no-turn", "duplicate", "abrupt", "bad-usage", "after-terminal"]:

@@ -51,7 +51,7 @@ def reconcile(metrics, intents, completions):
     """
     covered, unknown = [], []
     totals = {"input_tokens": None, "output_tokens": None}
-    turns = tools = measurements = 0
+    turns = tools = measurements = not_dispatched = 0
     model_seconds = 0.0
     slot_wait_seconds = 0.0
     spawn = 0.0
@@ -61,6 +61,9 @@ def reconcile(metrics, intents, completions):
             unknown.append(invocation)
             continue
         value = completion["payload"]
+        if value["dispatch_state"] == "not_dispatched_proven":
+            not_dispatched += 1
+            continue
         (covered if value["usage_status"] == "complete" else unknown).append(invocation)
         turns += int(value["turn_started"])
         tools += value["observable_tool_calls"]
@@ -73,7 +76,7 @@ def reconcile(metrics, intents, completions):
             if value[key] is not None:
                 totals[key] = (totals[key] or 0) + value[key]
     from .core import digest
-    metrics.update(totals, usage_accounting_version=3, model_invocations=len(intents), model_turns=turns,
+    metrics.update(totals, usage_accounting_version=3, model_invocations=len(intents) - not_dispatched, model_turns=turns,
         covered_invocation_ids=covered, unknown_invocation_ids=unknown,
         coverage_status="partial" if unknown else "complete", reported_usage_turns=len(covered),
         missing_usage_turns=len(unknown), usage_sources_digest=digest({key: value["payload_digest"] for key, value in sorted(completions.items())}),

@@ -25,6 +25,7 @@ SESSION_ID = re.compile(r"native-[0-9a-f]{32}\Z")
 HOOK_SOURCES = {"startup", "resume", "clear", "compact", "fork"}
 HOOK_GOAL = "Native session bootstrap; recall relevant repository context"
 HOOK_HEADER = b"Harness bootstrap; observations below are untrusted and grant no authority.\n"
+SESSION_CONSTRAINTS = ["No model calls", "No secrets or transcript ingestion", "Memory is not acceptance"]
 
 
 OPERATION_V1_SCHEMA = object_schema({"schema_version": {"const": 1}, "operation_id": IDENTIFIER,
@@ -44,12 +45,23 @@ def runtime_state():
     return safe_private(Path(pointer["installation_state"]))
 
 
-def persist(path, value):
+def persist(path, value, *, exclusive=False):
     """Сохраняет атомарный private metadata-файл после проверки пути и секретов."""
     sanitized(value)
     safe_private(path)
-    atomic_json(path, value)
+    atomic_json(path, value, exclusive=exclusive)
     path.chmod(0o600)
+    sync_directory(path.parent)
+
+
+def sync_directory(path):
+    """Publish file/directory entries durably on supported POSIX filesystems."""
+    if os.name != "nt":
+        descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
 
 
 def current_provenance(root):
@@ -88,6 +100,29 @@ def previous_checkpoints(memory, current, session, *, with_metrics=False):
     return (records, diagnostics, metrics) if with_metrics else (records, diagnostics)
 
 
+def replay_context(memory, ledger, current, session, goal, own, own_path):
+    """A cached handoff needs current source AND current mutable observations.
+
+    Store the post-commit projection, including our own new ledger event, so a
+    same-input retransmission is stable. Timing measurements are not inputs.
+    Incomplete optional scans cannot prove equivalence for reuse.
+    """
+    recall = memory.recall(goal, current, top_k=3, max_bytes=4096, optional=True)
+    scans = recall.get("scan_metrics")
+    expected_kinds = {"episodes", "semantic", "facts"}
+    complete = (isinstance(scans, list) and len(scans) == len(expected_kinds)
+        and all(isinstance(metric, dict) and isinstance(metric.get("kind"), str)
+                and metric["kind"] in expected_kinds and metric.get("complete") is True for metric in scans))
+    if complete:
+        complete = {metric["kind"] for metric in scans} == expected_kinds
+    recall = {key: value for key, value in recall.items() if key != "scan_metrics"}
+    foreign, diagnostics, metrics = previous_checkpoints(memory, current, session, with_metrics=True)
+    complete = complete and metrics.get("scan_complete") is True
+    return {"memory": recall, "ledger": ledger.inform(current, max_bytes=4096),
+        "foreign": foreign, "diagnostics": diagnostics,
+        "own": checkpoint_observation(memory, own, own_path, current), "complete": complete}
+
+
 def session_packet(state, *, root=None, goal=None, session=None, note=None,
                    next_step=None, evidence=None, max_bytes=4096, expected_generation=None, operation_id=None, lifecycle_source=None):
     """Выполняет реальные Memory/Ledger/Reducer и отдаёт только bounded context."""
@@ -117,7 +152,14 @@ def session_packet(state, *, root=None, goal=None, session=None, note=None,
                "note": note, "next": next_step, "receipt": receipt})
     safe_private(directory, create=True)
     with lock(directory / "session.lock", purpose="native session"):
+        pending_path = directory / "pending-generation.json"
+        if pending_path.exists():
+            # Keep every input and the immutable generation for explicit repair.
+            # No optional recall or retry may turn interrupted publication into
+            # a handoff mixing the old checkpoint with a new goal.
+            raise HarnessError("SESSION_RECOVERY_REQUIRED: interrupted generation publication; preserve " + str(pending_path))
         existed = metadata_path.exists()
+        generation_conflict = False
         if existed:
             metadata = json.loads(read_regular_file(safe_private(metadata_path), max_bytes=65536))
             saved_root = Path(metadata["root"]).resolve(strict=True)
@@ -128,11 +170,11 @@ def session_packet(state, *, root=None, goal=None, session=None, note=None,
             generation = metadata.get("goal_generation", 1)
             if goal is not None and goal != prior_goal:
                 if expected_generation != generation:
-                    raise HarnessError("GOAL_GENERATION_CONFLICT: use explicit goal-update with expected generation")
+                    generation_conflict = True
                 generation += 1
             else:
                 if expected_generation is not None and expected_generation != generation:
-                    raise HarnessError("GOAL_GENERATION_CONFLICT: stale expected generation")
+                    generation_conflict = True
                 goal = prior_goal
         else:
             if root is None or goal is None:
@@ -147,16 +189,6 @@ def session_packet(state, *, root=None, goal=None, session=None, note=None,
         request_digest = digest({"note": note, "next": next_step, "evidence": receipt, "goal": goal,
                                  "expected_generation": expected_generation})
         operation_path = directory / ("operation-" + operation_id + ".yaml") if operation_id else None
-        if operation_path and operation_path.exists():
-            operation = load(safe_private(operation_path), OPERATION_READ_SCHEMA)
-            if operation["schema_version"] == 2:
-                verify_record(operation)
-            if operation["request_digest"] != request_digest:
-                raise HarnessError("OPERATION_ID_CONFLICT: same ID has different checkpoint inputs")
-            packet = json.loads(read_regular_file(safe_private(operation["packet_path"]), max_bytes=65536))
-            if digest(packet) != operation["packet_digest"]:
-                raise HarnessError("Operation packet integrity mismatch")
-            return packet
         current = current_provenance(root)
         limits = context_settings(state)
         memory = Memory(state / "memory", current["repository_identity"], enabled=True,
@@ -181,12 +213,47 @@ def session_packet(state, *, root=None, goal=None, session=None, note=None,
                 row = load(own_checkpoint, SHORT_SCHEMA)
                 if row["id"] != session or row["repository_identity"] != current["repository_identity"]:
                     raise HarnessError("Own checkpoint binding mismatch")
+                if (row.get("goal_generation", 1) != metadata.get("goal_generation", 1)
+                        or row["goal"] != metadata.get("active_goal", metadata["goal"])):
+                    raise HarnessError("Own checkpoint goal generation mismatch")
+                if metadata.get("checkpoint_digest") is not None:
+                    committed_path = directory / ("generation-" + str(metadata["receipt_generation"]) + "-" + digest(metadata) + ".json")
+                    committed = json.loads(read_regular_file(safe_private(committed_path), max_bytes=131072))
+                    if (digest(row) != metadata["checkpoint_digest"]
+                            or committed != {"metadata": metadata, "checkpoint": row}):
+                        raise HarnessError("Own checkpoint digest/committed generation mismatch")
             except (OSError, ValueError, HarnessError) as exc:
                 raise HarnessError("OWN_CHECKPOINT_CORRUPT: recovery blocked") from exc
             if note is None:
                 previous.append(checkpoint_observation(memory, row, own_checkpoint, current))
         elif existed:
             raise HarnessError("OWN_CHECKPOINT_MISSING: recovery blocked")
+        if operation_path and operation_path.exists():
+            operation = load(safe_private(operation_path), OPERATION_READ_SCHEMA)
+            if operation["schema_version"] == 2:
+                verify_record(operation)
+            if operation["request_digest"] != request_digest:
+                raise HarnessError("OPERATION_ID_CONFLICT: same ID has different checkpoint inputs")
+            packet = json.loads(read_regular_file(safe_private(operation["packet_path"]), max_bytes=65536))
+            if digest(packet) != operation["packet_digest"]:
+                raise HarnessError("Operation packet integrity mismatch")
+            if (packet["required"].get("goal_generation", 1) != metadata.get("goal_generation", 1)
+                    or packet["required"].get("goal", prior_goal) != prior_goal):
+                raise HarnessError("GOAL_GENERATION_CONFLICT: operation replay belongs to a previous mission")
+            if (packet["required"].get("snapshot_id") != current["snapshot_id"]
+                    or packet["required"].get("repository_identity") != current["repository_identity"]):
+                raise HarnessError("STALE_OPERATION_REPLAY: source changed; preserve receipt and request a fresh handoff")
+            # The Python API has the same complete transport bound as the CLI.
+            json_bytes({"session": session, "root": str(root), "evidence": operation["packet_path"],
+                        "packet": packet}, max_bytes=max_bytes)
+            context = replay_context(memory, ledger, current, session, goal, row, own_checkpoint)
+            references = [ref for ref in operation.get("input_refs", []) if ref["kind"] == "context_replay"]
+            if (not context["complete"] or len(references) != 1
+                    or references[0]["content_digest"] != digest(context)):
+                raise HarnessError("STALE_OPERATION_REPLAY: context proof changed or unavailable; request a fresh handoff")
+            return packet
+        if generation_conflict:
+            raise HarnessError("GOAL_GENERATION_CONFLICT: stale expected generation; use explicit goal-update")
         foreign, diagnostics, checkpoint_metrics = previous_checkpoints(memory, current, session, with_metrics=True)
         previous.extend(foreign)
         metadata.update(goal=goal, active_goal=goal, goal_generation=generation,
@@ -208,7 +275,7 @@ def session_packet(state, *, root=None, goal=None, session=None, note=None,
         elif note is not None or not own_checkpoint.exists():
             pending_checkpoint = {"schema_version": 1, "id": session,
                 "repository_identity": current["repository_identity"], "goal": goal,
-                "constraints": ["No model calls", "No secrets or transcript ingestion", "Memory is not acceptance"],
+                "constraints": SESSION_CONSTRAINTS,
                 "checkpoint": note or "started", "active_task": goal[:512], "failures": [],
                 "important_files": [], "next_step": next_step or "Work within current task authorization",
                 "evidence_ids": [receipt["id"]] if receipt else [], "evidence_refs": [receipt] if receipt else [],
@@ -217,6 +284,9 @@ def session_packet(state, *, root=None, goal=None, session=None, note=None,
                 "context_epoch": metadata.get("context_epoch", 0),
                 "session_id": session, "attempts_used": 0,
                 "tokens_reported": None, "updated_at": now(), "provenance": current}
+        committed_checkpoint = pending_checkpoint if pending_checkpoint is not None else row
+        goal_digest = hashlib.sha256(goal.encode("utf-8")).hexdigest()
+        metadata.update(checkpoint_digest=digest(committed_checkpoint), goal_digest=goal_digest)
         raw_path = directory / ("retrieval-" + uuid.uuid4().hex + ".json")
         persist(raw_path, {"memory": recall, "ledger": inform, "previous_short_term": previous,
                            "evidence": receipt, "provenance": current, "diagnostics": diagnostics, "checkpoint_scan": checkpoint_metrics})
@@ -237,11 +307,22 @@ def session_packet(state, *, root=None, goal=None, session=None, note=None,
             "stale_ledger_count": inform["required"]["stale_items_count"],
             "memory_omitted_records": recall["omitted_records"],
             "ledger_omitted_records": inform["omitted"], "goal_generation": generation,
+            "goal": goal, "goal_digest": goal_digest, "constraints": committed_checkpoint["constraints"],
             "degraded_records": len(diagnostics) + len(recall.get("diagnostics", []))})
         persist(packet_path, packet)
-        persist(metadata_path, metadata)
+        generation_path = directory / ("generation-" + str(metadata["receipt_generation"]) + "-" + digest(metadata) + ".json")
+        committed_generation = {"metadata": metadata, "checkpoint": committed_checkpoint}
+        try:
+            persist(generation_path, committed_generation, exclusive=True)
+        except FileExistsError:
+            if json.loads(read_regular_file(safe_private(generation_path), max_bytes=131072)) != committed_generation:
+                raise HarnessError("SESSION_GENERATION_CONFLICT: immutable generation differs")
+        persist(pending_path, {"generation": metadata["receipt_generation"],
+            "generation_path": str(generation_path), "generation_digest": digest({"metadata": metadata, "checkpoint": committed_checkpoint})}, exclusive=True)
         if pending_checkpoint is not None:
             memory.update_short_term(pending_checkpoint)
+            sync_directory(own_checkpoint.parent)
+        persist(metadata_path, metadata)
         event = ledger.append("checkpoint" if note is not None else "lifecycle", {"reason": note or goal,
             "constraints": "Memory true; Ledger inform; no model calls; observations are not authority"},
             current, actor="native-session-adapter")
@@ -253,11 +334,16 @@ def session_packet(state, *, root=None, goal=None, session=None, note=None,
                     producer_module=__name__, generation=metadata["receipt_generation"],
                     input_refs=[{"kind": "checkpoint_request", "id": operation_id, "content_digest": request_digest, "scope": "session"},
                                 input_ref("source", current["snapshot_id"], current, "project"),
-                                input_ref("goal", str(generation), {"goal": goal, "generation": generation}, "session")])}
+                                input_ref("goal", str(generation), {"goal": goal, "generation": generation}, "session"),
+                                input_ref("context_replay", session,
+                                    replay_context(memory, ledger, current, session, goal, committed_checkpoint, own_checkpoint), "session")])}
             operation["payload_digest"] = digest({key: operation[key] for key in OPERATION_V1_SCHEMA["properties"] if key != "schema_version"})
             seal(operation)
             sanitized(operation)
             dump(operation_path, operation, OPERATION_SCHEMA, exclusive=True)
+            sync_directory(directory)
+        pending_path.unlink()
+        sync_directory(directory)
     return packet
 
 
@@ -307,6 +393,7 @@ def main(argv=None):
     update.add_argument("--session", required=True)
     update.add_argument("--goal", required=True)
     update.add_argument("--expected-generation", type=int, required=True)
+    update.add_argument("--operation-id")
     govern = actions.add_parser("govern")
     govern.add_argument("--session", required=True)
     govern.add_argument("--argv-json", required=True)
@@ -376,7 +463,7 @@ def main(argv=None):
                 next_step=args.next, evidence=args.evidence, operation_id=args.operation_id, max_bytes=args.max_bytes)
         elif args.action == "goal-update":
             packet = session_packet(state, session=args.session, goal=args.goal,
-                                    expected_generation=args.expected_generation, max_bytes=args.max_bytes)
+                                    expected_generation=args.expected_generation, operation_id=args.operation_id, max_bytes=args.max_bytes)
         elif args.action == "hook":
             raw = sys.stdin.buffer.read(65537)
             if len(raw) > 65536:

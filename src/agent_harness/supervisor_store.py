@@ -131,6 +131,10 @@ class SupervisorStore:
         self.state_schema = state_schema
         self._lease = None
         self._mutex = threading.RLock()
+        # Only a bounded head summary is cached, never caller-owned records.
+        # Every reuse checks the complete physical mutation stamp under lease.
+        # Explicit replay/resume always validates the entire immutable prefix.
+        self._journal_head = None
 
     def path(self, relative):
         relative = Path(relative)
@@ -203,10 +207,49 @@ class SupervisorStore:
         with self._mutex:
             path = self.path("journal/events.jsonl")
             if not path.exists():
+                if self._journal_head is not None and self._journal_head[1]:
+                    raise HarnessError("Validated journal prefix disappeared")
+                self._journal_head = None
                 return []
             _parents(path)
+            before = self._journal_stamp(path)
             raw = read_regular_file(path, max_bytes=MAX_JOURNAL_BYTES)
-            return self._decode_events(raw)
+            records = self._decode_events(raw)
+            after = self._journal_stamp(path)
+            if before != after:
+                raise HarnessError("Journal changed during validation")
+            previous = self._journal_head
+            if previous is not None and previous[1] and (len(records) < previous[1] or records[previous[1]-1]["hash"] != previous[2]):
+                raise HarnessError("Validated journal prefix changed; recovery required")
+            self._journal_head = (after, len(records), records[-1]["hash"] if records else "0" * 64,
+                                  sum(r["payload"].get("kind") == "checkpoint" for r in records))
+            return records
+
+    @staticmethod
+    def _journal_stamp(path):
+        info = _ordinary(path, missing_ok=True)
+        if info is None:
+            return None
+        return (info.st_dev, info.st_ino, info.st_mode, info.st_nlink,
+                info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+    @staticmethod
+    def _matches_open_stamp(stamp, info):
+        # Windows stat/fstat synthesize executable bits and ctime differently.
+        mask = ~0o111 if os.name == "nt" else -1
+        expected = (info.st_dev, info.st_ino, info.st_mode & mask,
+                    info.st_nlink, info.st_size, info.st_mtime_ns)
+        observed = (*stamp[:2], stamp[2] & mask, *stamp[3:6]) if stamp else None
+        return observed == expected and (os.name == "nt" or stamp[6] == info.st_ctime_ns)
+
+    def _head(self):
+        # Called only under _writing. Any replacement, append, truncate or
+        # same-size edit invalidates the prefix; a fresh store has no trust.
+        path = self.path("journal/events.jsonl")
+        stamp = self._journal_stamp(path)
+        if self._journal_head is None or self._journal_head[0] != stamp:
+            self.events()
+        return self._journal_head or (None, 0, "0" * 64, 0)
 
     @staticmethod
     def _decode_events(raw):
@@ -276,8 +319,8 @@ class SupervisorStore:
     def append_event(self, event):
         with self._writing():
             strict_yaml.validate(event, {"type": "object", "additionalProperties": True})
-            records = self.events()
-            record = {"schema_version": 1, "sequence": len(records) + 1, "event_id": uuid.uuid4().hex, "timestamp": now(), "previous_hash": records[-1]["hash"] if records else "0" * 64, "payload": event}
+            head = self._head()
+            record = {"schema_version": 1, "sequence": head[1] + 1, "event_id": uuid.uuid4().hex, "timestamp": now(), "previous_hash": head[2], "payload": event}
             record["hash"] = _digest(record)
             strict_yaml.validate(record, EVENT_SCHEMA)
             path = self.path("journal/events.jsonl")
@@ -289,16 +332,28 @@ class SupervisorStore:
                 raise HarnessError("Journal storage budget exhausted")
             flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
             with ParentDirectory(path) as parent:
+                if self._journal_stamp(path) != head[0]:
+                    raise HarnessError("Journal head changed before append")
                 fd = parent.open(flags)
                 with os.fdopen(fd, "ab") as output:
-                    if not stat.S_ISREG(os.fstat(output.fileno()).st_mode):
+                    opened = os.fstat(output.fileno())
+                    if not stat.S_ISREG(opened.st_mode):
                         raise HarnessError("Journal is not a regular file")
+                    if (head[0] is None and opened.st_size != 0 or
+                            head[0] is not None and not self._matches_open_stamp(head[0], opened)):
+                        raise HarnessError("Journal head changed while opening append")
                     if output.write(data) != len(data):
                         raise OSError("Short journal append")
                     output.flush()
                     os.fsync(output.fileno())
+                    written = os.fstat(output.fileno())
                 parent.sync()
                 parent.check()
+                stamp = self._journal_stamp(path)
+                if not self._matches_open_stamp(stamp, written):
+                    raise HarnessError("Journal changed during append")
+                self._journal_head = (stamp, record["sequence"], record["hash"],
+                                      head[3] + (event.get("kind") == "checkpoint"))
             return record
 
     def commit(self, state, reason, owner="supervisor", attempt_id=None):
@@ -306,8 +361,7 @@ class SupervisorStore:
             strict_yaml.validate(state, self.state_schema or {"type": "object", "additionalProperties": True})
             if not isinstance(reason, str) or not reason:
                 raise HarnessError("Checkpoint reason is required")
-            previous = [r for r in self.events() if r["payload"].get("kind") == "checkpoint"]
-            generation = len(previous) + 1
+            generation = self._head()[3] + 1
             payload = {"kind": "checkpoint", "generation": generation, "state": state, "state_digest": _digest(state), "reason": reason, "owner": owner, "attempt_id": attempt_id}
             event = self.append_event(payload)
             checkpoint = {"schema_version": 1, "generation": generation, "event_id": event["event_id"], "journal_hash": event["hash"], "state_digest": payload["state_digest"], "state": state, "reason": reason, "owner": owner, "attempt_id": attempt_id, "timestamp": event["timestamp"]}
@@ -315,8 +369,10 @@ class SupervisorStore:
             self.write("state.yaml", state, self.state_schema)
             return checkpoint
 
-    def recover(self):
-        with self._writing():
+    def recover(self, *, read_only=False):
+        # Read-only status uses the same authoritative head without publishing
+        # missing projections or acquiring a writing lease.
+        with self._mutex if read_only else self._writing():
             records = self.events()
             marker = self.read("recovery-required.yaml", RECOVERY_SCHEMA) if self.path("recovery-required.yaml").exists() else None
             checkpoints = [r for r in records if r["payload"].get("kind") == "checkpoint"]
@@ -334,7 +390,7 @@ class SupervisorStore:
                 if self.path(name).exists():
                     if self.read(name, CHECKPOINT_SCHEMA) != expected:
                         raise HarnessError("Immutable checkpoint differs from journal")
-                else:
+                elif not read_only:
                     self.write(name, expected, CHECKPOINT_SCHEMA, exclusive=True)
             state = checkpoints[-1]["payload"]["state"]
             if marker is not None:
@@ -346,6 +402,6 @@ class SupervisorStore:
             # A corrupt state is not silently discarded; the intact journal can
             # be inspected and an explicit recovery action taken by the caller.
             recovered = current != state
-            if recovered:
+            if recovered and not read_only:
                 self.write("state.yaml", state, self.state_schema)
-            return {"state": state, "generation": len(checkpoints), "recovered": recovered, "events": len(records), "recovery_required": False, "recovery_receipt": None}
+            return {"state": state, "generation": len(checkpoints), "recovered": recovered and not read_only, "projection_stale": recovered, "events": len(records), "recovery_required": False, "recovery_receipt": None}

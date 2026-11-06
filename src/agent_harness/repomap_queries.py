@@ -18,15 +18,22 @@ from .file_io import read_regular_file
 SOURCE_EXTENSIONS = {".py", ".pyi", ".rs", ".js", ".ts", ".tsx", ".jsx", ".c", ".h", ".cpp", ".hpp", ".go", ".java", ".cs"}
 
 
-def _source(root, name, *, max_bytes=262144):
+def _source(root, name, *, max_bytes=262144, skips=None):
     path = _path(root, name)
-    data, _ = _read(path, max_bytes, root=root, name=name)
-    if data is None:
+    def skipped(reason):
+        if skips is not None:
+            skips.append({"path": name, "reason": reason})
         return None
+    try:
+        data, _ = _read(path, max_bytes, root=root, name=name)
+    except (OSError, HarnessError):
+        return skipped("source_read_unavailable")
+    if data is None:
+        return skipped("source_byte_bound")
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError:
-        return None
+        return skipped("source_encoding_unavailable")
     sanitized(text)
     return text, hashlib.sha256(data).hexdigest()
 
@@ -44,9 +51,10 @@ def _files(root, inventory=None):
 
 
 class MatchRows(list):
-    def __init__(self, rows=(), reasons=()):
+    def __init__(self, rows=(), reasons=(), skipped_sources=()):
         super().__init__(rows)
         self.truncation_reasons = list(reasons)
+        self.skipped_sources = list(skipped_sources)
 
 
 def _matches(root, names, token):
@@ -56,6 +64,7 @@ def _matches(root, names, token):
     rg = shutil.which("rg")
     result = []
     reasons = []
+    skipped_sources = []
     if rg and names:
         # Batch argv size remains safe on Windows and does not need a shell.
         for start in range(0, len(names), 64):
@@ -75,10 +84,11 @@ def _matches(root, names, token):
     else:
         pattern = re.compile(r"\b" + re.escape(token) + r"\b")
         for name in names:
-            source = _source(root, name)
+            source = _source(root, name, skips=skipped_sources)
             if source:
                 result.extend((name, index) for index, line in enumerate(source[0].split("\n"), 1) if pattern.search(line))
-    return MatchRows(result[:8192], [*reasons, *(["global_match_cap"] if len(result) > 8192 else [])])
+    return MatchRows(result[:8192], [*reasons, *(row["reason"] for row in skipped_sources),
+        *(["global_match_cap"] if len(result) > 8192 else [])], skipped_sources)
 
 
 def query_repository(root, mode, *, revision=None, target=None, changed=(), symbol=None,
@@ -98,12 +108,20 @@ def query_repository(root, mode, *, revision=None, target=None, changed=(), symb
     names, partial, method = _files(root, tree)
     rows, consulted, lsp_status = [], {}, "not_requested"
     truncations = ["source_inventory_cap"] if partial else []
+    skipped_sources = []
     inventory_digest = digest({name: tree["files"][name] for name in names})
 
     def matches(selected_names, token):
         found = _matches(root, selected_names, token)
         truncations.extend(found.truncation_reasons)
+        skipped_sources.extend(found.skipped_sources)
         return found
+
+    def source_for(name):
+        source = _source(root, name, skips=skipped_sources)
+        if source is None:
+            truncations.append(skipped_sources[-1]["reason"])
+        return source
 
     def add(name, line, rank, reason, *, selected_symbol=None, end_line=None, confidence="heuristic"):
         if len(rows) >= 8192:
@@ -111,7 +129,7 @@ def query_repository(root, mode, *, revision=None, target=None, changed=(), symb
             return
         source = consulted.get(name)
         if source is None:
-            source = _source(root, name)
+            source = source_for(name)
             consulted[name] = source
         if not source:
             truncations.append("source_unavailable_or_size_cap")
@@ -151,7 +169,7 @@ def query_repository(root, mode, *, revision=None, target=None, changed=(), symb
     elif mode == "symbol-context":
         if not symbol or not path:
             raise HarnessError("symbol-context requires symbol and path")
-        selected = _source(root, path)
+        selected = source_for(path)
         if not selected:
             raise HarnessError("Selected symbol source is unavailable or too large")
         consulted[path] = selected
@@ -164,7 +182,7 @@ def query_repository(root, mode, *, revision=None, target=None, changed=(), symb
                 for item in symbols.get("items", []):
                     if item.get("name") == symbol:
                         name = item["path"]
-                        source = _source(root, name)
+                        source = source_for(name)
                         if not source or source[1] != item["sha256"]:
                             raise HarnessError("LSP definition binding is stale")
                         selected_range = item["range"]
@@ -195,7 +213,7 @@ def query_repository(root, mode, *, revision=None, target=None, changed=(), symb
                     if name != target_name:
                         add(name, line, 80, "module/import identifier occurrence")
             if mode == "change-impact" and (root / target_name).exists():
-                source = _source(root, target_name)
+                source = source_for(target_name)
                 if source:
                     all_tokens = re.findall(r"\b(?:def|class|fn|struct|function)\s+([A-Za-z_]\w*)", source[0])
                     if len(all_tokens) > 16:
@@ -227,6 +245,7 @@ def query_repository(root, mode, *, revision=None, target=None, changed=(), symb
     if offset > len(ranked):
         raise HarnessError("Invalid query offset")
     reasons = sorted(set(truncations))
+    skipped_sources = sorted({(row["path"], row["reason"]) for row in skipped_sources})
     result = {"schema_version": 2, "mode": mode, "query": query,
         "repository_identity": repository_identity(root), "revision": actual_revision,
         "snapshot_id": tree["digest"], "method": method, "results": [],
@@ -235,6 +254,8 @@ def query_repository(root, mode, *, revision=None, target=None, changed=(), symb
         "inventory_scope": "snapshot_source_extensions", "inventory_digest": inventory_digest,
         "inventory_complete": not partial, "complete_inventory": not partial,
         "results_complete": not reasons, "truncated": bool(reasons), "truncation_reasons": reasons,
+        "skipped_sources": [{"path": name, "reason": reason} for name, reason in skipped_sources[:8]],
+        "skipped_source_count": len(skipped_sources), "skipped_sources_omitted": max(0, len(skipped_sources) - 8),
         "resume_supported": True, "terminal_diagnostic": "query_must_be_narrowed" if reasons else None,
         "analysis_kind": "heuristic", "lsp_status": lsp_status,
         "limitations": ["lexical and syntactic ranking; dynamic imports and semantic references may be missing"]}

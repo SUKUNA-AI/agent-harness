@@ -1014,6 +1014,10 @@ pub fn snapshot(contract: &Value) -> Result<Value, String> {
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
     {
+        #[cfg(unix)]
+        if cwd.starts_with("//") {
+            return Err("UNSUPPORTED_ROOT_SPELLING: use a single POSIX root slash".into());
+        }
         let root = lexical_absolute(Path::new(cwd))?;
         let topology = parent_topology(&root.join(".harness-root-binding"))?;
         let root_binding = root_identity(&root)?;
@@ -1108,6 +1112,16 @@ pub fn snapshot(contract: &Value) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn ambiguous_posix_root_spelling_is_refused_before_inventory() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(temporary.path()).unwrap();
+        let spelling = format!("/{}", shown_path(&root).unwrap());
+        assert!(snapshot(&json!({"cwd": spelling})).unwrap_err()
+            .contains("UNSUPPORTED_ROOT_SPELLING"));
+    }
 
     #[test]
     fn windows_root_identity_retains_all_bits_as_opaque_bytes() {

@@ -14,3 +14,5 @@
 6. Проверь взаимодействия и конечный пользовательский сценарий. После исправления повтори затронутые проверки и обязательные интеграционные gates. Для длительной работы сохрани checkpoint; сообщи результат и ограничения. Push/PR/merge/deploy требуют отдельного действующего основания.
 
 Точные флаги и схемы — [CLI reference](../docs/CLI_REFERENCE_RU.md), ограничения evidence — [приёмка](../docs/ACCEPTANCE.md). Не дублируй managed lifecycle в простой прямой задаче.
+
+Для длинного managed mission координатор сам готовит contract/plan v2 из полного разрешённого запроса: [verified flow](../docs/VERIFIED_TASK_FLOW_RU.md). Не проси пользователя держать backlog вручную. Required mission/constraints сохраняются отдельно от source observations; dependent открывается только после current integrated node receipt. Native workflow остаётся advisory, если client enforcement не наблюдалось.

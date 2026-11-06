@@ -286,7 +286,7 @@ pending migration. `work benchmark validate|schedule|report --manifest FILE
 --assets-root ROOT` проверяет offline portfolio; report требует `--trials FILE`.
 Это не solve runner и не разрешение на model расход.
 
-`agent-harness-session goal-update --session ID --goal TEXT --expected-generation N`
+`agent-harness-session goal-update --session ID --goal TEXT --expected-generation N [--operation-id ID]`
 обновляет краткую active goal через CAS. `intake [--event-file FILE]` принимает
 allowlisted metadata (default stdin); `status --root ROOT` выводит coverage.
 `verify-result --session ID --run-dir CORE_RUN --expected-candidate SHA` связывает
@@ -306,7 +306,20 @@ Deterministic facts: `work memory file-fact ID --root ROOT --path RELATIVE_FILE`
 Изменение через `--checkpoint-scan '{"max_records":64}'` или `--memory-scan JSON`
 требует `--expected-generation N`. Это не Codex model/permission/compaction settings.
 Общий session transport budget принимается только в диапазоне 2048–65536 bytes.
+Текущие goal bytes/digest/generation и constraints обязательны даже после source
+change. Когда required envelope не помещается, `BUDGET_TOO_SMALL` требует большего
+бюджета; обязательные поля не обрезаются. Interrupted generation publication
+блокирует resume с `SESSION_RECOVERY_REQUIRED`; сохраняйте private marker и
+immutable generation для repair. Полный протокол: [Memory и context](MEMORY_AND_CONTEXT_RU.md).
 
 `install --adopt-hook-sha256 SHA` явно принимает существующую single-handler
 SessionStart группу по SHA256 от installer canonical(group). По умолчанию чужой
 harness handler остаётся конфликтом; mixed groups отклоняются и с digest.
+
+## Verified managed contracts
+
+`work start --contract <private-contract.yaml> --plan <private-plan.yaml> --cwd <source>` принимает согласованные contract/plan v2. В v2 обязательны mission/node_checks, у плана mission_digest/generation, а у узлов requirement_ids/checks.local/checks.integration. `work status --run-dir <run> --verify-evidence` показывает current requirements и проверяет raw node evidence. Без --plan managed v2 использует structured planner также при cap1. [Формат и ограничения](VERIFIED_TASK_FLOW_RU.md).
+
+`work mission-update --run-dir <run> --contract <new.yaml> --reason <explicit-change>` сохраняет immutable successor mission без model call. `work resume --run-dir <run> --plan <new-plan.yaml>` продолжает новое поколение, сохраняя старые budgets/usage и проверяя новую mission binding.
+
+`work benchmark task-flow-experiment prepare|verify|aggregate --help` подготавливает source-bound matched arms и агрегирует будущие independent reports без запуска моделей. [Входы, ограничения и примеры](TASK_FLOW_PREPARATION_RU.md).

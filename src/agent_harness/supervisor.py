@@ -18,6 +18,7 @@ from .supervisor_store import SupervisorStore, atomic_write
 from .work_contract import load_contract, legacy_contract, deadline_for, source_revision
 from . import telemetry
 from .failure_policy import classify, repair_decision
+from .task_packets import compile_packet, preflight, invoke, NotDispatched
 
 TERMINAL = {"ACCEPTED", "CANCELLED", "TIMED_OUT", "NO_PROGRESS", "FAILED_TERMINAL"}
 BLOCKED = {"BLOCKED_APPROVAL", "BLOCKED_AMBIGUOUS", "BLOCKED_ENVIRONMENT"}
@@ -118,14 +119,15 @@ class Supervisor:
         return supervisor
 
     def load(self, *, recover=False):
-        self.contract = self.store.read("contract.yaml", "work-contract.schema.json")
         if recover:
             recovered = self.store.recover()
             self.state = recovered["state"]
             self.recovery_required = recovered.get("recovery_required", False)
         else:
-            self.state = self.store.read("state.yaml", "work-state.schema.json")
-            self.recovery_required = self.store.path("recovery-required.yaml").exists()
+            observed = self.store.recover(read_only=True)
+            self.state = observed["state"]
+            self.recovery_required = observed.get("recovery_required", False)
+        self.contract = self.store.read(self.state.get("contract_path", "contract.yaml"), "work-contract.schema.json") if self.state else None
         if self.state is None or digest(self.contract) != self.state["contract_digest"]:
             raise HarnessError("Work contract/state binding invalid")
         if self.state.get("migration", {}).get("status") == "pending":
@@ -138,8 +140,78 @@ class Supervisor:
         self.state_dir = recorded_state_dir
         return self.state
 
+    def update_mission(self, contract_path, *, reason):
+        """Publish an explicitly authorized immutable successor via one journal head.
+
+        No model work is started. The existing resume operation continues from
+        the new head with all original budgets and historical accounting intact.
+        """
+        if not isinstance(reason, str) or not reason.strip():
+            raise HarnessError("Mission update requires an explicit authorized change reason")
+        with self.store.lease("explicit mission revision"):
+            self.load(recover=True)
+            if self.recovery_required or (self.path / "cancel.yaml").exists():
+                raise HarnessError("Reconcile recovery/cancellation before changing mission")
+            old = self.contract
+            new = load_contract(contract_path)
+            if old["schema_version"] != 2 or new["schema_version"] != 2 or old["mode"] != "managed" or new["mode"] != "managed":
+                raise HarnessError("Mission revisions require verified managed contract v2")
+            if (new["task"]["id"] != old["task"]["id"] or new["mission"]["id"] != old["mission"]["id"]
+                    or new["mission"]["generation"] != old["mission"]["generation"] + 1
+                    or new["mission"].get("previous_digest") != digest(old["mission"])):
+                raise HarnessError("Mission revision generation/previous head binding invalid")
+            requested = new["task"].get("repository_revision")
+            actual_revision = source_revision(self.state["source_cwd"])
+            if requested and (requested != actual_revision or requested != self.state["revision"]):
+                raise HarnessError("Mission repository revision does not match the authorized source baseline")
+            from .orchestration import _within
+            if any(not any(_within(scope, allowed) for allowed in old["task"]["allowed_write_scopes"])
+                    for scope in new["task"]["allowed_write_scopes"]):
+                raise HarnessError("Mission revision cannot expand existing write authority")
+            if old["task"]["read_only"] and not new["task"]["read_only"] or new["model"] != old["model"]:
+                raise HarnessError("Mission revision cannot expand permissions or change model policy")
+            for name, limit in old["budgets"].items():
+                if name not in new["budgets"] or new["budgets"][name] > limit:
+                    raise HarnessError("Mission revision cannot reset or enlarge original budgets")
+            from .agent_lifecycle import GlobalSlots
+            accounting = self.receipts().reconcile_usage(repair=True)
+            if any(r["invocation_id"] not in accounting["completions"] for r in accounting["intents"].values()):
+                raise HarnessError("Mission update blocked by uncertain invocation")
+            if any(r["payload"]["outcome"] == "unknown" or r["payload"]["process_tree_stopped"] is not True
+                    or r["payload"]["dispatch_state"] not in {"finished_observed", "not_dispatched_proven"}
+                    for r in accounting["completions"].values()):
+                raise HarnessError("Mission update blocked by unknown outcome or unconfirmed process cleanup")
+            registry = GlobalSlots(self.state_dir, create=False)
+            registry.reconcile(self.state["run_id"], accounting)
+            if identity_alive(self.state["process_identity"]) or any(r["unresolved"] for r in registry.inventory(self.state["run_id"])):
+                raise HarnessError("Mission update blocked by live or uncertain writers")
+            if self.state["status"] == "ACCEPTED" and self.status(verify=True)["status"] != "ACCEPTED":
+                raise HarnessError("Revalidate stale accepted source before changing mission")
+            relative = "missions/generation-" + str(new["mission"]["generation"]) + "-" + digest(new) + ".yaml"
+            if self.store.path(relative).exists():
+                if self.store.read(relative, "work-contract.schema.json") != new:
+                    raise HarnessError("Immutable mission generation conflict")
+            else:
+                self.store.write(relative, new, "work-contract.schema.json", exclusive=True)
+            # One committed checkpoint chooses contract+goal+acceptance+plan
+            # together. A pre-commit crash leaves only an unreferenced payload.
+            self.contract = new
+            self.state.update(contract_path=relative, contract_digest=digest(new), status="NEW",
+                reason="Authorized mission revision: " + reason[:2048], plan_path=None, agents=[],
+                core_run=None, candidate_digest=None, thread_id=None, process_identity=None, process_status="not_started",
+                max_attempts=new["budgets"]["max_attempts"], current_failure=None,
+                acceptance=[{"id": c["id"], "required": c["required"], "status": "pending", "evidence_id": None} for c in new["acceptance"]])
+            self.state["deadline"] = min(self.state["deadline"], deadline_for(new, self.state["started_at"]))
+            self._save("mission head committed with original deadline, attempts and usage: " + reason[:2048])
+        return self.status()
+
     def remaining(self):
         return (datetime.fromisoformat(self.state["deadline"].replace("Z", "+00:00")) - datetime.now(timezone.utc)).total_seconds()
+
+    def agent_path(self, name):
+        generation = self.contract.get("mission", {}).get("generation", 1)
+        prefix = "agents/" if generation == 1 else "agents/mission-" + str(generation) + "/"
+        return prefix + name + ".yaml"
 
     def receipts(self):
         from .execution_receipts import ExecutionReceipts
@@ -165,9 +237,26 @@ class Supervisor:
             nodes.append({"node_id": name, "status": status, "created": name in self.state["agents"], "mandatory": True})
         root_done = any(r["node_id"] == "@integration" and r["record_type"] == "completion" and r["payload"]["outcome"] == "completed" for r in bound)
         execution_complete = len(integrated & {n["id"] for n in plan["tasks"]}) == len(nodes) and root_done
+        from . import verified_flow
+        coverage = None
+        if verified_flow.enabled(self):
+            try:
+                agents = {name: self.store.read(self.agent_path(name), "agent-state.schema.json") for name in integrated}
+                frontier = verified_flow.refresh_frontier(self, plan, agents, names=integrated, verify_only=True)
+                coverage = verified_flow.coverage(self, plan, frontier)
+                for item in nodes:
+                    if item["node_id"] in frontier:
+                        item["status"] = "verified"
+            except (HarnessError, OSError, ValueError, KeyError):
+                execution_complete = False
+                coverage = [{"id": r["id"], "status": "stale", "evidence_ids": []} for r in self.contract["mission"]["requirements"]]
+            execution_complete = execution_complete and bool(coverage) and all(
+                row["status"] == "accepted" for row in coverage if next(r for r in self.contract["mission"]["requirements"] if r["id"] == row["id"])["required"])
         review_done = any(r["record_type"] == "review" and r["payload"]["candidate_digest"] == self.state["candidate_digest"]
             and r["payload"]["verdict"] == "approved" for r in bound)
-        return {"plan_digest": plan_digest, "nodes": nodes, "never_started": [n["node_id"] for n in nodes if n["node_id"] not in started],
+        return {"plan_digest": plan_digest, "nodes": nodes, "requirements": coverage,
+            "completion_policy": "verified_integrated_frontier_v1" if verified_flow.enabled(self) else "legacy_integration_only",
+            "never_started": [n["node_id"] for n in nodes if n["node_id"] not in started],
             "root_integration_completed": root_done, "execution_complete": execution_complete,
             "review_completed": review_done, "complete": execution_complete and (review_done or self.state["schema_version"] == 1)}
 
@@ -175,7 +264,8 @@ class Supervisor:
         if self.contract["mode"] == "managed" and not self.state["integration_worktree"]:
             raise HarnessError("Managed acceptance requires an established integration candidate")
         if not self.state["core_run"]:
-            target = self.path / "verification"
+            target = self.path / ("verification" if self.contract.get("mission", {}).get("generation", 1) == 1 else
+                "verification-mission-" + str(self.contract["mission"]["generation"]))
             value = legacy_contract(self.contract, cwd=self.state["cwd"], run_id=self.state["run_id"],
                                     attempt=max(1, self.state["attempts_used"]), deadline=self.state["deadline"], source_cwd=self.state["source_cwd"])
             run = Run.create(target, value)
@@ -236,7 +326,9 @@ class Supervisor:
         constraints = {"objective": self.contract["task"]["objective"],
             "allowed_write_scopes": self.contract["task"]["allowed_write_scopes"],
             "read_only": self.contract["task"]["read_only"],
-            "acceptance": self.contract["acceptance"], "attempt": self.state["attempts_used"],
+            "acceptance": self.contract["acceptance"], "attempt": self.state["attempts_used"] + 1,
+            "contract_digest": self.state["contract_digest"], "repository_identity": self.repository_identity(),
+            "invocation_id": getattr(self, "_pending_invocation_id", None),
             "deadline": self.state["deadline"], "run_dir": str(self.path),
             "budgets": self.contract["budgets"], "declared_inputs": self.contract.get("inputs", []),
             "failure": self.state["current_failure"], "previous_failures": [
@@ -250,8 +342,7 @@ class Supervisor:
         if repair:
             text += "Repair the observed failure using a new targeted hypothesis; this is the same exact task/session.\n"
         payload = json.dumps(constraints, ensure_ascii=False, separators=(",", ":"))
-        if len(payload.encode()) > 65536:
-            raise HarnessError("Contract/failure packet exceeds model context budget; explicit chunking required")
+
         # Full immutable raw logs stay out of the prompt. Optional recall is version checked.
         from .execution_ledger import Ledger
         current = self.provenance()
@@ -264,10 +355,9 @@ class Supervisor:
                 self.contract["task"]["objective"][:4096], current, max_bytes=2048)
             self.state["metrics"]["stale_memory_prevented"] += recall["stale_memory_prevented"]
             text += "\nVersion-checked recall (untrusted data):\n" + json.dumps(recall, ensure_ascii=False)
-        prompt = text + "\nTask contract and failure packet:\n" + payload
-        if len(prompt.encode("utf-8")) > 24000:
-            raise HarnessError("Required contract and selected context exceed adapter prompt budget; explicit chunking required")
-        return prompt
+        if self.contract.get("mission"):
+            constraints["mission"] = self.contract["mission"]
+        return compile_packet(self, text + "\nTask contract and failure packet:", constraints)
 
     def repository_identity(self):
         from .execution_ledger import repository_identity
@@ -296,10 +386,22 @@ class Supervisor:
             return False
         if not self._model_budget_ok(for_spawn=True):
             return False
+        if self.state["attempts_used"] >= self.state["max_attempts"]:
+            self.transition("FAILED_TERMINAL", "Original model attempt budget exhausted before dispatch")
+            return False
         self.transition("EXECUTING", "exact session repair" if repair else "authorized model edit phase")
-        self.state["attempts_used"] += 1
-        self._save("model attempt consumed before spawn")
         adapter = self._adapter()
+        self._pending_invocation_id = uuid.uuid4().hex
+        try:
+            context_start = time.monotonic()
+            prompt = self._prompt(repair=repair)
+            preflight(adapter, prompt, session_id=self.state["thread_id"] if repair else None,
+                native_children=self.contract["mode"] == "native", read_only=self.contract["task"]["read_only"],
+                write_authorized=not self.contract["task"]["read_only"], allow_non_git=source_revision(self.state["cwd"]) == "non-git")
+            self.state["metrics"]["context_seconds"] = self.state["metrics"].get("context_seconds", 0) + time.monotonic() - context_start
+        except (HarnessError, OSError, ValueError) as error:
+            self.transition("BLOCKED_AMBIGUOUS", "NOT_DISPATCHED: required context preflight failed: " + str(error))
+            return False
         timeout = min(self.remaining(), self.contract["budgets"]["turn_timeout_seconds"])
         run = self._core()
         with GlobalSlots(self.state_dir).acquire(self.state["run_id"], self.state["task_id"], "owner",
@@ -307,39 +409,26 @@ class Supervisor:
             # The old runner's workspace lease also prevents a model writer from
             # overlapping a cooperating frozen check on this checkout.
             with run.workspace_lock():
-                try:
-                    context_start = time.monotonic()
-                    prompt = self._prompt(repair=repair)
-                    self.state["metrics"]["context_seconds"] = self.state["metrics"].get("context_seconds", 0) + time.monotonic() - context_start
-                except (HarnessError, OSError, ValueError) as error:
-                    slot.complete()  # No adapter/model process has been invoked.
-                    self.transition("BLOCKED_AMBIGUOUS", "Required context could not be constructed safely: " + str(error))
-                    return False
                 fresh_remaining = self.remaining()
                 if fresh_remaining <= 0:
                     slot.complete()
                     self.transition("TIMED_OUT", "original deadline expired while waiting for slot/workspace/context")
                     return False
+                self.state["attempts_used"] += 1
+                self._save("model attempt reserved at validated dispatch boundary")
                 intent = self.receipts().intent("@integration" if self.contract["mode"] == "managed" else "@root",
-                    "attempt-" + str(self.state["attempts_used"]), checkout=self.state["cwd"], owner=slot.value["lease_id"])
+                    "attempt-" + str(self.state["attempts_used"]), checkout=self.state["cwd"], owner=slot.value["lease_id"], invocation_id=self._pending_invocation_id)
                 execution_start = time.monotonic()
-                try:
-                    result = adapter.run(prompt, cwd=self.state["cwd"],
-                        session_id=self.state["thread_id"] if repair else None,
-                        timeout=min(fresh_remaining, self.contract["budgets"]["turn_timeout_seconds"]), deadline=self.state["deadline"],
-                        cancel_file=self.path / "cancel.yaml", on_process=lambda process: (slot.bind(process), self._on_process(process)),
-                        on_event=self._on_event, native_children=self.contract["mode"] == "native",
-                        read_only=self.contract["task"]["read_only"], write_authorized=not self.contract["task"]["read_only"],
-                        allow_non_git=source_revision(self.state["cwd"]) == "non-git", log_dir=self.path / "codex")
-                except HarnessError as error:
-                    if slot.value["child_identity"] is not None:
-                        raise
-                    slot.complete()  # Argument/config validation failed before spawn.
-                    result = {"status": "failed", "error": str(error), "thread_id": self.state["thread_id"],
-                              "usage": None, "events": 0, "exit_code": None, "logs": {}}
+                result = invoke(adapter, prompt, slot=slot, cwd=self.state["cwd"],
+                    session_id=self.state["thread_id"] if repair else None,
+                    timeout=min(fresh_remaining, self.contract["budgets"]["turn_timeout_seconds"]), deadline=self.state["deadline"],
+                    cancel_file=self.path / "cancel.yaml", on_process=lambda process: (slot.bind(process), self._on_process(process)),
+                    on_event=self._on_event, native_children=self.contract["mode"] == "native",
+                    read_only=self.contract["task"]["read_only"], write_authorized=not self.contract["task"]["read_only"],
+                    allow_non_git=source_revision(self.state["cwd"]) == "non-git", log_dir=self.path / "codex")
                 result["slot_wait_ms"] = slot.wait_seconds * 1000
-                self.receipts().completion(intent, result, duration_ms=(time.monotonic() - execution_start) * 1000)
-            if result.get("process_tree_stopped") is not False:
+                completion = self.receipts().completion(intent, result, duration_ms=(time.monotonic() - execution_start) * 1000)
+            if result.get("process_tree_stopped") is True or self.contract["schema_version"] == 1 and result.get("process_tree_stopped") is not False:
                 slot.complete(result)
         if self.state["schema_version"] == 1:
             telemetry.observe(self.state["metrics"], result)
@@ -356,7 +445,14 @@ class Supervisor:
         except (HarnessError, OSError, ValueError) as error:
             self.transition("UNKNOWN_OUTCOME", "Command ledger could not be persisted; reconcile before acceptance: " + str(error))
             return False
-        if result.get("process_tree_stopped") is False:
+        if result.get("dispatch_state") == "not_dispatched_proven":
+            if result["status"] == "cancelled":
+                self.transition("CANCEL_REQUESTED", "Persisted cancellation prevented process creation")
+                self.transition("CANCELLED", "NOT_DISPATCHED: no process started")
+            else:
+                self.transition("TIMED_OUT" if result["status"] == "timed_out" else "BLOCKED_AMBIGUOUS", "NOT_DISPATCHED: adapter refused before process creation")
+            return False
+        if result.get("process_tree_stopped") is False or self.contract["schema_version"] == 2 and result.get("process_tree_stopped") is not True:
             self.transition("UNKNOWN_OUTCOME", "Owned model process tree has no confirmed cleanup; no acceptance or new dispatch")
             return False
         if result["status"] not in {"completed", "succeeded", "success"}:
@@ -368,7 +464,7 @@ class Supervisor:
             if failure["repairable"]:
                 self.transition("FAILED_REPAIRABLE", "model turn failed; classify before bounded repair")
                 self.state["failure_history"].append({**failure, "snapshot_id": current,
-                                                       "attempt": self.state["attempts_used"]})
+                                                       "attempt": self.state["attempts_used"], "completion_ref": completion["record_id"]})
             if decision["action"] == "repair":
                 if not self.state["thread_id"]:
                     self.transition("UNKNOWN_OUTCOME", "repair requires persisted exact Codex session identity")
@@ -405,6 +501,23 @@ class Supervisor:
         return True
 
     def _verify(self):
+        from . import verified_flow
+        if verified_flow.enabled(self):
+            plan = self.store.read(self.state["plan_path"], "agent-plan.schema.json")
+            agents = {name: self.store.read(self.agent_path(name), "agent-state.schema.json") for name in self.state["agents"]}
+            try:
+                verified_flow.refresh_frontier(self, plan, agents)
+            except HarnessError as error:
+                failure = classify({"status": "failed", "error": str(error)})
+                self.state["current_failure"] = failure
+                current = self.provenance()["snapshot_id"]
+                decision = repair_decision(self.state["failure_history"], failure, current,
+                    attempts=self.state["attempts_used"], max_attempts=self.state["max_attempts"])
+                self.transition("VERIFYING", "integrated node checks rejected the final root result")
+                self.transition("FAILED_REPAIRABLE", "fresh node gate diagnostics require bounded repair")
+                self.state["failure_history"].append(dict(failure, snapshot_id=current, attempt=self.state["attempts_used"]))
+                self.transition(decision["status"], str(error))
+                return False
         if self.contract["mode"] == "managed" and not self.plan_progress().get("execution_complete", False):
             self.transition("BLOCKED_AMBIGUOUS", "DAG_INCOMPLETE: mandatory plan nodes or root integration lack completion/integration receipts")
             return False
@@ -542,7 +655,13 @@ class Supervisor:
 
     def _new_core_attempt(self, reason):
         run = self._core()
-        number = len(run.state()["attempts"]) + 1
+        core_state = run.state()
+        if (len(core_state["attempts"]) > 1 and core_state.get("attempt_reason") == reason
+                and not (run.attempt_dir(core_state) / "candidate.json").exists()):
+            # A crash after preparing a fresh core attempt does not consume
+            # another one before the model repair has actually run.
+            return
+        number = len(core_state["attempts"]) + 1
         value = legacy_contract(self.contract, cwd=self.state["cwd"], run_id=self.state["run_id"],
                                 attempt=number, deadline=self.state["deadline"], source_cwd=self.state["source_cwd"])
         run.new_attempt(value, reason=reason)
@@ -596,6 +715,7 @@ class Supervisor:
             if repair_journal:
                 self.store.repair_torn_tail()
             self.load(recover=True)
+            committed_root_repair = self.state["status"] == "REPAIRING"
             if self.state["status"] in TERMINAL - {"ACCEPTED"} and not new_attempt:
                 raise HarnessError("Terminal work needs a new explicitly budgeted task; resume cannot reset attempts")
             if identity_alive(self.state["process_identity"]):
@@ -611,7 +731,13 @@ class Supervisor:
                 raise HarnessError("Global model registry has live or uncertain writers for this run: " + str(unresolved))
             unfinished_agents = []
             for agent_id in self.state["agents"]:
-                agent = self.store.read("agents/" + agent_id + ".yaml", "agent-state.schema.json")
+                agent_path = self.agent_path(agent_id)
+                if not self.store.path(agent_path).exists():
+                    if any(r["node_id"] == agent_id for r in accounting["records"]):
+                        raise HarnessError("Missing agent projection with possible dispatch; exact reconciliation required: " + agent_id)
+                    # Frozen-plan reconciliation safely prepares a never-dispatched node.
+                    continue
+                agent = self.store.read(agent_path, "agent-state.schema.json")
                 if identity_alive(agent["process_identity"]):
                     raise HarnessError("Managed worker still alive: " + agent_id + "; refusing duplicate writer")
                 if agent["status"] not in {"integrated", "verified", "stopped"}:
@@ -661,6 +787,16 @@ class Supervisor:
             if self.state["status"] == "UNKNOWN_OUTCOME":
                 self.transition("RECOVERY_REQUIRED", "owned process is absent; independent verification precedes retry")
             if self.contract["mode"] == "managed":
+                if committed_root_repair:
+                    root = [r for r in accounting["completions"].values() if r["node_id"] == "@integration"
+                        and r["attempt_id"] == "attempt-" + str(self.state["attempts_used"])]
+                    if (len(root) != 1 or root[0]["payload"]["process_tree_stopped"] is not True
+                            or root[0]["payload"]["outcome"] not in {"completed", "failed"}):
+                        raise HarnessError("Committed root repair lacks an exact known stopped completion")
+                    self._assert_candidate_binding(self._core())
+                    self.state["status"] = "REPAIRING"
+                    self._save("resume committed root repair before repeating verification or any writer")
+                    return self._loop()
                 self.native_disabled_proof = native_disabled_proof
                 if self.state["status"] != "PREFLIGHT":
                     self.transition("PREFLIGHT", "revalidate managed prerequisites after explicit recovery")
@@ -682,9 +818,11 @@ class Supervisor:
                 "note": "Foreground owner cancels its exact contained process; unknown writes require reconciliation"}
 
     def status(self, *, verify=False):
-        if self.state is None:
-            self.load()
+        observed = self.state
+        self.load()
         state = self.state
+        binding_conflict = (observed is not None and observed["generation"] == state["generation"]
+            and any(observed.get(k) != state.get(k) for k in ("cwd", "source_cwd", "core_run", "integration_worktree", "contract_digest", "candidate_digest")))
         # Read-only reconstruction does not rewrite the authoritative journal.
         self.receipts().reconcile_usage()
         from .agent_lifecycle import GlobalSlots
@@ -748,6 +886,10 @@ class Supervisor:
             if errors:
                 result.update(status="STALE", evidence_current=False, reason="; ".join(errors))
                 result["metrics"].update(accepted_tasks=0, time_to_acceptance_seconds=None)
+        if verify and binding_conflict:
+            result.update(status="STALE", evidence_current=False,
+                reason="Observed candidate binding differs from the committed run head; explicit reconciliation required")
+            result["metrics"].update(accepted_tasks=0, time_to_acceptance_seconds=None)
         return result
 
     def write_report(self):

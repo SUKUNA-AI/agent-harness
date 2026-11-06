@@ -339,6 +339,16 @@ manifest до изменения targets. Но старый бинарник с 
 Не запускайте его на новой установке и не считайте смену package checkout
 доказательством безопасного отката состояния. Если discovery блокируется,
 сначала сопоставьте pointer, overlay и state с сохранёнными данными. Не придумывайте manifest или hashes.
+До изменения targets manifest сохраняет исходные target/parent identities;
+каждый target проходит `pending` → `publishing` → `applied`. Перед replace
+сохраняются identity подготовленного inode, security metadata и полная цепочка
+parents. `rollback --manifest` сверяет prepared-транзакцию после жёсткого
+завершения процесса между replace и записью результата. Same-content подмена
+target, изменение metadata или backup требуют сверки и не перезаписываются.
+Staging-файл и writer lock могут сохраниться после hard exit; сначала подтвердите
+завершение владельца и выполните операционную сверку. Автоматического удаления
+lock нет. На Windows fsync directory недоступен; POSIX hard-exit тесты не
+доказывают power-loss durability этой платформы.
 Подробный операционный порядок — [OPERATIONS](docs/OPERATIONS.md).
 
 ![Установка, проверка и откат](docs/diagrams/installation-recovery.svg)

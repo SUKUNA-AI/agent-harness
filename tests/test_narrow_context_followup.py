@@ -226,7 +226,9 @@ class NarrowContextFollowup(unittest.TestCase):
         self.assertIsNone(operation["run_id"])
         self.assertIsNone(operation["task_id"])
         self.assertEqual(operation["input_refs"][0]["content_digest"], operation["request_digest"])
-        self.assertEqual(len(operation["input_refs"]), 3)
+        self.assertEqual({ref["kind"] for ref in operation["input_refs"]},
+                         {"checkpoint_request", "source", "goal", "context_replay"})
+        self.assertEqual(len(operation["input_refs"]), 4)
         with self.assertRaises(ValueError):
             validate(operation, OPERATION_V1_SCHEMA)
         dump(path, {**operation, "schema_version": 99})

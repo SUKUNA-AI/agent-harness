@@ -23,12 +23,17 @@ REQUIRED_PAYLOAD = {
     "integration_intent": {"completion_ref", "patch_ref", "patch_digest", "worker_checkout_ref", "ownership_token", "pre_head", "pre_tree", "expected_tree", "result_kind", "dependency_vector"},
     "integration": {"integration_intent_ref", "completion_ref", "result_head", "result_tree", "result_digest", "result_kind"},
     "review": {"completion_ref", "candidate_digest", "verdict", "findings"},
+    "node_check": {"completion_ref", "candidate_digest", "phase", "verification_run", "verification_digest", "verification_definition_digest", "dependency_vector", "requirement_ids", "verdict"},
+    "node_acceptance": {"completion_ref", "candidate_digest", "local_ref", "integrated_ref", "integration_ref", "mission_digest", "dependency_vector", "requirement_ids"},
+    "coverage": {"candidate_digest", "mission_digest", "coverage"},
 }
 
 
 def validate_record(record):
     validate(record, SCHEMA)
-    if set(record["payload"]) != REQUIRED_PAYLOAD[record["record_type"]]:
+    required = REQUIRED_PAYLOAD[record["record_type"]]
+    optional = {"error"} if record["record_type"] == "completion" else set()
+    if not required <= set(record["payload"]) or set(record["payload"]) - required - optional:
         raise HarnessError("Execution receipt payload fields do not match record type")
     if record["record_type"] in {"invocation_intent", "completion"} and record["invocation_id"] is None:
         raise HarnessError("Invocation identity is required for execution receipts")
@@ -107,8 +112,8 @@ class ExecutionReceipts:
             "capability_receipt_ref": None, "execution_owner": "managed_supervisor",
             "input_refs": [state["contract_digest"]], "payload": {}}
 
-    def intent(self, node_id, attempt_id, *, checkout, owner, dependencies=(), candidate_digest=None):
-        value = self.envelope("invocation_intent", node_id, attempt_id, uuid.uuid4().hex)
+    def intent(self, node_id, attempt_id, *, checkout, owner, dependencies=(), candidate_digest=None, invocation_id=None):
+        value = self.envelope("invocation_intent", node_id, attempt_id, invocation_id or uuid.uuid4().hex)
         value["payload"] = {"checkout": str(checkout), "owner_id": owner,
             "dependency_vector": list(dependencies), "contract_digest": self.supervisor.state["contract_digest"],
             "deadline": self.supervisor.state["deadline"], "dispatch_state": "possibly_dispatched", "candidate_digest": candidate_digest}
@@ -130,14 +135,19 @@ class ExecutionReceipts:
         usage_status = ("invalid" if invalid else "complete" if telemetry.complete_usage(usage)
             else "partial" if any(v is not None for v in counters.values()) else "unavailable")
         status = result.get("status", "unknown")
-        dispatch = ("started_observed" if result.get("process_tree_stopped") is False else
-            "finished_observed" if status in {"completed", "failed", "cancelled"} else
+        no_dispatch = result.get("dispatch_state") == "not_dispatched_proven"
+        if no_dispatch:
+            if result.get("turn_started") or usage is not None or result.get("process_tree_stopped") is not True:
+                raise HarnessError("Contradictory no-dispatch result")
+            usage_status = "not_applicable"
+        dispatch = ("not_dispatched_proven" if no_dispatch else "started_observed" if result.get("process_tree_stopped") is False else
+            "finished_observed" if status in {"completed", "failed", "cancelled", "timed_out"} else
             "started_observed" if result.get("turn_started") else "possibly_dispatched")
         from .file_io import read_regular_file
         logs = {key: result.get("logs", {}).get(key) for key in ("stdout", "stderr")}
         for stream in ("stdout", "stderr"):
             logs[stream + "_digest"] = hashlib.sha256(read_regular_file(logs[stream])).hexdigest() if logs[stream] else None
-        value["payload"] = {"intent_ref": intent["record_id"], "outcome": status if status in {"completed", "failed", "cancelled"} else "unknown",
+        value["payload"] = {"intent_ref": intent["record_id"], "outcome": status if status in {"completed", "failed", "cancelled", "timed_out"} else "unknown",
             "dispatch_state": dispatch, "usage_scope": "invocation_total", "usage_status": usage_status,
             **counters, "usage_source_ref": result.get("logs", {}).get("stdout"), "covered_event_ids": [],
             "correlation_status": "explicit", "started_at": intent["created_at"], "finished_at": now(),
@@ -145,7 +155,7 @@ class ExecutionReceipts:
             "turn_started": bool(result.get("turn_started", usage is not None)),
             "observable_tool_calls": result.get("observable_tool_calls", 0),
             "spawn_seconds": result.get("spawn_seconds"), "process_tree_stopped": result.get("process_tree_stopped"),
-            "logs": logs}
+            "logs": logs, "error": str(result.get("error") or "")[:2048]}
         for existing in self.records():
             if existing["record_id"] == value["record_id"]:
                 stable = lambda payload: {k: v for k, v in payload.items() if k not in {"finished_at", "duration_ms"}}
@@ -191,5 +201,6 @@ class ExecutionReceipts:
         value = completion["payload"]
         usage = {key: value[key] for key in ("input_tokens", "output_tokens", "cached_input_tokens", "reasoning_tokens") if value[key] is not None}
         return {"status": value["outcome"], "usage": usage or None, "thread_id": value["thread_id"],
+            "dispatch_state": value["dispatch_state"], "error": value.get("error", ""),
             "logs": {k: v for k, v in value["logs"].items() if k in {"stdout", "stderr"} and v is not None},
             "turn_started": value["turn_started"], "process_tree_stopped": value["process_tree_stopped"]}

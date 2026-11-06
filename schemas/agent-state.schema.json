@@ -113,7 +113,8 @@
         "cancelled",
         "blocked",
         "unknown_outcome",
-        "failed"
+        "failed",
+        "prepared"
       ]
     },
     "started_at": {
@@ -237,6 +238,51 @@
         "maxLength": 16384
       },
       "maxItems": 128
+    },
+    "last_failure": {
+      "type": "string",
+      "maxLength": 2048
+    },
+    "failures": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "verified_ref": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "repair_base_tree": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40,64}$"
+    },
+    "retry_decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "repair",
+            "stop"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 2048
+        }
+      },
+      "required": [
+        "action",
+        "status",
+        "reason"
+      ]
     }
   },
   "required": [

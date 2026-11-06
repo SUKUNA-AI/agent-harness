@@ -427,7 +427,7 @@ class Memory:
             return False
 
     def _current_core_check(self, run_dir, check_id, current):
-        from .core import Run, read_json
+        from .core import Run, read_json, file_hash
         from .execution_ledger import repository_identity
         from .runner import _check_evidence_errors, _executable
         from .core import _tool_version_probes
@@ -452,7 +452,7 @@ class Memory:
         executable = frozen.get(check_id, {}).get("executable", {})
         actual = _executable(check["argv"][0], check.get("cwd", contract["cwd"]))
         if (not actual or actual != executable.get("resolved") or
-                hashlib.sha256(read_regular_file(Path(actual).resolve(strict=True), max_bytes=16 * 1024 * 1024)).hexdigest() != executable.get("sha256")):
+                file_hash(Path(actual).resolve(strict=True)) != executable.get("sha256")):
             raise HarnessError("Core check executable identity changed")
         details = []
         _check_evidence_errors(run, state, contract, candidate, frozen, details=details)

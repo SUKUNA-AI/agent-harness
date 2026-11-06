@@ -82,3 +82,9 @@
 Числа тестов, benchmark и ограничения старого отчёта относятся к его версии.
 Состояние нового релиза проверяется по его commit, CI, отдельному verification
 report и встроенному `release-manifest.json` с hashes payload файлов.
+
+## Verified task flow
+
+- [Проверяемая очередь задач](VERIFIED_TASK_FLOW_RU.md) — contract/plan v2, node gates и текущая приёмка.
+- [Протокол matched сравнения](TASK_FLOW_EXPERIMENT_RU.md) — подготовка последующих model runs.
+- [Подготовка source-bound task-flow эксперимента](TASK_FLOW_PREPARATION_RU.md) — supplied bank, frozen policies и unknown-aware reports.

@@ -1,7 +1,7 @@
 """Validated task DAG and bounded critical-path scheduling; no model runtime."""
 from __future__ import annotations
 
-from .core import HarnessError, IDENTIFIER
+from .core import HarnessError, IDENTIFIER, digest
 from .orchestration import _path, _overlap, _within
 
 
@@ -15,9 +15,23 @@ def validate_plan(plan, contract):
     criteria = {item["id"] for item in contract["acceptance"]}
     scopes = contract["task"]["allowed_write_scopes"]
     budget = contract["budgets"]
+    verified = contract["schema_version"] == 2
+    if plan["schema_version"] != contract["schema_version"]:
+        raise HarnessError("Plan/mission version barrier: legacy integration is not verified task flow")
+    if verified:
+        if plan["mission_digest"] != digest(contract["mission"]):
+            raise HarnessError("Plan belongs to a different mission generation")
+        requirements = {r["id"] for r in contract["mission"]["requirements"]}
+        mapped = {r for node in nodes for r in node["requirement_ids"]}
+        mandatory = {r["id"] for r in contract["mission"]["requirements"] if r["required"]}
+        if not mapped <= requirements or not mandatory <= mapped:
+            raise HarnessError("MISSION_COVERAGE_INCOMPLETE: mandatory requirement missing from task mapping")
+        node_checks = {c["id"] for c in contract["node_checks"]}
     for node in nodes:
         if not IDENTIFIER.fullmatch(node["id"]):
             raise HarnessError("Invalid task ID")
+        if verified and any(not set(node["checks"][phase]) <= node_checks for phase in ("local", "integration")):
+            raise HarnessError("Unknown frozen node check definition")
         if node["id"] in node["depends_on"] or not set(node["depends_on"]) <= by_id.keys():
             raise HarnessError("Unknown or self dependency")
         if not set(node["acceptance_ids"]) <= criteria or not node["acceptance_ids"]:

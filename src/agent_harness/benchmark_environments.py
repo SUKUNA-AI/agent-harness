@@ -57,10 +57,9 @@ ARM_LAUNCH_OBSERVATION=object_schema({'schema_version':{'const':1},'record_type'
 
 
 def _safe_join(root,relative):
-    path=Path(relative)
-    if path.is_absolute() or path.anchor or '..' in path.parts or '\\' in relative or any(':' in part for part in path.parts):
+    if not isinstance(relative,str) or '\\' in relative or ':' in relative or any(part in ('','.','..') for part in relative.split('/')):
         raise HarnessError('BENCH_ENVIRONMENT_PATH_ESCAPE')
-    return Path(root)/path
+    return Path(root).joinpath(*relative.split('/'))
 
 
 def _present(path):
@@ -310,7 +309,7 @@ class ArmHomeBuilder:
         if (state/'machine.json').exists():
             immutable['@state/machine.json']={'sha256':_ref(state/'machine.json')['sha256'],'bytes':(state/'machine.json').stat().st_size}
         closed=[home/name for name in ('agents','skills','plugins','mcp')]+[user/'.agents',user/'.config']
-        namespace={str(path.relative_to(root)):_inventory(path,deadline) for path in closed}
+        namespace={path.relative_to(root).as_posix():_inventory(path,deadline) for path in closed}
         definitions={name:_present(home/name) for name in ('AGENTS.md','AGENTS.override.md','hooks.json','config.toml','harness-machine.json','agent-harness-hook.py')}
         manifest={'schema_version':1,'files':immutable,'closed_namespaces':namespace,'definitions':definitions}
         _save(root/'files.json',_json(manifest),deadline)

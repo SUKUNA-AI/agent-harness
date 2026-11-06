@@ -123,6 +123,15 @@ class _DeadlineCodexAdapter(CodexAdapter):
         self.runner._require_remaining(end)
         return value
 
+    def preflight(self, prompt, **options):
+        self.runner._require_remaining(self.deadline)
+        validator = getattr(self.backend, "preflight", None)
+        if validator is None:
+            raise HarnessError("BENCH_TRANSPORT_PREFLIGHT_UNSUPPORTED")
+        result = validator(prompt, **options)
+        self.runner._require_remaining(self.deadline)
+        return result
+
     def run(self, prompt, **options):
         end = self.runner._earliest_deadline(self.deadline, options.get("deadline"))
         remaining = self.runner._require_remaining(end)

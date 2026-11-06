@@ -342,6 +342,9 @@ def _interval(values, manifest):
 
 
 def dispatch(argv):
+    if argv and argv[0] == "task-flow-experiment":
+        from .task_flow_experiment import dispatch as task_flow_dispatch
+        return task_flow_dispatch(argv[1:])
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("validate", "schedule", "report"))
     parser.add_argument("--manifest", required=True)

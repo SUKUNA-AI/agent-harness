@@ -588,6 +588,7 @@ def _git_settings(cwd):
 
 def snapshot(contract):
     """Select a verified native backend when available; preserve manifest format."""
+    _supported_snapshot_root(contract)
     from .native import snapshot as native_snapshot
     value = native_snapshot(contract)
     return snapshot_python(contract) if value is None else verify_snapshot(value, "Native snapshot")
@@ -646,7 +647,16 @@ def _snapshot_python(contract):
 
 
 
+def _supported_snapshot_root(contract):
+    # POSIX reserves exactly two leading slashes for implementation-defined
+    # semantics. Refuse ambiguous spellings before Git can change inventory kind.
+    # Windows UNC roots are supported by the Windows reader and must stay intact.
+    if os.name != "nt" and str(contract.get("cwd", "")).startswith("//"):
+        raise HarnessError("UNSUPPORTED_ROOT_SPELLING: use a single POSIX root slash")
+
+
 def snapshot_python(contract):
+    _supported_snapshot_root(contract)
     from .file_io import ParentDirectory, FileReadError
     try:
         with ExitStack() as stack:

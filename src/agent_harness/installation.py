@@ -335,6 +335,13 @@ def atomic(path: Path, data: bytes) -> dict:
                 publication = _PUBLICATION.get()
                 if publication is not None and publication["path"] == path:
                     publication["_applied_metadata"] = receipt
+                    # Persist staging identity before the irreversible replace.
+                    # A hard exit after replace can then be reconciled without
+                    # adopting a user's same-content replacement or chmod.
+                    if "_before_publish" in publication:
+                        publication["_before_publish"](receipt)
+                        if metadata(path) != original:
+                            raise InstallError(f"Concurrent metadata edit during publication preparation: {path}")
                 if os.name == "nt" and original is not None:
                     parent.check()
                     windows_helper("_windows_replace", path, staged_path)
@@ -377,7 +384,7 @@ def matches_receipt(path: Path, receipt: dict | None) -> bool:
         return current is None and receipt is None
     # Publication changes inode ctime. All other identity fields and the exact
     # security set must match the verified staging inode, never a fresh target.
-    return (current["identity"][:-1] == receipt["identity"]
+    return (current["identity"][:-1] == tuple(receipt["identity"])
             and current["security"] == receipt["security"])
 
 
@@ -1034,10 +1041,16 @@ def apply_plan(plans: list[dict], state: Path, package: Path) -> dict:
         if p["before"] is not None:
             atomic(backup, p["before"])
         atomic(installed, p["after"])
-        files.append({"path": str(p["path"]), "before_sha256": digest(p["before"]) if p["before"] is not None else None, "after_sha256": digest(p["after"]), "backup": str(backup) if p["before"] is not None else None, "installed_copy": str(installed), "kind": p["kind"], "meta": p["meta"], "metadata_before": p["_metadata"]["security"] if p["_metadata"] else None})
+        files.append({"path": str(p["path"]), "before_sha256": digest(p["before"]) if p["before"] is not None else None, "after_sha256": digest(p["after"]), "backup": str(backup) if p["before"] is not None else None, "installed_copy": str(installed), "kind": p["kind"], "meta": p["meta"], "metadata_before": p["_metadata"]["security"] if p["_metadata"] else None,
+                      "parent_binding": p["_parent_binding"], "target_before": p["_metadata"], "progress": "pending"})
     manifest = {"schema_version": 2, "policy_version": VERSION, "package_root": str(package), "install_id": stamp, "created": dt.datetime.now(dt.timezone.utc).isoformat(), "files": files, "previous_manifest": json.loads(previous_ref) if previous_ref else None, "status": "prepared", "boundary_protocol": "physical-parent-v2"}
     manifest_path = transaction / "manifest.json"
     atomic(manifest_path, canonical(manifest))
+    def preparing(index, receipt):
+        row = files[index]
+        row.update(metadata_after=receipt["security"], publication_identity=receipt["identity"],
+                   parent_binding=parent_binding(plans[index]["path"]), progress="publishing")
+        atomic(manifest_path, canonical(manifest))
     written = []
     new_ref = None
     try:
@@ -1048,10 +1061,16 @@ def apply_plan(plans: list[dict], state: Path, package: Path) -> dict:
                 raise InstallError(f"Concurrent edit while installing: {p['path']}")
             # Track even an atomic implementation which commits then raises.
             written.append(p)
-            publish_target(p)
+            p["_before_publish"] = lambda receipt, index=i: preparing(index, receipt)
+            try:
+                publish_target(p)
+            finally:
+                p.pop("_before_publish", None)
             files[i]["metadata_after"] = p["_applied_metadata"]["security"]
             files[i]["parent_binding"] = parent_binding(p["path"])
             files[i]["publication_identity"] = p["_applied_metadata"]["identity"]
+            files[i]["progress"] = "applied"
+            atomic(manifest_path, canonical(manifest))
         manifest["status"] = "written_pending_native_verification"
         atomic(manifest_path, canonical(manifest))
         if read(state / "active.json") != previous_ref:
@@ -1126,6 +1145,10 @@ def rollback_plan(manifest: dict, current_files: dict | None = None) -> list[dic
             raise InstallError(f"Backup integrity error: {path}")
         if current == before:
             continue
+        if manifest.get("status") == "prepared" and "progress" in p:
+            receipt = {"identity": p.get("publication_identity"), "security": p.get("metadata_after")}
+            if p["progress"] not in {"publishing", "applied"} or receipt["identity"] is None or not matches_receipt(path, receipt):
+                raise InstallError(f"Interrupted installation conflict; user edit preserved: {path}")
         if current == installed:
             new = before
         elif p["kind"] == "instructions" and current is not None:

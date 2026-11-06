@@ -18,6 +18,19 @@ Cohort фиксирует полный **выбранный pinned index** и ч
 
 `capture_local_git_checkout(...)` использует только read-only local Git, проверяет HEAD и каждый blob перед pinned export. Source file descriptors сохраняют modes `100644/100755`; symlinks/submodules явно не поддержаны. Prepared solve получает новый Git root без ambient Git config/hooks/templates. Для SWE его initial tree обязан совпасть с captured original tree; новый preparation commit **не выдаётся** за оригинальный base commit. Project-local AGENTS сохраняются. Actual Codex instruction discovery boundary всё равно требует qualification.
 
+Baseline capture требует raw-byte равенства worktree каждому immutable Git blob.
+Git-clean checkout с CRLF, clean/smudge, ident или encoding transformations не
+является таким baseline. CRLF при LF blob явно отклоняется с
+`BENCH_BASE_CHECKOUT_FILTERED_BYTES_UNSUPPORTED`; другие несовпадения сохраняют
+`BENCH_DIRTY_BASE_CHECKOUT`. Capture не запускает filters и не нормализует bytes.
+Подготовьте отдельный checkout с отключёнными EOL/filter transformations и
+проверьте raw bytes перед capture. Fixtures задают собственные Git config и
+attributes settings, не наследуя autocrlf оператора. SWE text patch делит строки
+только по LF; CR, U+2028, U+0085, VT и FF остаются содержимым строки, отсутствие
+final LF передаётся Git marker. Binary/NUL patch отклоняется. Serialized relative
+paths arm inventory используют POSIX `/`; reader отвергает backslash, drive,
+пустые компоненты и dot/traversal. Эти controls не аттестуют Windows runtime.
+
 Для двух собственных suites `LocalTaskBundleAdapter(fresh_git=True)` создаёт materialization **v2** с настоящим physical Git binding. Readers принимают v1/v2; v1 сохраняет прежнее поведение и запрещает добавленный `.git`. Только проверенный v2 исключает собственные Git metadata из source/oracle/milestone projection. Old v1 reader отказывает v2; сохранённые v1 receipts не повышаются автоматически.
 
 `UpstreamBenchmarkAdapter(profile_ref, assets_root, boundary=..., arm_builder=..., evaluator_boundary=...)` реально потребляет plan, root/child policy refs и pinned arm receipt. Builder передаётся как `ArmHomeBuilder.prepare_arm(..., workspace=source)`, затем `verify_arm/launch_environment`; transport получает отдельную environment копию через `with_environment`, без изменения process-global environment. Source/arm receipts SHA входят в frozen task contract. `PortfolioBenchmarkAdapter` маршрутизирует три внешние и две собственные suites, применяя тот же per-arm builder к собственным задачам.

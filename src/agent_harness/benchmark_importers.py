@@ -70,7 +70,12 @@ def _paths(files):
 
 
 def capture_local_git_checkout(repository, revision, assets_root, *, prefix='checkout', deadline=None):
-    """Read-only local Git capture, checking every worktree byte against HEAD."""
+    """Capture an immutable, raw-byte Git baseline, without running filters.
+
+    Git-clean is weaker than byte identity (EOL/clean filters can hide changes).
+    The supported input is an untransformed checkout; capture never silently
+    canonicalizes worktree bytes or invokes repository-provided filters.
+    """
     from datetime import datetime,timezone
     def git(*args):
         _deadline(deadline)
@@ -98,7 +103,10 @@ def capture_local_git_checkout(repository, revision, assets_root, *, prefix='che
         raw=read_regular_file(Path(repository)/name)
         algorithm=hashlib.sha1 if len(oid)==40 else hashlib.sha256
         if algorithm(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()!=oid.decode():
-            raise HarnessError('BENCH_DIRTY_BASE_CHECKOUT')
+            canonical=git('cat-file','blob',oid.decode())
+            if b'\r\n' in raw and raw.replace(b'\r\n',b'\n')==canonical:
+                raise HarnessError('BENCH_BASE_CHECKOUT_FILTERED_BYTES_UNSUPPORTED: CRLF worktree differs from immutable Git blob; prepare a raw-byte checkout with EOL/filter transforms disabled')
+            raise HarnessError('BENCH_DIRTY_BASE_CHECKOUT: worktree bytes differ from immutable Git blob; clean/smudge, encoding and ident transforms are unsupported')
         relative=_relative(prefix)+'/'+name
         atomic_write(store.path(relative),raw,exclusive=True)
         files.append({'path':name,'asset':{'path':relative,'sha256':_hash(raw)},'mode':mode.decode()})

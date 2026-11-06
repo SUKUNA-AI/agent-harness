@@ -3,7 +3,10 @@
   "additionalProperties": false,
   "properties": {
     "schema_version": {
-      "const": 1
+      "enum": [
+        1,
+        2
+      ]
     },
     "task": {
       "type": "object",
@@ -193,7 +196,11 @@
                 "equals": {
                   "type": "object",
                   "maxProperties": 1000,
-                  "propertyNames": {"type": "string", "minLength": 1, "maxLength": 1000},
+                  "propertyNames": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000
+                  },
                   "additionalProperties": true
                 }
               },
@@ -305,6 +312,301 @@
           }
         }
       }
+    },
+    "mission": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+          "maxLength": 128
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "original_request": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 131072
+        },
+        "global_constraints": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "uniqueItems": true
+        },
+        "non_goals": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "uniqueItems": true
+        },
+        "requirements": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+                "maxLength": 128
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 8192
+              },
+              "provenance": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 8192
+              },
+              "kind": {
+                "enum": [
+                  "deliverable",
+                  "behavior",
+                  "compatibility",
+                  "safety",
+                  "performance",
+                  "documentation"
+                ]
+              },
+              "required": {
+                "type": "boolean"
+              },
+              "acceptance_ids": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 128,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+                  "maxLength": 128
+                }
+              }
+            },
+            "required": [
+              "id",
+              "text",
+              "provenance",
+              "kind",
+              "required",
+              "acceptance_ids"
+            ]
+          }
+        },
+        "previous_digest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "id",
+        "generation",
+        "original_request",
+        "global_constraints",
+        "non_goals",
+        "requirements"
+      ]
+    },
+    "node_checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "required"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+            "maxLength": 128
+          },
+          "kind": {
+            "enum": [
+              "command",
+              "source",
+              "content",
+              "visual",
+              "runtime"
+            ]
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "argv": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 16384
+            },
+            "maxItems": 256,
+            "minItems": 1
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "timeout": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 86400
+          },
+          "expected_exit": {
+            "type": "integer"
+          },
+          "effect": {
+            "enum": [
+              "read_only",
+              "local_test"
+            ]
+          },
+          "resources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tool_versions": {
+            "type": "object",
+            "propertyNames": {
+              "not": {
+                "const": "executable"
+              }
+            },
+            "description": "Named version probes; executable is reserved for the command fingerprint.",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 16384
+              },
+              "maxItems": 256,
+              "minItems": 1
+            }
+          },
+          "criteria": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+              "maxLength": 128
+            },
+            "maxItems": 128,
+            "minItems": 1
+          },
+          "assertions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "regex"
+              ],
+              "properties": {
+                "stream": {
+                  "enum": [
+                    "stdout",
+                    "stderr",
+                    "combined"
+                  ]
+                },
+                "regex": {
+                  "type": "string"
+                },
+                "min_matches": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "forbidden": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "reports": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "path",
+                "format"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "format": {
+                  "enum": [
+                    "junit",
+                    "json"
+                  ]
+                },
+                "min_tests": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "max_skipped": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "required_cases": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "equals": {
+                  "type": "object",
+                  "maxProperties": 1000,
+                  "propertyNames": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000
+                  },
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "cache_policy": {
+            "enum": [
+              "never",
+              "verified_inputs_only"
+            ]
+          },
+          "input_closure": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 16384
+            },
+            "maxItems": 128
+          }
+        },
+        "additionalProperties": false
+      },
+      "maxItems": 128,
+      "minItems": 1
     }
   },
   "required": [
@@ -335,5 +637,38 @@
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "work-contract v1"
+  "title": "Work contract v1 legacy / v2 verified task flow",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "const": 2
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "mission",
+          "node_checks"
+        ]
+      },
+      "else": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "mission"
+              ]
+            },
+            {
+              "required": [
+                "node_checks"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
 }

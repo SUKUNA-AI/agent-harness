@@ -298,7 +298,10 @@ class ExecutionDurabilityTests(unittest.TestCase):
     def test_cleanup_fixture_does_not_mask_pre_exec_failure(self):
         with patch("agent_harness.codex_execution._start_contained",
                    side_effect=HarnessError("synthetic pre-exec failure")):
-            with self.assertRaisesRegex(AssertionError, "Cleanup scenario requires a real completed turn"):
+            # Ordinary adapter assertions now produce durable UNKNOWN_OUTCOME.
+            # The control must still fail its count of real completed turns;
+            # a pre-exec failure cannot masquerade as a cleanup scenario.
+            with self.assertRaisesRegex(AssertionError, "0 != 1"):
                 self.test_successful_terminal_event_without_process_tree_cleanup_cannot_integrate()
 
     def test_join_read_only_node_has_real_completion_without_fictitious_commit(self):
