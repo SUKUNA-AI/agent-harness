@@ -168,6 +168,9 @@ def refresh_frontier(supervisor, plan, agents, *, names=None, verify_only=False)
 
 
 def coverage(supervisor, plan, frontier):
+    from .completion_eligibility import policy, rows
+    if policy(supervisor):
+        return rows(supervisor.contract, plan, frontier)
     rows = []
     for requirement in supervisor.contract["mission"]["requirements"]:
         names = [n["id"] for n in plan["tasks"] if requirement["id"] in n["requirement_ids"]]

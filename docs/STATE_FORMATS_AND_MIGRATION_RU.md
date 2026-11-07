@@ -12,10 +12,33 @@
 | Установленный Codex | Его `config.toml` | Адресный обратимый installer; model/provider/permissions сохраняются |
 | Work contract/state/checkpoints/agent/memory | Strict YAML, независимый `schema_version` | Закрытые schemas, bounded fields и UTC timestamps |
 | Codex process events | JSONL native protocol | Хранятся отдельно; model completion не равно acceptance |
-| Recovery journal | Небольшие typed JSONL records с hash chain | Не пользовательский чат; replay только complete verified records |
+| Recovery journal | Небольшие typed JSONL records v1/v2 с hash chain | Root preparation/reservation facts требуют v2; default events/checkpoints остаются v1 |
 | Existing core run, evidence, release/install manifests | Исторический JSON | Existing reader/rollback продолжают работать |
 | Architecture narrative и derived knowledge | Markdown | Authoritative structured provenance остаётся в YAML |
 | Optional model table payload | TOON после измерения | Никогда не подменяет state, schema или native JSONL |
+
+## Journal и root preparation
+
+Reader `supervisor-journal-event.v2.schema.json` читает смешанную hash chain
+outer versions 1/2. Старые schema file и inline const1 сохранены. Только закрытые
+root preparation/reservation/failure payloads используют outer2; root payload1,
+обычный payload2 и неизвестные будущие версии отвергаются. Первый authoritative
+root protocol event блокирует старого writer также для supervised native/legacy
+run. Это не включает plan quality и не добавляет keys в work-state/receipt.
+
+Core preparation intent ссылается на immutable addressed metadata и отдельные
+JSON blobs contract/baseline/prior/expected state. Метаданные и journal row
+сохраняют предел2MiB, journal —64MiB. Каждый blob ограничен100MiB+2bytes, как
+существующий native snapshot response; Python-only inventory выше этого предела
+получает явный capacity stop. Большой core snapshot проверяется существующим
+snapshot validator/digest, а не YAML node limit. Hashes, current subject,
+origin baseline и physical ownership повторно проверяются при recovery.
+`publication_prior_ref` закрепляет прежний state inode и существующие parents
+до intent. Fact `root_core_preparation_files` публикует addressed manifest всех
+staged output identities до их установки. Проверяются file inodes, hashes и
+вложенные parents; same-bytes replacement не разрешает overwrite или reuse.
+Обычные core JSON/CLI limits не меняются. Подробности transaction ordering и
+typed outcomes — в [Supervisor](EXECUTION_SUPERVISOR_RU.md#подготовка-root-repair-и-reservation).
 
 ## Strict YAML
 
@@ -146,8 +169,15 @@ exclusive destination. Старый JSON не удаляется; существ
 перезаписывается. Эта функция не объявляет любой legacy run новым work run и
 не конвертирует installation chain автоматически.
 
-Installation/rollback manifests остаются исходными: пользовательские settings,
-marker blocks, backups и active manifest chain обслуживает штатный installer.
+Штатный installer обслуживает пользовательские settings, marker blocks,
+backups и active manifest chain. Существующие installation/rollback manifests
+сохраняют свои versioned formats.
+Новые installer manifests v3 используют `commit_protocol: active-binding-v1`.
+Commit подтверждает проверенная active manifest chain либо сохранённый
+`installs/<id>/commit.json` с exact manifest/active-pointer/physical binding;
+один status label не доказывает commit. При неоднозначном владении сохраняются
+backups и чужие edits, а recovery требует сверки. `migrate_json` не заменяет
+этот installation protocol и не повышает trust старых manifests.
 Перед обновлением выполните doctor и install dry-run, проверьте targeted diff,
 затем примените и вызовите verify. Для native loading нужен отдельный новый
 Codex process; изменение файлов не гарантирует hot reload текущего чата.
@@ -158,7 +188,11 @@ ZIP source archive без native bundle не подтверждает Rust capab
 
 ## Work-state v2 и explicit migration
 
-Новый writer создаёт work/agent state v2; readers сохраняют v1 без повышения trust.
+Work/agent state v2 ввели durable execution receipts и usage accounting v3.
+Текущий новый managed run с work-contract v2 создаётся как work-state v3 с
+plan-quality policy; agent projections и другие work paths остаются v2.
+Contract/plan имеют собственные версии v2. Legacy work-state v1/v2 читаются без
+автоматического upgrade или повышения trust.
 Execution receipts имеют собственную закрытую schema; usage accounting v3
 подтверждает invocation coverage, а не одно наличие чисел.
 `work migrate` сначала показывает hash-bound план; apply проверяет expected
@@ -166,3 +200,51 @@ generation, сохраняет backups/intent и публикует pending vers
 Pending блокирует supervisor; `--recover` явно завершает переход.
 `legacy_history_unverified` не снимается новой успешной попыткой.
 [Команды и downgrade ограничения](STABILIZATION_RU.md).
+
+## Явный переход managed work-state v2 → v3
+
+`work migrate --run-dir RUN --expected-generation N --target-version 3`
+строит read-only план установки plan-quality policy. Исходный run должен иметь
+managed contract v2, согласованные checkpoint/journal и остановленные execution
+invocations. Проверяются W03 cleanup/subject/accounting guard и registry данного
+run; неизвестный исход или отсутствующий registry после использованных попыток
+требует отдельной reconciliation. Миграция не вызывает модель и не освобождает
+неопределённые slots. Просроченный deadline не разрешает начать новый upgrade.
+
+План schema2 связывает generation, точные source bytes/hash inventory, journal
+head, снимки source roots, material digest и versioned policy/schema refs.
+Используется committed `state.contract_path`, включая successor mission;
+исходный `contract.yaml` не подменяет текущую миссию. `--max-planning-rounds N`
+может только уменьшить предел из исходного `contract.budgets.max_attempts`;
+для apply нужно повторить тот же параметр и передать reviewed `--expected-plan-digest`.
+
+Apply сохраняет ограниченные backups и immutable intent schema2 с точными
+pending/final state digests и frozen bootstrap material. Сначала публикуется
+authoritative v3 pending barrier; только затем policy/schema artifacts и их
+journal pins; последним — final v3 head и delivery receipt schema2. Старый v2
+writer отказывает на новом checkpoint. Pending блокирует обычный supervisor;
+`--target-version 3 --recover OPERATION_ID --expected-generation N` явно завершает
+сохранённый переход. Recovery проверяет backups/source/pending/final binding,
+повторно публикует только точный frozen material и восстанавливает недостающие
+derived projections. Даже после истечения deadline разрешено закончить это
+housekeeping без model calls или увеличения бюджета. `--max-planning-rounds`
+при recovery не принимается: новый пакет не пересчитывает сохранённую policy.
+
+Переход сохраняет исходные deadline, attempts, budgets, usage/trust и failure
+history, старые receipts, selected plan и candidate/core refs. State становится
+`RECOVERY_REQUIRED`, plan_quality — `unassessed`, rounds_used — 0 и assessment_ref —
+null. Это не приёмка старого плана или старого reviewer verdict: перед новой
+работой нужен новый bound assessment в оставшихся исходных лимитах. Если run
+ещё не имел completion policy v2, она публикуется за тем же v3 barrier;
+исторические review receipts продолжают читаться по своим frozen versions.
+
+Default-маршрут `work migrate` по-прежнему выполняет только v1 → v2 и сохраняет
+прежние migration plan/intent/receipt schema1. Явный target3 не объединяет два
+перехода автоматически. Read-only inspection/status и обычный resume legacy run
+не устанавливают policy/schema и не повышают версию. Unknown versions отказывают
+закрыто. Backups не являются разрешением на downgrade или ручную замену journal.
+
+Лимиты migration inventory: 512 файлов и 32 MiB суммарных source bytes; отдельный
+structured document ограничен 2 MiB. Превышение или конфликт прекращают переход,
+а не обрезают историю. Hash bindings проверяют согласованность локальных bytes;
+они не удостоверяют автора receipts и не обеспечивают OS isolation.

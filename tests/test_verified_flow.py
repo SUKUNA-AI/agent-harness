@@ -1,5 +1,6 @@
 """Verified queues, lifecycle crashes and transport, using contained fixtures."""
 from copy import deepcopy
+from contextlib import nullcontext
 import hashlib
 import json
 import os
@@ -19,6 +20,24 @@ from agent_harness import verified_flow
 import test_execution_durability as durability
 Crash = durability.Crash
 
+PLAN_QUALITY_FIXTURE = """if 'HARNESS_PLAN_QUALITY' in prompt:
+ quality_packet=json.loads(prompt.rsplit('\\n',1)[1]);quality_plan=quality_packet['input']['plan']
+ quality_verdict='approved';quality_findings=[];quality_nodes=[]
+ for quality_node in quality_plan['tasks']:
+  quality_nodes.append(dict(node_id=quality_node['id'],outcome=quality_node['goal'][:1500],requirement_ids=quality_node['requirement_ids'],depends_on=quality_node['depends_on'],dependency_rationale='Local acceptance uses only already available prerequisites.',dependency_valid=True,atomicity='coherent',atomicity_rationale='One observable outcome with matching local and integrated assertions.',indivisibility_condition='The scoped behavior and its checks form one coherent outcome.',owner=quality_node['id'],scope_rationale='One frozen owner for the listed write scope.',local_checks=quality_node['checks']['local'],integration_checks=quality_node['checks']['integration'],local_check_rationale='Assert the actual local output.',integration_check_rationale='Assert the merged output independently.',checks_meaningful=True,review_handoff='Local and integrated checks passed on the bound candidate.',budget_rationale='Original attempts, turn timeout and deadline remain bounded.',shared_interfaces=[]))
+ quality_wire=dict(schema_version=1,**quality_packet['binding'],verdict=quality_verdict,findings=quality_findings,nodes=quality_nodes)
+ event('item.completed',item={'type':'agent_message','text':json.dumps(quality_wire)})
+ event('turn.completed',usage={'input_tokens':10,'output_tokens':3});raise SystemExit
+"""
+
+
+def legacy_verified_creation(supervisor, material):
+    """Test-only frozen v2 creation: no quality artifacts/pins are published."""
+    from agent_harness.completion_eligibility import pin
+    supervisor.store.write('contract.yaml', supervisor.contract, 'work-contract.schema.json', exclusive=True)
+    pin(supervisor)
+    supervisor._save('fixture frozen v2 creation; no implicit quality upgrade')
+
 
 class VerifiedFlowTests(unittest.TestCase):
     def setUp(self):
@@ -29,7 +48,7 @@ class VerifiedFlowTests(unittest.TestCase):
         self.environment.start()
         self.addCleanup(self.environment.stop)
 
-    def fixture(self, *, verified=True, attempts=3, script_edit=None, plan_edit=None, contract_edit=None):
+    def fixture(self, *, verified=True, attempts=3, script_edit=None, plan_edit=None, contract_edit=None, planning_rounds=None, legacy=False):
         supervisor, fake = durability.ExecutionDurabilityTests().fixture(self.root)
         contract = deepcopy(supervisor.contract)
         plan_path = self.root / "plan.yaml"
@@ -61,8 +80,9 @@ class VerifiedFlowTests(unittest.TestCase):
         dump(self.root / "task-v2.yaml", contract)
         dump(plan_path, plan)
         # Reuse only the synthetic source/adapter, with a distinct new run.
-        supervisor = Supervisor.create(self.root / "task-v2.yaml", run_dir=self.root / "private" / "verified",
-            cwd=self.root / "source", state_dir=self.root / "state", adapter=supervisor.adapter)
+        with patch('agent_harness.plan_quality.publish_creation', legacy_verified_creation) if legacy else nullcontext():
+            supervisor = Supervisor.create(self.root / "task-v2.yaml", run_dir=self.root / "private" / "verified",
+                cwd=self.root / "source", state_dir=self.root / "state", adapter=supervisor.adapter, max_planning_rounds=planning_rounds)
         supervisor.plan_input = str(plan_path)
         script = fake.read_text()
         script = script.replace("prompt=args[-1]", """prompt=args[-1]
@@ -75,7 +95,8 @@ if manifest:
 """)
         script = script.replace("task['goal']", "task['goal'].split()[0]")
         if verified:
-            script = script.replace("json.dumps({'schema_version':1,'verdict':'approved','findings':[]})", "json.dumps({'schema_version':2,'verdict':'approved','findings':[], 'requirements':[{'id':r['id'],'status':'accepted','evidence_ids':r['evidence_ids']} for r in json.loads(prompt.rsplit('\\n',1)[1])['coverage']], 'unrepresented_requirements':[]})")
+            script = script.replace("json.dumps({'schema_version':1,'verdict':'approved','findings':[]})", "json.dumps({'schema_version':json.loads(prompt.rsplit('\\n',1)[1])['required_verdict_version'],'verdict':'approved','findings':[], 'requirements':[dict({'id':r['id'],'status':'deferred' if r['status']=='deferred' else 'accepted','evidence_ids':r['evidence_ids']}, **({'reason':r['reason']} if 'reason' in r else {})) for r in json.loads(prompt.rsplit('\\n',1)[1])['coverage']], 'unrepresented_requirements':[]})")
+            script = script.replace("if 'HARNESS_FINAL_REVIEW' in prompt:\n", PLAN_QUALITY_FIXTURE + "if 'HARNESS_FINAL_REVIEW' in prompt:\n")
         if script_edit:
             script = script_edit(script)
         fake.write_text(script)
@@ -114,7 +135,7 @@ if manifest:
         result = supervisor.start()
         self.assertEqual(result["status"], "FAILED_TERMINAL", result)
         self.assertFalse(any(r["node_id"] == "right" and r["record_type"] == "invocation_intent" for r in supervisor.receipts().records()))
-        self.assertEqual(fake.with_suffix(".calls").read_text().splitlines(), ["exec"])
+        self.assertEqual(fake.with_suffix(".calls").read_text().splitlines(), ["exec", "exec"])
 
     def test_local_check_failure_gets_bounded_repair_same_task(self):
         def edit(script):
@@ -216,6 +237,62 @@ if manifest:
         self.assertEqual(supervisor.store.read("agents/right.yaml")["attempts_used"], 2)
         self.assertIn("VALUE = 43", (Path(result["cwd"]) / "right.py").read_text())
 
+    def test_independent_integration_regression_repairs_responsible_writer(self):
+        # The same cross-file regression must be checked without a dependency
+        # edge forcing traversal of the earlier node's accepted evidence.
+        fixture = self.fixture
+        created = []
+        def independent(**options):
+            options["plan_edit"] = lambda plan: plan["tasks"][1].update(depends_on=[])
+            result = fixture(**options)
+            created.append(result[0])
+            return result
+        with patch.object(self, "fixture", independent):
+            self.test_integrated_ancestor_regression_allows_only_responsible_repair()
+        self.assertEqual(created[0].store.read("agents/left.yaml")["attempts_used"], 1)
+
+    def test_mid_wave_repair_preserves_later_completed_writer(self):
+        def contract(value):
+            value["budgets"]["max_concurrent_managed_agents"] = 3
+            value["task"]["allowed_write_scopes"].append("zzobserver.py")
+            value["mission"]["original_request"] += " Also create the observer output."
+            requirement = deepcopy(value["mission"]["requirements"][0])
+            requirement.update(id="R-zzobserver", text="Create the observer output")
+            value["mission"]["requirements"].append(requirement)
+            check = deepcopy(value["node_checks"][1])
+            check.update(id="observer-value", argv=[sys.executable, "-c",
+                "from pathlib import Path; assert 'VALUE = 42' in Path('zzobserver.py').read_text()"])
+            value["node_checks"].append(check)
+            value["node_checks"][0]["argv"][-1] += "; assert 'VALUE = 42' not in Path('right.py').read_text()"
+            value["node_checks"][1]["argv"][-1] = "from pathlib import Path; assert any('VALUE = '+str(v) in Path('right.py').read_text() for v in (42,43))"
+        def plan(value):
+            value["tasks"][0]["estimated_seconds"] = 90
+            value["tasks"][1].update(depends_on=[], estimated_seconds=60)
+            observer = deepcopy(value["tasks"][1])
+            observer.update(id="zzobserver", goal="zzobserver", write_scope=["zzobserver.py"],
+                outputs=["zzobserver.py"], requirement_ids=["R-zzobserver"], estimated_seconds=30,
+                checks={"local": ["observer-value"], "integration": ["observer-value"]})
+            value["tasks"].append(observer)
+        def script(value):
+            return value.replace("if mode in ('left','right'):target=mode+'.py'",
+                "if mode in ('left','right','zzobserver'):target=mode+'.py'\nif mode=='right':\n marker=pathlib.Path(__file__).with_suffix('.right-seen');value=43 if marker.exists() else 42;marker.write_text('seen')")
+        supervisor, fake = self.fixture(contract_edit=contract, plan_edit=plan, script_edit=script)
+        capabilities = supervisor.adapter.capabilities
+        with patch.object(supervisor.adapter, "capabilities", lambda: dict(capabilities(), native_children_disabled=True)):
+            result = supervisor.start()
+        self.assertEqual(result["status"], "ACCEPTED", result)
+        for name, attempts in (("left", 1), ("right", 2), ("zzobserver", 1)):
+            self.assertEqual(supervisor.store.read("agents/" + name + ".yaml")["attempts_used"], attempts)
+        records = supervisor.receipts().records()
+        observer_completions = [i for i, row in enumerate(records) if row["record_type"] == "completion" and row["node_id"] == "zzobserver"]
+        observer_integrations = [i for i, row in enumerate(records) if row["record_type"] == "integration" and row["node_id"] == "zzobserver"]
+        right_integrations = [i for i, row in enumerate(records) if row["record_type"] == "integration" and row["node_id"] == "right"]
+        self.assertEqual((len(observer_completions), len(observer_integrations), len(right_integrations)), (1, 1, 2))
+        self.assertLess(observer_completions[0], right_integrations[0])
+        self.assertGreater(observer_integrations[0], right_integrations[-1])
+        self.assertEqual(len(fake.with_suffix(".calls").read_text().splitlines()),
+            sum(row["record_type"] == "invocation_intent" for row in records))
+
     def test_review_coverage_publication_crashes_reconcile_without_model_replay(self):
         from agent_harness.execution_receipts import ExecutionReceipts
         supervisor, fake = self.fixture()
@@ -239,7 +316,8 @@ if manifest:
             result = supervisor.start()
         self.assertEqual(result["status"], "UNKNOWN_OUTCOME", result)
         completion = next(r for r in supervisor.receipts().records() if r["record_type"] == "completion")
-        self.assertEqual(completion["payload"]["dispatch_state"], "started_observed")
+        self.assertEqual(completion["payload"]["dispatch_state"], "possibly_dispatched")
+        self.assertIsNone(completion["payload"]["process_tree_stopped"])
         with self.assertRaisesRegex(HarnessError, "uncertain writers"):
             Supervisor(supervisor.path, adapter=supervisor.adapter).resume()
 
@@ -270,7 +348,10 @@ if manifest:
 
     def test_explicit_mission_revision_preserves_budget_and_drops_old_acceptance(self):
         from agent_harness.core import digest
-        supervisor, _ = self.fixture()
+        # Two complete generations share one frozen deadline. Allow the real
+        # verification/receipt work to finish; the assertions below still require
+        # that mission revision never extends it or resets attempts/usage.
+        supervisor, _ = self.fixture(contract_edit=lambda c: c["budgets"].update(max_wall_seconds=900))
         self.assertEqual(supervisor.start()["status"], "ACCEPTED")
         old_deadline, old_attempts = supervisor.state["deadline"], supervisor.state["attempts_used"]
         usage = deepcopy(supervisor.state["metrics"])
@@ -411,7 +492,7 @@ if manifest:
         def script(value):
             return value.replace("if mode=='permission':", "if mode=='left':event('turn.failed',error={'message':'retryable fixture failure'});raise SystemExit(1)\nif mode=='permission':")
         supervisor, fake = self.fixture(script_edit=script,
-            contract_edit=lambda c: c["budgets"].update(max_tokens=13))
+            contract_edit=lambda c: c["budgets"].update(max_tokens=26))
         run = supervisor.adapter.run
         def counted(*args, **kwargs):
             result = run(*args, **kwargs)
@@ -423,7 +504,7 @@ if manifest:
             result = supervisor.start()
         self.assertEqual(result["status"], "FAILED_TERMINAL", result)
         self.assertIn("token budget exhausted", result["reason"])
-        self.assertEqual(fake.with_suffix(".calls").read_text().splitlines(), ["exec"])
+        self.assertEqual(fake.with_suffix(".calls").read_text().splitlines(), ["exec", "exec"])
         self.assertEqual(supervisor.store.read("agents/left.yaml")["attempts_used"], 1)
 
     def test_known_stopped_reviewer_failure_gets_bounded_fresh_retry(self):
@@ -486,10 +567,12 @@ if manifest:
             raise Crash()
         with patch.object(supervisor, "_new_core_attempt", crash_after_prepare), self.assertRaises(Crash):
             supervisor.start()
-        self.assertEqual(len(supervisor._core().state()["attempts"]), 2)
+        # Origin bootstrap, current post-DAG input, then root repair; only two
+        # root model reservations are consumed across these three generations.
+        self.assertEqual(len(supervisor._core().state()["attempts"]), 3)
         recovered = Supervisor(supervisor.path, adapter=supervisor.adapter)
         self.assertEqual(recovered.resume()["status"], "ACCEPTED")
-        self.assertEqual(len(recovered._core().state()["attempts"]), 2)
+        self.assertEqual(len(recovered._core().state()["attempts"]), 3)
 
     def test_null_process_cleanup_keeps_lease_unresolved_on_resume(self):
         from agent_harness.agent_lifecycle import GlobalSlots
@@ -546,7 +629,7 @@ sup.start()
         supervisor, fake = self.fixture(script_edit=script)
         result = supervisor.start()
         self.assertEqual(result["status"], "NO_PROGRESS", result)
-        self.assertEqual(len(fake.with_suffix(".calls").read_text().splitlines()), 2)
+        self.assertEqual(len(fake.with_suffix(".calls").read_text().splitlines()), 3)
 
     def test_resume_honors_committed_repair_of_a_failed_final_check(self):
         def contract(value):
@@ -586,7 +669,7 @@ sup.start()
         supervisor, fake = self.fixture(script_edit=script)
         result = supervisor.start()
         self.assertEqual(result["status"], "NO_PROGRESS", result)
-        self.assertEqual(len(fake.with_suffix(".calls").read_text().splitlines()), 5)
+        self.assertEqual(len(fake.with_suffix(".calls").read_text().splitlines()), 6)
         with self.assertRaisesRegex(HarnessError, "Terminal work"):
             Supervisor(supervisor.path, adapter=supervisor.adapter).resume()
 

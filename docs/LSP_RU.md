@@ -5,6 +5,24 @@
 проверяемый план. Сервис, база данных и постоянный индекс harness не создаются.
 Серверы не входят в Python-пакет и не устанавливаются автоматически.
 
+По умолчанию LSP transport — Python. Явный `AGENT_HARNESS_LSP_BACKEND=native`
+выбирает Linux Tokio transport из проверенного native bundle. Один helper
+`--lsp-session <session-id>` обслуживает всю Session: initialize, didOpen,
+несколько RPC, server requests/notifications, shutdown и exit. Python сохраняет
+semantic API, URI/UTF-16 mapping, source checks, rename policy и запрет
+`workspace/applyEdit`. HTTP server и постоянный daemon не создаются.
+
+Этот backend квалифицирован только для Linux x86_64/glibc с доступной `/proc`
+process identity и обычным SIGCHLD без auto-reaping. Windows/macOS/ARM не
+квалифицированы: оставьте Python transport. Windows containment сохраняет
+прежний порядок suspended launch → private Job → resume. Ошибка явно выбранного
+native backend не вызывает повторный запуск через Python. Выбор snapshot
+`AGENT_HARNESS_BACKEND` от выбора LSP независим.
+
+Для возврата к Python задайте `AGENT_HARNESS_LSP_BACKEND=python` или уберите
+переменную перед новой Session. Не меняйте binary/backend во время работы
+сервера. Это не меняет установленный профиль Codex.
+
 Полный каталог flags/exit codes — [CLI reference](CLI_REFERENCE_RU.md#lsp-code).
 Для выбора между `rg`, heuristic RepoMap и semantic LSP см.
 [контекст](CONTEXT_AND_NATIVE_RU.md#что-выбрать). Результат language server не
@@ -242,6 +260,31 @@ staging и записи исходников; увеличьте `--max-bytes`.
 process group, Windows — private kill-on-close Job Object. Серверные requests
 configuration/progress обрабатываются, а `workspace/applyEdit` отклоняется.
 
+В native режиме Python закрепляет identity helper как лидера SID/PGID и не
+reap-ит его до завершения owned group, в том числе после аварии helper. Tokio
+дренирует stdout/stderr конкурентно; cancellation и parent EOF не зависят от
+свободного места в очереди данных. Это cooperative containment, не sandbox
+против намеренно escaping descendants. Механическая остановка дерева отдельно
+от успешного завершения Session: без shutdown ACK и допуска exit notification
+native Session не считается полной; malformed/partial frames, потеря terminal,
+ошибка callback и timeout остаются ошибками после cleanup.
+
+Native stream mode имеет собственный protocol v1, отличный от one-shot v1/v2:
+4-byte big-endian length и strict JSON envelope с session ID/sequence. RPC body
+передаётся как исходный UTF-8 JSON, без повторной сериализации чисел. Его limits:
+
+| Ресурс | Лимит |
+| --- | --- |
+| LSP body / headers | 16 MiB / 8192 bytes |
+| Входящий LSP stream / frames | 64 MiB / 20000 |
+| Wire frame / initial start frame | 2 × 16 MiB + 4096 / 1 MiB |
+| Wire stream / packets в каждом направлении | 256 MiB / 40000 |
+| Очередь каждого направления | 4 entries и 16 MiB decoded payload; 4096 bytes reserve для input metadata |
+| Stderr chunk / retained tail | 4096 / 65536 bytes; tail не ограничивает lifetime stderr |
+
+Лимиты объявляются в ready handshake и проверяются Python adapter. Они не
+заменяют общий wall deadline и не являются обещанием фиксированного RSS.
+
 Stdout выдаёт компактный UTF-8 JSON. `--max-bytes` по умолчанию 8192,
 диапазон 1024–262144; лимит включает JSON escaping и до двух байтов финального
 CRLF. При усечении остаются `total_items`, `returned_items`, `truncated`.
@@ -255,6 +298,14 @@ CRLF. При усечении остаются `total_items`, `returned_items`, 
 усечения. Это ограничения входа и буферов, не общий лимит RSS или OS sandbox.
 
 ## Проверки и происхождение
+
+`tests/test_native_lsp.py` использует compiled helper и реальные disposable
+процессы: несколько RPC в одной Session, server requests/notifications,
+fragmentation, backpressure/stderr flood, cancel/timeout, parent/helper hard exit,
+descendants, shutdown ACK и causal error propagation. Путь Python сохраняется
+как отдельный backend и regression oracle. Реальный pinned language server
+проверяется отдельно через `tools/check_lsp.py`; отсутствие dependencies — не
+успешная runtime qualification.
 
 `tests/test_lsp_safety.py` дополнительно проверяет закрытые targets, нестабильный
 набор, late edit, повреждённый/подменённый backup, readback восстановления и

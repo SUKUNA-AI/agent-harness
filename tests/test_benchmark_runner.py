@@ -76,6 +76,9 @@ class FixtureCodexAdapter(BoundFixtureCodexAdapter):
 
 
 class FixtureAdapter(CodexBenchmarkAdapter):
+    # Explicit frozen compatibility protocol; real bundle producers use v2.
+    grade_protocol_version = 1
+
     def __init__(self, root, *, kind="synthetic"):
         self.root, self.kind, self.modes, self.bound = root, kind, {}, 4
         self.wall = 10

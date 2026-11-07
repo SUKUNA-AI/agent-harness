@@ -72,11 +72,26 @@ expected generation. Checkpoint принимает устойчивый `--opera
 повтора после broken pipe. Evidence note сохраняет typed refs; старый note
 без current status chain остаётся observation.
 
-SessionStart без reliable agent/root identity сохраняется unbound и возвращает
-degraded; явный `start` остаётся fallback. Наличие hooks.json не доказывает trust,
+Обычный SessionStart Codex с проверенными session ID, cwd и source, без agent-полей
+и parent session, запускает bootstrap в локальном root scope. Это решение не
+подставляет agent ID/type в observer: исходная unknown/unbound identity сохраняется.
+Явные child/unknown/null type или parent без устойчивого agent ID возвращают
+degraded; устойчивые child ID имеют отдельные namespaces. SubagentStart не заменяет
+SessionStart. Явный `start` остаётся fallback. Наличие hooks.json не доказывает trust,
 invocation или task acceptance. `status`, `intake`, `verify-result` и bounded
 recordset retrieval описаны в [CLI](CLI_REFERENCE_RU.md) и
 [контрактах стабилизации](STABILIZATION_RU.md).
+
+CLI `hook` возвращает закрытый JSON `hookSpecificOutput` с
+`hookEventName: "SessionStart"` и строкой `additionalContext`, содержащей
+`Harness bootstrap` и native packet. Бюджет проверяет весь UTF-8 JSON, escaping и
+резерв CRLF до записи stdout. При переполнении optional context заменяется явным
+pointer на уже сохранённый полный packet; все `packet.required` и внешние
+session/root/evidence сохраняются. Если обязательная часть не помещается,
+возвращается валидный degraded-контекст `BUDGET_TOO_SMALL` с
+`required_context: "not_delivered"`; обязательные поля не обрезаются и bootstrap
+не повторяется для уменьшения вывода. Чистый `hook_packet` и CLI start/checkpoint
+сохраняют прежний формат.
 
 Новые observer/operation/bridge receipts v2 содержат actual package build digest
 (Python, schemas, vendored runtime) и отдельный loaded producer digest. V1 readers

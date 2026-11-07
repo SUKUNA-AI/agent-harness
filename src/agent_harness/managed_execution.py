@@ -10,7 +10,7 @@ import time
 import uuid
 from datetime import datetime, timedelta
 
-from .agent_lifecycle import GlobalSlots, Worktrees, git
+from .agent_lifecycle import GlobalSlots, Worktrees, git, guard_invocations, invocation_timeout, InvocationUnresolved
 from .core import HarnessError, digest, now, snapshot
 from .work_contract import legacy_contract
 from .scheduling import Scheduler, validate_plan
@@ -66,6 +66,12 @@ def validate_suppression(proof_path, capabilities):
 
 
 def _plan_path(supervisor):
+    from .plan_quality import enabled
+    if enabled(supervisor):
+        active = supervisor.state["plan_quality"]["active_round"]
+        if active is None:
+            raise HarnessError("Planning round must be reserved before a proposed plan")
+        return "plans/quality-round-" + str(active) + "/plan.yaml"
     generation = supervisor.contract.get("mission", {}).get("generation", 1)
     return "plans/current.yaml" if generation == 1 else "plans/mission-" + str(generation) + "/current.yaml"
 
@@ -107,7 +113,8 @@ def _plan(supervisor, capabilities):
                   "Use independent write scopes only where useful. No model/provider/security changes. "
                   "Unknown acceptance IDs, overlap, cyclic dependencies and budget escalation are rejected.\n" +
                   json.dumps(supervisor.contract, ensure_ascii=False))
-        prompt = compile_packet(supervisor, "Return a complete map of coherent bounded outcomes. Do not edit files. For contract v2 return plan schema_version2, generation1, full requirement_ids coverage and checks.local/checks.integration IDs from node_checks. Do not create one giant item merely because concurrency is1. Keep each item independently verifiable without requiring later features.", {"contract": supervisor.contract, "mission_digest": digest(supervisor.contract["mission"]) if verified_flow.enabled(supervisor) else None})
+        prompt = compile_packet(supervisor, "Return a complete map of coherent bounded outcomes. Do not edit files. For contract v2 return plan schema_version2, the current mission generation, full requirement_ids coverage and checks.local/checks.integration IDs from node_checks. Do not create one giant item merely because concurrency is1. Keep each item independently verifiable without requiring later features.", {"contract": supervisor.contract, "mission_digest": digest(supervisor.contract["mission"]) if verified_flow.enabled(supervisor) else None,
+            "planning_request": getattr(supervisor, "plan_quality_request", None)})
         preflight(supervisor._adapter(), prompt, read_only=True, native_children=False, output_schema=str(schema_path))
         with GlobalSlots(supervisor.state_dir).acquire(supervisor.state["run_id"], "planner", "architect",
                 cancel_file=supervisor.path / "cancel.yaml", timeout=min(60, supervisor.remaining())) as slot:
@@ -116,14 +123,21 @@ def _plan(supervisor, capabilities):
                 supervisor.state["process_identity"] = value["identity"]
                 supervisor.state["process_status"] = "running"
                 supervisor._save("structured planner process bound before waiting")
-            intent = supervisor.receipts().intent("@planner", "planner-1", checkout=supervisor.state["cwd"], owner=slot.value["lease_id"])
+            from .plan_quality import enabled as quality_enabled
+            attempt = "planner-" + str(supervisor.state["plan_quality"]["active_round"]) if quality_enabled(supervisor) else "planner-1"
+            intent = supervisor.receipts().intent("@planner", attempt, checkout=supervisor.state["cwd"], owner=slot.value["lease_id"],
+                input_refs=getattr(supervisor, "plan_quality_input_refs", ()))
             started = time.monotonic()
             result = invoke(supervisor._adapter(), prompt, slot=slot, cwd=supervisor.state["cwd"],
-                timeout=min(supervisor.remaining(), 300), deadline=supervisor.state["deadline"], read_only=True, native_children=False,
+                timeout=invocation_timeout(supervisor, "planner"), deadline=supervisor.state["deadline"], read_only=True, native_children=False,
                 output_schema=str(schema_path), log_dir=supervisor.path / "planner", on_process=planner_process,
                 cancel_file=supervisor.path / "cancel.yaml")
             result["slot_wait_ms"] = slot.wait_seconds * 1000
-            supervisor.receipts().completion(intent, result, duration_ms=(time.monotonic() - started) * 1000)
+            try:
+                supervisor.receipts().completion(intent, result, duration_ms=(time.monotonic() - started) * 1000)
+            except (HarnessError, ValueError) as error:
+                raise InvocationUnresolved("Planner completion evidence invalid: " + str(error)) from error
+            guard_invocations(supervisor, node_ids={"@planner"})
             if result.get("process_tree_stopped") is True or supervisor.contract["schema_version"] == 1 and result.get("process_tree_stopped") is not False:
                 slot.complete(result)
         if supervisor.state["schema_version"] == 1:
@@ -235,6 +249,11 @@ def execute_managed(supervisor, *, recovering=False):
     contract, state = supervisor.contract, supervisor.state
     receipts = supervisor.receipts()
     accounting = receipts.reconcile_usage(repair=recovering)
+    try:
+        guard_invocations(supervisor, accounting=accounting)
+    except InvocationUnresolved as error:
+        supervisor.transition("UNKNOWN_OUTCOME", str(error))
+        return supervisor._loop()
     if not supervisor._model_budget_ok():
         return supervisor._loop()
     capabilities = supervisor._adapter().capabilities()
@@ -254,14 +273,19 @@ def execute_managed(supervisor, *, recovering=False):
         return supervisor._loop()
     supervisor.transition("PLANNING", "reconcile the complete frozen task DAG")
     try:
-        if recovering and supervisor.store.path(_plan_path(supervisor)).exists():
+        from . import plan_quality
+        if plan_quality.enabled(supervisor):
+            plan = plan_quality.select_plan(supervisor, capabilities)
+            if plan is None:
+                return supervisor._loop()
+        elif recovering and supervisor.store.path(_plan_path(supervisor)).exists():
             state["plan_path"] = _plan_path(supervisor)
             plan = supervisor.store.read(state["plan_path"], "agent-plan.schema.json")
             validate_plan(plan, contract)
             frozen = [e["payload"]["plan_digest"] for e in supervisor.store.events() if e["payload"].get("kind") == "plan_frozen" and e["payload"].get("mission_generation", 1) == contract.get("mission", {}).get("generation", 1)]
             if frozen and (len(set(frozen)) != 1 or frozen[-1] != digest(plan)):
                 raise HarnessError("Persisted plan digest changed without authorized revision")
-            if not frozen and state["schema_version"] == 2:
+            if not frozen and state["schema_version"] >= 2:
                 # A crash before journal publication is safe only when no task was dispatched.
                 if accounting["intents"] or state["agents"]:
                     raise HarnessError("Frozen plan lacks authoritative journal binding")
@@ -291,11 +315,19 @@ def execute_managed(supervisor, *, recovering=False):
                 state["plan_path"] = _plan_path(supervisor)
                 supervisor._save("Recovered structured plan from exact immutable completion artifact")
             elif any(r["node_id"] == "@planner" and state["contract_digest"] in r["input_refs"] for r in accounting["intents"].values()):
-                supervisor.transition("UNKNOWN_OUTCOME", "Planner outcome requires exact artifact reconciliation; no blind model retry")
+                # guard_invocations already distinguishes missing/unknown
+                # completions. A known stopped failed plan is never a plan.
+                if contract["schema_version"] == 2:
+                    supervisor.transition("FAILED_TERMINAL", "Known stopped planner did not produce a successful plan; no automatic planner replay")
+                else:
+                    supervisor.transition("UNKNOWN_OUTCOME", "Planner outcome requires exact artifact reconciliation; no blind model retry")
                 return supervisor._loop()
             else:
                 plan = _plan(supervisor, capabilities)
-    except (HarnessError, ValueError) as error:
+    except InvocationUnresolved as error:
+        supervisor.transition("UNKNOWN_OUTCOME", str(error))
+        return supervisor._loop()
+    except (HarnessError, OSError, ValueError) as error:
         if state["status"] in {"FAILED_TERMINAL", "BLOCKED_ENVIRONMENT", "CANCELLED", "TIMED_OUT"}:
             return supervisor._loop()
         supervisor.transition("BLOCKED_AMBIGUOUS", "Unsafe or invalid persisted plan: " + str(error))
@@ -315,7 +347,17 @@ def execute_managed(supervisor, *, recovering=False):
     state["metrics"]["worktree_seconds"] += time.monotonic() - start
     trees.validate(staging, expected_id="integration", expected_role="integrator", integrated=True)
     state["cwd"] = state["integration_worktree"] = staging["path"]
-    core = supervisor._core()
+    if plan_quality.enabled(supervisor):
+        errors=plan_quality.evidence_errors(supervisor,plan)
+        if errors:
+            supervisor.transition("BLOCKED_AMBIGUOUS","PLAN_QUALITY: "+"; ".join(errors))
+            return supervisor._loop()
+    try:
+        core = supervisor._core()
+    except Exception as error:
+        from .root_preparation import handle_failure
+        handle_failure(supervisor,error,context="core_bootstrap")
+        return supervisor._loop()
     if recovering:
         core.resume()
     supervisor.transition("EXECUTING", "validated scopes; resume only proven operations")
@@ -376,6 +418,10 @@ def execute_managed(supervisor, *, recovering=False):
     def worker(node, record):
         start = time.monotonic()
         name = node["id"]
+        if plan_quality.enabled(supervisor):
+            errors = plan_quality.evidence_errors(supervisor, plan)
+            if errors:
+                raise NotDispatched("PLAN_QUALITY: " + "; ".join(errors))
         previous = agents.get(name)
         known = [r for r in accounting["completions"].values() if r["node_id"] == name and r["plan_digest"] == plan_digest]
         pending = [r for r in accounting["intents"].values() if r["node_id"] == name and r["invocation_id"] not in accounting["completions"]]
@@ -457,7 +503,7 @@ def execute_managed(supervisor, *, recovering=False):
         save()
         with GlobalSlots(supervisor.state_dir).acquire(state["run_id"], name, node["role"],
                 cancel_file=supervisor.path / "cancel.yaml", timeout=min(60, supervisor.remaining())) as slot:
-            remaining = min(supervisor.remaining(), (deadline - datetime.now(deadline.tzinfo)).total_seconds(), contract["budgets"]["turn_timeout_seconds"])
+            remaining = invocation_timeout(supervisor, "worker", node_remaining=(deadline - datetime.now(deadline.tzinfo)).total_seconds())
             if remaining <= 0:
                 slot.complete()
                 raise HarnessError("Managed task deadline expired before dispatch")
@@ -477,6 +523,10 @@ def execute_managed(supervisor, *, recovering=False):
                 preflight(supervisor._adapter(), prompt, read_only=node["read_only"], native_children=False,
                     write_authorized=not node["read_only"], output_schema=review_schema,
                     session_id=agent["thread_id"] if attempt > 1 else None)
+                if plan_quality.enabled(supervisor):
+                    errors = plan_quality.evidence_errors(supervisor, plan)
+                    if errors:
+                        raise NotDispatched("PLAN_QUALITY: " + "; ".join(errors))
             except (HarnessError, OSError, ValueError) as error:
                 slot.complete()
                 raise NotDispatched(str(error)) from error
@@ -484,13 +534,15 @@ def execute_managed(supervisor, *, recovering=False):
             agent["invocation_ids"].append(intent["invocation_id"])
             save()
             model_start = time.monotonic()
-            result = invoke(supervisor._adapter(), prompt, slot=slot, cwd=record["path"], timeout=remaining, deadline=agent["deadline"],
+            result = invoke(supervisor._adapter(), prompt, slot=slot, cwd=record["path"],
+                timeout=invocation_timeout(supervisor, "worker", node_remaining=(deadline - datetime.now(deadline.tzinfo)).total_seconds()), deadline=agent["deadline"],
                 session_id=agent["thread_id"] if attempt > 1 else None, output_schema=review_schema,
                 cancel_file=supervisor.path / "cancel.yaml", on_process=process, on_event=event,
                 read_only=node["read_only"], native_children=False, write_authorized=not node["read_only"],
                 log_dir=supervisor.path / "codex" / name)
             result["slot_wait_ms"] = slot.wait_seconds * 1000
             completion = receipts.completion(intent, result, duration_ms=(time.monotonic() - model_start) * 1000)
+            guard_invocations(supervisor, node_ids={name})
             if result.get("process_tree_stopped") is True or contract["schema_version"] == 1 and result.get("process_tree_stopped") is not False:
                 slot.complete(result)
         agent.update(status="ready_for_review" if result["status"] == "completed" else result["status"],
@@ -645,10 +697,18 @@ def execute_managed(supervisor, *, recovering=False):
             state["metrics"]["integration_seconds"] += time.monotonic() - start
             if verified_flow.enabled(supervisor):
                 try:
-                    verified_flow.refresh_frontier(supervisor, plan, agents, names=[name])
+                    # Every integration changes the shared candidate, including
+                    # evidence for independent nodes. Refresh the whole completed
+                    # frontier before it can authorize root preparation. A failed
+                    # check still returns to this integration's bounded repair.
+                    verified_flow.refresh_frontier(supervisor, plan, agents,
+                        names=[*sorted(completed), name])
                 except HarnessError as error:
                     if node_failure(name, agent, error):
-                        continue
+                        # Keep this exact integrated repair base. Later completed
+                        # results remain durable and are replayed after repair;
+                        # integrating them now could invalidate its ownership.
+                        break
                     return supervisor._loop()
             completed.add(name)
             supervisor._save("integrated scoped task " + name + "; final combined acceptance still pending")

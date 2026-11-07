@@ -890,6 +890,17 @@ fn rooted_open(path: &Path) -> Result<File, String> {
 }
 
 pub fn read_regular(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
+    read_regular_until(path,limit,Instant::now()+Duration::from_secs(120))
+}
+
+pub fn read_regular_until(path: &Path, limit: u64, deadline: Instant) -> Result<Vec<u8>, String> {
+    #[cfg(target_os="linux")]
+    {
+        return crate::fs_read::read_bounded_until(path,limit,deadline).map_err(|e|e.to_string());
+    }
+    #[cfg(not(target_os="linux"))]
+    {
+    check_time(deadline)?;
     let mut file = rooted_open(path)?;
     let metadata = file.metadata().map_err(|e| e.to_string())?;
     if !metadata.is_file() {
@@ -912,6 +923,7 @@ pub fn read_regular(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
         return Err("source changed during read".into());
     }
     Ok(data)
+    }
 }
 
 fn entry(path: &Path, deadline: Instant) -> Result<Value, String> {
@@ -933,6 +945,10 @@ fn entry(path: &Path, deadline: Instant) -> Result<Value, String> {
         let target = text(fs::read_link(path).map_err(|e| e.to_string())?.as_os_str())?;
         json!({"kind":"symlink","sha256":format!("{:x}",Sha256::digest(target.as_bytes())),"target":target})
     } else if metadata.is_file() {
+        #[cfg(target_os="linux")]
+        let digest=crate::fs_read::hash_regular_until(path,deadline).map_err(|e|e.to_string())?.sha256;
+        #[cfg(not(target_os="linux"))]
+        let digest={
         let mut file = rooted_open(path)?;
         if stamp(&file.metadata().map_err(|e| e.to_string())?, Some(&file))? != before {
             return Err(format!(
@@ -950,6 +966,8 @@ fn entry(path: &Path, deadline: Instant) -> Result<Value, String> {
             }
             hash.update(&buffer[..count]);
         }
+        format!("{:x}",hash.finalize())
+        };
         #[cfg(unix)]
         let executable = {
             use std::os::unix::fs::MetadataExt;
@@ -957,7 +975,7 @@ fn entry(path: &Path, deadline: Instant) -> Result<Value, String> {
         };
         #[cfg(windows)]
         let executable = Value::Null;
-        json!({"kind":"file","sha256":format!("{:x}",hash.finalize()),"size":metadata.len(),"executable":executable})
+        json!({"kind":"file","sha256":digest,"size":metadata.len(),"executable":executable})
     } else {
         return Ok(json!({"kind":"directory"}));
     };

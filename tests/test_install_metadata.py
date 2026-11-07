@@ -200,10 +200,13 @@ class InstallerMetadataTests(unittest.TestCase):
         self.acl(config)
         pointer = self.state / "active.json"
         atomic = install.atomic
+        pinned = {}
 
         def late_edit(path, data):
             result = atomic(path, data)
             if path == pointer:
+                manifest_path = Path(json.loads(data)["manifest"])
+                pinned["bytes"] = manifest_path.read_bytes()
                 os.setxattr(pointer, "user.foreign-edit", b"preserve")
                 raise OSError("publication committed then wrapper failed")
             return result
@@ -212,8 +215,12 @@ class InstallerMetadataTests(unittest.TestCase):
             self.apply()
         self.assertTrue(pointer.exists())
         self.assertEqual(os.getxattr(pointer, "user.foreign-edit"), b"preserve")
-        manifest = json.loads(next((self.state / "installs").glob("*/manifest.json")).read_text())
-        self.assertEqual(manifest["status"], "failed_recovery_required")
+        manifest_path = next((self.state / "installs").glob("*/manifest.json"))
+        self.assertEqual(manifest_path.read_bytes(), pinned["bytes"])
+        self.assertEqual(json.loads(pointer.read_bytes())["sha256"], install.digest(pinned["bytes"]))
+        recovery = json.loads((manifest_path.parent / "recovery.json").read_bytes())
+        self.assertEqual(recovery["status"], "failed_recovery_required")
+        self.assertTrue(any("active manifest pointer" in item for item in recovery["unrestored"]))
 
     def test_legacy_created_file_removal_requires_ordinary_security_baseline(self):
         target = self.home / "legacy-target"

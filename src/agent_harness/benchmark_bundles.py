@@ -50,6 +50,8 @@ GRADE_INPUT = object_schema({"schema_version": {"const": 1}, "manifest_digest": 
     "trial_id": HASH, "evaluator_digest": HASH, "solve_digest": HASH, "cwd": SHORT,
     "solve_outcome": {"enum": ["completed", "failed", "cancelled", "timeout", "environment_error", "unknown"]}},
     ("schema_version", "manifest_digest", "trial_id", "evaluator_digest", "solve_digest", "cwd", "solve_outcome"))
+GRADE_INPUT_SCHEMA = {'oneOf': [GRADE_INPUT, evaluation.GRADE_INPUT_V2]}
+
 INVENTORY = object_schema({"path": PATH, "sha256": HASH}, ("path", "sha256"))
 BINDING_ITEM = object_schema({"path": SHORT, "device": {"type": "integer", "minimum": 0},
     "inode": {"type": "integer", "minimum": 0}}, ("path", "device", "inode"))
@@ -219,9 +221,15 @@ def evaluate_materialized(receipt_path, grade_input, *, receipt_digest=None, dea
     if receipt_digest is not None and _hash(read_regular_file(receipt_path)) != receipt_digest:
         raise HarnessError("BENCH_MATERIALIZED_RECEIPT_CHANGED")
     value = verify_materialized(receipt_path, deadline=deadline)
-    inputs = strict_yaml.load(grade_input, GRADE_INPUT)
-    if inputs["trial_id"] != value["trial_id"] or inputs["manifest_digest"] != value["manifest_digest"] or inputs["cwd"] != value["source_root"]:
+    inputs = strict_yaml.load(grade_input, GRADE_INPUT_SCHEMA)
+    identity = inputs if inputs["schema_version"] == 1 else inputs["subject"]
+    if identity["trial_id"] != value["trial_id"] or identity["manifest_digest"] != value["manifest_digest"] or inputs["cwd"] != value["source_root"]:
         raise HarnessError("BENCH_EVALUATOR_SUBJECT_MISMATCH")
+    context = None
+    if inputs['schema_version'] == 2:
+        context = evaluation.begin_evaluation(grade_input, receipt_path, bundle_digest=value['bundle_digest'],
+            task_id=value['task_id'], manifest_digest=value['manifest_digest'], trial_id=value['trial_id'],
+            artifact_roots=[('protected', value['evaluator_root']), ('candidate', value['source_root'])])
     outcome = inputs["solve_outcome"]
     if outcome == "unknown":
         raise HarnessError("BENCH_UNKNOWN_SOLVE_OUTCOME")
@@ -240,6 +248,13 @@ def evaluate_materialized(receipt_path, grade_input, *, receipt_digest=None, dea
         # Acceptance is exclusively the independent oracle's result; a caller
         # cannot supply an already-accepted execution state or bypass checks.
         outcome = "accepted" if checks_passed else "failed"
+    if context is not None:
+        verify_materialized(receipt_path, deadline=deadline)
+        if receipt_digest is not None and _hash(read_regular_file(receipt_path)) != receipt_digest:
+            raise HarnessError('BENCH_MATERIALIZED_RECEIPT_CHANGED')
+        return evaluation.finish_evaluation(context, outcome=outcome, command=['artifact-json-v1'],
+            returncode=0 if outcome == 'accepted' else 1)
+    # Explicit v1 request compatibility only; never fallback from a v2 failure.
     grade = {"schema_version": 1, "record_type": "independent_grade", "manifest_digest": value["manifest_digest"],
         "trial_id": value["trial_id"], "evaluator_digest": inputs["evaluator_digest"], "outcome": outcome}
     strict_yaml.validate(grade, evaluation.GRADE)

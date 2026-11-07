@@ -400,7 +400,7 @@ Hardlinks, неподдержанные inode/platform flags и невозмож
 обнаруживаются до изменения targets. Путь metadata-preserving installation
 поддерживает Linux и Windows; macOS не заявляется поддержанным installer target.
 
-Install manifest v2 связывает target с physical identity parent chain,
+Legacy install manifest v2 связывает target с physical identity parent chain,
 installed digest, publication identity и backup. Замена parent другим каталогом
 блокирует install/reinstall/verify/rollback даже при byte-identical copies;
 копии в новом месте не удаляются как собственная установка. Legacy v1 не содержит
@@ -419,6 +419,26 @@ Linux-файлом `0600`, текущими uid/gid и отсутствием xa
 Это защита согласованной локальной операции, а не filesystem CAS или OS sandbox
 против другого процесса с теми же правами. Сохранение backup не заменяет резервное
 копирование важных пользовательских данных.
+
+Новые установки используют manifest v3 с `commit_protocol: active-binding-v1`.
+Старые readers v1/v2 остаются, но старый writer отказывает на v3 до изменения
+targets. Schema version установщика не связана с версией work-state или продукта.
+Commit доказывается проверенной цепочкой `active.json` → exact manifest, а не
+строкой `written_pending_native_verification`: native verification — отдельный
+последующий факт. До commit rollback проверяет publication identity и metadata
+во всех phases, включая final manifest и окно перед active replacement. Чужой
+same-bytes replacement сохраняется; совпадение bytes само по себе не даёт владения.
+
+После commit отдельный immutable `installs/<id>/commit.json` сохраняет исторический
+binding и checksum, поэтому смена active head не стирает доказательство предыдущей
+установки. Сам выбранный active pointer manifest для этого не переписывается.
+При позднем сбое `recovery.json` сохраняет causal error и незавершённые объекты;
+backups и pinned manifest остаются для reconciliation. Повреждённый commit receipt
+или неоднозначная chain требуют recovery без удаления targets. Настоящий committed
+rollback сохраняет прежнюю targeted policy и посторонние пользовательские edits.
+Проверки hard process exit не являются power-loss qualification. Текущие новые
+crash/ownership controls выполнены на Linux; настоящая Windows qualification
+вынесена отдельно.
 
 ## Необязательные возможности
 

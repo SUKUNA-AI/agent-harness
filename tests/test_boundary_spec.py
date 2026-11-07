@@ -234,20 +234,74 @@ class InstallationBoundaryTests(unittest.TestCase):
     def test_legacy_manifest_reader_and_old_writer_version_barrier(self):
         self.apply()
         manifest = installation.active_manifest(self.state)
-        self.assertEqual(2, manifest['schema_version'])
-        # Emulate a legacy version-1 reader without rewriting the immutable
-        # installation record. New reader retains explicit old-manifest support.
-        legacy = deepcopy(manifest)
-        legacy['schema_version'] = 1
-        legacy.pop('boundary_protocol')
-        for row in legacy['files']:
-            row.pop('parent_binding', None)
-            row.pop('publication_identity', None)
-        self.assertTrue(installation.rollback_plan(legacy))
-        future = deepcopy(manifest)
-        future['schema_version'] = 999
-        with self.assertRaises(installation.InstallError):
-            installation.rollback_plan(future)
+        self.assertEqual(3, manifest['schema_version'])
+        self.assertEqual('active-binding-v1', manifest['commit_protocol'])
+        modern_ref = json.loads((self.state / 'active.json').read_bytes())
+        modern_path = Path(modern_ref['manifest'])
+        modern_bytes = modern_path.read_bytes()
+        self.assertTrue(installation.rollback_plan(manifest))
+
+        # Relabelling a bound modern record is not a legacy installation and
+        # must not acquire rollback authority from identical target bytes.
+        forged = deepcopy(manifest)
+        forged['schema_version'] = 1
+        forged.pop('boundary_protocol')
+        forged.pop('commit_protocol')
+        with self.assertRaisesRegex(installation.InstallError, 'immutable manifest binding'):
+            installation.rollback_plan(forged)
+
+        target = self.home / 'AGENTS.md'
+        marker = b'\n# unrelated edit after installation\n'
+        target.write_bytes(target.read_bytes() + marker)
+        current = {row['path']: Path(row['path']).read_bytes() for row in manifest['files']}
+        for version in (1, 2):
+            with self.subTest(legacy_version=version):
+                # Independent owned historical-format transaction: immutable
+                # bytes, matching active reference, real installed/backup data.
+                # Never rewrite the modern manifest to manufacture old trust.
+                state = self.base / f'legacy-state-v{version}'
+                legacy = deepcopy(manifest)
+                legacy['schema_version'] = version
+                legacy['install_id'] = f'legacy-v{version}'
+                legacy['previous_manifest'] = None
+                legacy.pop('commit_protocol')
+                if version == 1:
+                    legacy.pop('boundary_protocol')
+                transaction = state / 'installs' / legacy['install_id']
+                transaction.mkdir(parents=True)
+                for row in legacy['files']:
+                    for key in ('installed_copy', 'backup'):
+                        if row[key] is not None:
+                            source = Path(row[key])
+                            copied = transaction / source.name
+                            copied.write_bytes(source.read_bytes())
+                            row[key] = str(copied)
+                    if version == 1:
+                        for key in ('parent_binding', 'publication_identity', 'progress'):
+                            row.pop(key, None)
+                path = transaction / 'manifest.json'
+                raw = installation.canonical(legacy)
+                path.write_bytes(raw)
+                (state / 'active.json').write_bytes(installation.canonical({
+                    'manifest': str(path), 'sha256': installation.digest(raw)}))
+                read = installation.active_manifest(state)
+                self.assertEqual(legacy, read)
+                plans = installation.rollback_plan(read)
+                restored = next(plan['after'] for plan in plans if plan['path'] == target)
+                self.assertIn(marker.strip(), restored)
+                self.assertEqual(current, {name: Path(name).read_bytes() for name in current})
+                # Reader compatibility still requires exact backup bytes.
+                Path(legacy['files'][0]['installed_copy']).write_bytes(b'corrupt fixture copy')
+                with self.assertRaisesRegex(installation.InstallError, 'Backup integrity'):
+                    installation.rollback_plan(read)
+
+        self.assertEqual(modern_bytes, modern_path.read_bytes())
+        self.assertEqual(modern_ref, json.loads((self.state / 'active.json').read_bytes()))
+        for version in (999, True, 1.0):
+            future = deepcopy(manifest)
+            future['schema_version'] = version
+            with self.subTest(unsupported_version=version), self.assertRaises(installation.InstallError):
+                installation.rollback_plan(future)
 
 
     def test_hook_rollback_edit_under_non_utf8_default_locale(self):

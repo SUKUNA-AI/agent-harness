@@ -34,6 +34,11 @@ flowchart TD
 </details>
 
 Для локального native-чата доступен [компактный session adapter и SessionStart hook](NATIVE_SESSION_RU.md).
+Hook упаковывает уже полученный reducer packet в поддержанный клиентом JSON
+`hookSpecificOutput.additionalContext`. Полный serialized UTF-8 budget включает
+escaping и CRLF; optional omissions ведут к сохранённому пакету, обязательная
+часть не обрезается. Bootstrap scope обычного SessionStart без agent-полей
+не меняет исходную unknown/unbound identity observer.
 
 ## Provenance и свежесть
 

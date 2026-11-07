@@ -1,0 +1,160 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "record_type": {
+      "const": "benchmark_evaluator_execution"
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subject_version": {
+          "const": 1
+        },
+        "manifest_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "task_id": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "trial_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "candidate_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "candidate_scheme": {
+          "const": "ordinary-tree-no-git-v1"
+        },
+        "evaluator_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "evaluator_artifact_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "bundle_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "toolchain_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "subject_version",
+        "manifest_digest",
+        "task_id",
+        "trial_id",
+        "candidate_digest",
+        "candidate_scheme",
+        "evaluator_digest",
+        "evaluator_artifact_digest",
+        "bundle_digest",
+        "toolchain_digest"
+      ]
+    },
+    "evaluator_input_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "evaluator_input": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "path",
+        "sha256"
+      ]
+    },
+    "outcome": {
+      "enum": [
+        "accepted",
+        "failed",
+        "cancelled",
+        "timeout",
+        "environment_error"
+      ]
+    },
+    "requirements": {
+      "type": "array",
+      "maxItems": 512,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "status": {
+            "enum": [
+              "passed",
+              "failed",
+              "unknown",
+              "not_run"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ]
+      }
+    },
+    "started_at": {
+      "type": "string",
+      "format": "utc"
+    },
+    "finished_at": {
+      "type": "string",
+      "format": "utc"
+    },
+    "command": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "string",
+        "maxLength": 512
+      }
+    },
+    "returncode": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "record_type",
+    "subject",
+    "evaluator_input_digest",
+    "evaluator_input",
+    "outcome",
+    "requirements",
+    "started_at",
+    "finished_at",
+    "command",
+    "returncode"
+  ]
+}

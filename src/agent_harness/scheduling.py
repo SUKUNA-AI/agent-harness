@@ -23,7 +23,8 @@ def validate_plan(plan, contract):
             raise HarnessError("Plan belongs to a different mission generation")
         requirements = {r["id"] for r in contract["mission"]["requirements"]}
         mapped = {r for node in nodes for r in node["requirement_ids"]}
-        mandatory = {r["id"] for r in contract["mission"]["requirements"] if r["required"]}
+        from .completion_eligibility import rows
+        mandatory = {r["id"] for r in rows(contract, plan, {}) if r["required"]}
         if not mapped <= requirements or not mandatory <= mapped:
             raise HarnessError("MISSION_COVERAGE_INCOMPLETE: mandatory requirement missing from task mapping")
         node_checks = {c["id"] for c in contract["node_checks"]}

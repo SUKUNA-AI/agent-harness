@@ -1,0 +1,209 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "record_type": {
+      "const": "benchmark_grade_input"
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subject_version": {
+          "const": 1
+        },
+        "manifest_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "task_id": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "trial_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "candidate_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "candidate_scheme": {
+          "const": "ordinary-tree-no-git-v1"
+        },
+        "evaluator_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "evaluator_artifact_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "bundle_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "toolchain_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "subject_version",
+        "manifest_digest",
+        "task_id",
+        "trial_id",
+        "candidate_digest",
+        "candidate_scheme",
+        "evaluator_digest",
+        "evaluator_artifact_digest",
+        "bundle_digest",
+        "toolchain_digest"
+      ]
+    },
+    "manifest_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "trial_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "evaluator_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "candidate_capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "path",
+        "sha256"
+      ]
+    },
+    "evaluator": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "path",
+        "sha256"
+      ]
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "path",
+        "sha256"
+      ]
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "python": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "executable_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "harness_build_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "python",
+        "executable_sha256",
+        "harness_build_digest"
+      ]
+    },
+    "solve_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "cwd": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "evidence_root": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "solve_outcome": {
+      "enum": [
+        "completed",
+        "failed",
+        "cancelled",
+        "timeout",
+        "environment_error",
+        "unknown"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "utc"
+    },
+    "requirement_ids": {
+      "type": "array",
+      "maxItems": 512,
+      "items": {
+        "type": "string",
+        "maxLength": 512
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "record_type",
+    "subject",
+    "manifest_digest",
+    "trial_id",
+    "evaluator_digest",
+    "candidate_capture",
+    "evaluator",
+    "toolchain",
+    "runtime",
+    "solve_digest",
+    "cwd",
+    "evidence_root",
+    "solve_outcome",
+    "created_at",
+    "requirement_ids"
+  ]
+}

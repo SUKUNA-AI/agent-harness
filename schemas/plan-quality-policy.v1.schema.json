@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "policy_id": {
+      "const": "coherent-outcomes-v1"
+    },
+    "max_rounds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 128
+    },
+    "output_schema_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "deterministic_obligations": {
+      "const": [
+        "mandatory_coverage",
+        "acyclic_dependencies",
+        "exclusive_write_owners",
+        "nonempty_outcomes_and_checks",
+        "frozen_original_request"
+      ]
+    },
+    "semantic_obligations": {
+      "const": [
+        "coherent_outcomes",
+        "independent_upstream_acceptance",
+        "meaningful_checks",
+        "shared_interface_ownership",
+        "justified_atomicity_and_handoff"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "policy_id",
+    "max_rounds",
+    "output_schema_digest",
+    "deterministic_obligations",
+    "semantic_obligations"
+  ]
+}

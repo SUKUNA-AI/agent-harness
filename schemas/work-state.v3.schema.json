@@ -1,0 +1,732 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "enum": [
+        1,
+        2,
+        3
+      ]
+    },
+    "run_id": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "task_id": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "status": {
+      "enum": [
+        "ACCEPTED",
+        "BLOCKED_AMBIGUOUS",
+        "BLOCKED_APPROVAL",
+        "BLOCKED_ENVIRONMENT",
+        "CANCELLED",
+        "CANCEL_REQUESTED",
+        "EXECUTING",
+        "FAILED_REPAIRABLE",
+        "FAILED_TERMINAL",
+        "FREEZING",
+        "NEW",
+        "NO_PROGRESS",
+        "PASS",
+        "PLANNING",
+        "PREFLIGHT",
+        "RECOVERY_REQUIRED",
+        "REPAIRING",
+        "TIMED_OUT",
+        "UNKNOWN_OUTCOME",
+        "VERIFYING"
+      ]
+    },
+    "reason": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "cwd": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "source_cwd": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "revision": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "baseline_digest": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "contract_digest": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "started_at": {
+      "type": "string",
+      "maxLength": 16384,
+      "format": "utc"
+    },
+    "updated_at": {
+      "type": "string",
+      "maxLength": 16384,
+      "format": "utc"
+    },
+    "last_progress_at": {
+      "type": "string",
+      "maxLength": 16384,
+      "format": "utc"
+    },
+    "deadline": {
+      "type": "string",
+      "maxLength": 16384,
+      "format": "utc"
+    },
+    "attempts_used": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "max_attempts": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100
+    },
+    "thread_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "process_identity": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "pid": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "created": {
+          "type": "string",
+          "maxLength": 16384
+        }
+      },
+      "required": [
+        "pid",
+        "created"
+      ]
+    },
+    "process_status": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "core_run": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "candidate_digest": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "failure_history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "type": "string",
+            "maxLength": 16384
+          },
+          "signature": {
+            "type": "string",
+            "maxLength": 16384
+          },
+          "repairable": {
+            "type": "boolean"
+          },
+          "detail": {
+            "type": "string",
+            "maxLength": 16384
+          },
+          "snapshot_id": {
+            "type": "string",
+            "maxLength": 16384
+          },
+          "attempt": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "completion_ref": {
+            "type": "string",
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "category",
+          "signature",
+          "repairable",
+          "detail",
+          "snapshot_id",
+          "attempt"
+        ]
+      },
+      "maxItems": 100
+    },
+    "current_failure": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "signature": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "repairable": {
+          "type": "boolean"
+        },
+        "detail": {
+          "type": "string",
+          "maxLength": 16384
+        }
+      },
+      "required": [
+        "category",
+        "signature",
+        "repairable",
+        "detail"
+      ]
+    },
+    "acceptance": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 16384
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "passed",
+              "failed",
+              "stale",
+              "not_applicable",
+              "blocked"
+            ]
+          },
+          "evidence_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 16384
+          }
+        },
+        "required": [
+          "id",
+          "required",
+          "status",
+          "evidence_id"
+        ]
+      },
+      "maxItems": 128
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "model_turns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "repair_attempts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "managed_spawns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observable_codex_tool_calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "controlled_tool_calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duplicate_tool_calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fresh_revalidations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stale_memory_prevented": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "manual_interventions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recoveries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recovery_successes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cache_hits_informational": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cache_hits_checks": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "integration_conflicts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "input_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "output_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "usage_accounting_version": {
+          "enum": [
+            2,
+            3
+          ]
+        },
+        "reported_usage_turns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "missing_usage_turns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "spawn_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "integration_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "model_invocations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "spawn_measurements": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "worktree_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "covered_invocation_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 16384
+          },
+          "maxItems": 10000
+        },
+        "unknown_invocation_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 16384
+          },
+          "maxItems": 10000
+        },
+        "usage_sources_digest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 16384
+        },
+        "coverage_status": {
+          "enum": [
+            "complete",
+            "partial",
+            "unverified_legacy"
+          ]
+        },
+        "known_lower_bound_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "input_available": {
+          "type": "boolean"
+        },
+        "output_available": {
+          "type": "boolean"
+        },
+        "model_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "context_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "check_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "snapshot_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "slot_wait_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "recovery_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "legacy_history_unverified": {
+          "type": "boolean"
+        },
+        "receipt_input_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "receipt_output_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "receipt_model_invocations": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "model_turns",
+        "repair_attempts",
+        "managed_spawns",
+        "observable_codex_tool_calls",
+        "controlled_tool_calls",
+        "duplicate_tool_calls",
+        "fresh_revalidations",
+        "stale_memory_prevented",
+        "manual_interventions",
+        "recoveries",
+        "recovery_successes",
+        "cache_hits_informational",
+        "cache_hits_checks",
+        "integration_conflicts",
+        "input_tokens",
+        "output_tokens",
+        "reported_usage_turns",
+        "missing_usage_turns",
+        "spawn_seconds",
+        "integration_seconds"
+      ]
+    },
+    "agents": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 16384
+      },
+      "maxItems": 64
+    },
+    "plan_path": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "integration_worktree": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "harness_version": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "platform": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "python": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "codex_version": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "model_profile": {
+          "type": "string",
+          "maxLength": 16384
+        }
+      },
+      "required": [
+        "harness_version",
+        "platform",
+        "python",
+        "codex_version",
+        "model_profile"
+      ]
+    },
+    "state_dir": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "migration": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "committed"
+          ]
+        },
+        "plan_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "operation_id",
+        "status",
+        "plan_digest"
+      ]
+    },
+    "contract_path": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "plan_quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "policy_ref": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "output_schema_ref": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 16384
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "path",
+                "sha256"
+              ]
+            }
+          },
+          "required": [
+            "path",
+            "sha256",
+            "digest",
+            "output_schema_ref"
+          ]
+        },
+        "max_rounds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 128
+        },
+        "rounds_used": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 128
+        },
+        "plan_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 128
+        },
+        "active_round": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 128
+        },
+        "active_plan_digest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "assessment_ref": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
+        },
+        "phase": {
+          "enum": [
+            "unassessed",
+            "planning",
+            "reviewing",
+            "requires_revision",
+            "blocked",
+            "approved"
+          ]
+        }
+      },
+      "required": [
+        "policy_ref",
+        "max_rounds",
+        "rounds_used",
+        "plan_revision",
+        "active_round",
+        "active_plan_digest",
+        "assessment_ref",
+        "phase"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "task_id",
+    "status",
+    "reason",
+    "cwd",
+    "source_cwd",
+    "revision",
+    "baseline_digest",
+    "contract_digest",
+    "generation",
+    "started_at",
+    "updated_at",
+    "last_progress_at",
+    "deadline",
+    "attempts_used",
+    "max_attempts",
+    "thread_id",
+    "process_identity",
+    "process_status",
+    "core_run",
+    "candidate_digest",
+    "failure_history",
+    "current_failure",
+    "acceptance",
+    "metrics",
+    "agents",
+    "plan_path",
+    "integration_worktree",
+    "environment",
+    "state_dir"
+  ],
+  "title": "work-state v1 legacy / v2 receipt-bound writer barrier",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "const": 3
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "plan_quality"
+        ]
+      },
+      "else": {
+        "properties": {
+          "plan_quality": false
+        }
+      }
+    }
+  ]
+}

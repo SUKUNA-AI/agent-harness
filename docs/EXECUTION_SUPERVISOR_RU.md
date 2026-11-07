@@ -116,6 +116,96 @@ stale evidence и unknown outcome. Одинаковая ошибка при не
 сохраняет signature/snapshot в failure history и требует точный session ID.
 Отсутствие usage у такой попытки также учитывается при token budget.
 
+### Подготовка root repair и reservation
+
+Ошибка подготовки сохраняет тип причины, исходный phase и ссылку на ограниченный
+sanitized causal artifact в `diagnostics/`. Текст exception служит диагностикой;
+он не выбирает разрешения или stop category. В частности, одинаковые слова
+`approval`, `deadline` или `NO_PROGRESS` не меняют typed outcome.
+
+| Доказанная причина подготовки | Outcome |
+| --- | --- |
+| Повтор той же failure при неизменных inputs без новой hypothesis | `NO_PROGRESS` |
+| Исчерпан исходный attempt/token budget | `FAILED_TERMINAL` |
+| Истёк исходный wall deadline | `TIMED_OUT` |
+| Недоступен необходимый executable/capability | `BLOCKED_ENVIRONMENT` |
+| Требуется дополнительная authority | `BLOCKED_APPROVAL` |
+| Integrity conflict или неизвестная внутренняя ошибка подготовки | `UNKNOWN_OUTCOME`, explicit recovery |
+| Неоднозначное требование | `BLOCKED_AMBIGUOUS` |
+| Usage coverage неизвестна при token cap | `BLOCKED_ENVIRONMENT`, usage остаётся unknown |
+| Сохранён cancellation request | `CANCELLED` |
+
+`REPAIRING → NO_PROGRESS` разрешён только с проверяемой basis из consecutive
+failure history и current source. Causal artifact и journal fact публикуются
+перед stop transition; сбой checkpoint не превращает исходную ошибку в
+`Illegal transition`. Status показывает controlled recovery и diagnostic ref,
+даже если последний сохранённый checkpoint ещё имеет `REPAIRING`.
+
+Verification generation, root model reservation и invocation/usage учитываются
+отдельно. `root_execution` показывает `verification_generation`,
+`reserved_attempts`, `journal_reservations` и `invocation_intents`; intent означает
+возможный dispatch, а не доказанный model turn. Обычный `Run.new_attempt` сохраняет
+свои прежние CLI limits и no-progress semantics. Отдельный Supervisor helper
+готовит verification generation по immutable journal intent/commit, сохраняет
+origin baseline/history и проверяет оставшиеся исходные model/time budgets.
+Одинаковое объяснение или отсутствие `candidate.json` не доказывает reuse.
+
+В managed DAG первая generation фиксирует origin до workers. После интеграции
+Supervisor готовит отдельную generation для текущего dispatch input: проверяет
+ownership integration worktree, receipts, HEAD/tree, current frontier и quality
+assessment. Исходный baseline сохраняется; старый bootstrap не становится
+доказательством нового candidate. Поэтому число verification generations может
+превышать число model reservations, в том числе после root repair.
+
+Новая root reservation и точный slot binding записываются до checkpoint
+`attempts_used`, затем публикуется invocation intent, затем вызывается adapter.
+После crash до invocation intent свежая полная journal validation может доказать
+отсутствие именно этого dispatch. Reconciliation сохраняет один UUID/attempt,
+включая reservation на последнем разрешённом attempt. Перед освобождением точного
+reserved/no-child slot journal фиксирует необратимую cancellation этого binding.
+Crash после release с последующим independent reuse не разрешает менять чужой
+slot: старый root получает новый binding в другом свободном slot. Active/changed
+старый lease, неизвестный journal prefix или уже опубликованный invocation
+intent требуют reconciliation; отсутствие PID не является no-dispatch proof.
+
+Bounded ожидание пяти занятых slots даёт typed `BLOCKED_ENVIRONMENT`; истечение
+исходного deadline остаётся `TIMED_OUT`, cancellation — `CANCELLED`. Неизвестная
+ошибка slot/workspace acquisition сохраняется как controlled recovery с causal
+artifact. Пойманная ошибка входа в workspace lease может освободить точный
+unused slot только под его текущим живым OS guard, после свежей проверки writer,
+journal, отсутствия связанного intent и неизменности slot row. Hard exit до
+reservation оставляет unbound slot unresolved; такой исторический slot не
+освобождается по отсутствию PID или новому свободному slot.
+
+Root prompt сериализуется детерминированно до первой reservation. Replay
+восстанавливает reserved attempt/session/UUID и проверяет полный prompt digest,
+включая Memory/Ledger. Изменение optional context блокирует exact replay; context
+не отбрасывается ради совпадения hash. В diagnostic не копируются prompt,
+transcript, argv или environment; privacy refusal оставляет type/digest и явный
+withheld marker. Неподтверждённый orphan attempt directory сохраняется. Только
+точные operation/token и physical directory/file identities разрешают завершить
+его публикацию; same bytes по знакомому пути недостаточно.
+
+Если causal chain содержит структурированные command/argv/environment/prompt
+атрибуты, rendered messages всей цепочки withheld: exception wrappers могут
+копировать argv в `str(error)`. Artifact сохраняет type/digest и явное omission.
+
+Перед публикацией core outputs Supervisor сохраняет отдельный journal fact
+`root_core_preparation_files`: addressed manifest связывает каждый staged файл
+с его physical identity, digest и identities всех output parents. Persistent
+stage links доказывают владение state, contract, baseline, origin и shared-file
+outputs после hard exit. Замена отдельного файла или вложенного каталога теми
+же байтами блокирует recovery до новой reservation. State replace разрешён
+только для точного прежнего inode, закреплённого до intent. Manifest и stages
+не восстанавливаются догадкой при потере или конфликте; чужие файлы сохраняются.
+Ownership markers для collections `attempts`/`contracts` и shared baseline
+parents хранятся во внешнем controller namespace, сохраняя состав legacy
+collections: в `attempts/` остаются только actual attempt directories.
+
+`resume --new-attempt` после доказанного `NO_PROGRESS` создаёт структурированную
+authority для новой hypothesis в оставшихся исходных пределах. Он не переписывает
+старую reservation, не возвращает использованный budget и не переносит deadline.
+
 Repair передаёт compact failure packet в `codex exec resume <exact-id>`.
 `resume --last` не используется. Thread ID сохраняется при `thread.started`,
 process identity включает PID и creation identity. На Windows используется
@@ -198,8 +288,11 @@ limit для скрытого inference внутри turn. Неизвестны�
 
 ## Durable execution correction candidate
 
-Новые work-state v2 связывают полный persisted plan с immutable invocation,
-completion и integration receipts. Usage v3 восстанавливается по уникальным
+Work-state v2 ввёл связь полного persisted plan с immutable invocation,
+completion и integration receipts. Текущий новый managed run с work-contract v2
+создаётся как work-state v3 с plan-quality policy; agent projections и другие
+work paths сохраняют свои версии. Contract/plan остаются v2. Legacy work-state
+v1/v2 читаются без автоматического upgrade. Usage v3 восстанавливается по уникальным
 invocations; legacy v2 и unknown outcomes не становятся полным нулём.
 Отсутствующий agent не делает обязательный plan node optional.
 Final dependency guard имеет bounded transitive closure и общую lock order;
@@ -210,6 +303,22 @@ Schema2 managed выполняет отдельный fresh read-only final revi
 checks. Reviewer verdict и completion связаны с exact candidate; cached negative
 verdict воспроизводится как negative. Неизменённый repair не становится unknown
 лишь из-за отсутствия approval. Reviewer также входит в первоначальный budget.
+Перед использованием результата или допуском зависимой работы все managed v2
+роли (planner, worker, root, reviewer) проходят общий post-invocation guard:
+известный terminal outcome, `process_tree_stopped is True`, точный intent/completion
+subject и сохранённый accounting. Guard повторяется при replay и strict status.
+Свободный global slot не разрешает зависимую работу при unresolved invocation;
+другие runs могут использовать свои свободные slots. Known stopped failure
+остаётся failure и допускает только исходную ограниченную repair policy.
+False, null и отсутствие cleanup не становятся подтверждённой остановкой;
+неверный тип отклоняется без release. Неизвестный исход adapter exception хранит
+cleanup null, а не выдуманное false. Proven no-dispatch требует явного
+`turn_started is False`, отсутствия usage и `cleanup is True`; противоречие
+не разрешает новый intent. Legacy contract v1 сохраняет прежнюю admission policy.
+
+Timeout каждой invocation равен минимуму оставшегося run deadline и исходного
+`turn_timeout_seconds`; planner дополнительно ограничен 300 секундами, worker —
+оставшимся deadline своего узла. Ожидание slot и подготовка не сбрасывают deadline.
 Dependency closure/generation race может повторить preparation до трёх раз в
 исходном deadline; source/integrity/physical-store ошибки не ретраятся.
 

@@ -177,7 +177,7 @@ class Contracts(unittest.TestCase):
         self.assertTrue((directory / "foreign.yaml").exists())
 
     def test_goal_generation_lifecycle_preserves_task_and_conflicts(self):
-        event = {"hook_event_name": "SessionStart", "session_id": "root-runtime", "agent_type": "root",
+        event = {"hook_event_name": "SessionStart", "session_id": "root-runtime",
                  "source": "startup", "cwd": str(self.root)}
         first = hook_packet(self.state, event)
         identifier = first["required"]["session"]
@@ -348,12 +348,16 @@ class Contracts(unittest.TestCase):
 
     def test_child_namespace_and_unknown_identity_never_mutate_root(self):
         event = {"hook_event_name": "SessionStart", "session_id": "same-runtime", "source": "startup", "cwd": str(self.root)}
-        with self.assertRaisesRegex(HarnessError, "AMBIGUOUS_AGENT_IDENTITY"):
-            hook_packet(self.state, event)
+        for extra in ({"agent_type": "unknown"}, {"agent_type": "child"}, {"agent_type": None},
+                      {"parent_session_id": "parent"}, {"agent_type": "root", "parent_session_id": "parent"}):
+            with self.subTest(extra=extra), self.assertRaisesRegex(HarnessError, "AMBIGUOUS_AGENT_IDENTITY"):
+                hook_packet(self.state, {**event, **extra})
         self.assertFalse((self.state / "native-sessions").exists())
+        root = hook_packet(self.state, event)
         one = hook_packet(self.state, {**event, "agent_type": "child", "agent_id": "child-one"})
         two = hook_packet(self.state, {**event, "agent_type": "child", "agent_id": "child-two"})
         self.assertNotEqual(one["required"]["session"], two["required"]["session"])
+        self.assertNotIn(root["required"]["session"], (one["required"]["session"], two["required"]["session"]))
 
     def test_migration_dry_run_and_gc_preserve_originals(self):
         self.memory.record_semantic(self.semantic())

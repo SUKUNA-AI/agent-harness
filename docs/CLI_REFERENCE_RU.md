@@ -18,7 +18,9 @@
 абсолютным каталогом; пути argv передаются отдельными строками, без shell.
 Relative POSIX paths в `context`/`code` интерпретируются относительно `--root`.
 
-Успешные результаты и отрицательные verdict/results — JSON в stdout. Обработанная
+Core/query команды обычно возвращают JSON в stdout. `work` поддерживает
+`--format text|yaml|json`, по умолчанию `text`: status/report печатают строковую
+сводку; отдельные metadata replies могут оставаться JSON. Обработанная
 ошибка — JSON в stderr с exit 2. Ошибки самого `argparse`, включая неизвестный флаг,
 также имеют exit 2, но используют обычный текст usage. Установочные commands используют собственный JSON output: в том числе blocked/error
 печатаются в stdout. Build-команда native передаёт вывод build script и его exit
@@ -42,13 +44,15 @@ code. Полный managed JSON обычно форматирован;
 
 | Команда | Аргументы и действие |
 | --- | --- |
-| `work start` | `--contract F`; `--cwd` default current directory; optional `--run-dir`, `--state-dir`, `--codex`, `--plan`, `--native-disabled-proof`, `--format text\|yaml\|json` |
+| `work start` | `--contract F`; `--cwd` default current directory; optional `--run-dir`, `--state-dir`, `--codex`, `--plan`, `--native-disabled-proof`, `--max-planning-rounds`, `--format text\|yaml\|json` |
 | `work status` | `--run-dir P`, optional `--summary`, `--verify-evidence`, `--format` |
 | `work report` | `--run-dir P`, `--format`; сверяет актуальность evidence |
 | `work watch` | `--run-dir P`; interval2s, timeout3600s, без model calls |
-| `work resume` | `--run-dir P`; optional `--repair-journal`, `--new-attempt REASON`, `--codex`; original budgets сохраняются |
+| `work resume` | `--run-dir P`; optional `--repair-journal`, `--new-attempt REASON`, `--codex`, `--plan F`, `--native-disabled-proof F`; original budgets сохраняются |
 | `work stop` | `--run-dir P`, optional `--reason`; durable request, exact owned process cancellation |
 
+В подкомандах `work`, где эти flags доступны, `--state-dir` задаёт global state
+registry, а `--format` выбирает `text`, `yaml` или `json` с default `text`.
 State directory по умолчанию берётся из установленного machine pointer, затем
 platform state path. Новый run по умолчанию получает UUID под `state/runs`.
 Путь global registry сохраняется в state; несовместимый override при resume
@@ -59,7 +63,8 @@ accepted task в проверенном report.
 
 Contract: [work schema](../schemas/work-contract.schema.json). Defaults:
 max_attempts3 (initial edit включён), managed concurrency1, max_wall_seconds7200,
-turn_timeout_seconds1800, mode native, memory false, ledger inform. Global cap
+turn_timeout_seconds1800, mode native, ledger inform. Default `memory` — `false`
+для contract v1 и `true` для contract v2; явное значение сохраняется. Global cap
 managed sessions5; contract может понизить до1. Max tokens проверяется по native
 reported usage на границах turns, не внутри скрытого model runtime.
 
@@ -203,6 +208,12 @@ serialized packet при verify ограничен 4 MiB. Слишком бол�
 
 ## LSP code
 
+`AGENT_HARNESS_LSP_BACKEND=python|native` выбирает transport; default `python`.
+Native доступен только на квалифицированном Linux x86_64/glibc с проверенным
+bundle, без автоматического fallback после ошибки. Snapshot backend задаётся
+отдельно. Для rollback уберите переменную или задайте `python` перед новой
+Session; подробности — [LSP reference](LSP_RU.md).
+
 | Команда | Обязательные аргументы | Особенности |
 | --- | --- | --- |
 | `code doctor` | Нет; `--root .` default | Optional file/server/language/max-bytes; серверы не запускаются |
@@ -286,6 +297,21 @@ pending migration. `work benchmark validate|schedule|report --manifest FILE
 --assets-root ROOT` проверяет offline portfolio; report требует `--trials FILE`.
 Это не solve runner и не разрешение на model расход.
 
+Для отдельного managed v2 → v3 plan-quality upgrade используется
+`work migrate --run-dir RUN --expected-generation N --target-version 3`.
+Apply добавляет `--apply --expected-plan-digest SHA`. Необязательный
+`--max-planning-rounds N` только уменьшает исходный предел; повторите его при
+apply, если он был в dry-run. Pending v3 завершается явно:
+`work migrate --run-dir RUN --expected-generation N --target-version 3 --recover OPERATION_ID`.
+Recovery использует frozen policy и не принимает новый round limit. Команда
+не запускает assessment или модель, сохраняет исходные counters/deadline и
+оставляет план unassessed до следующего допустимого resume. Default без target3
+сохраняет прежний v1 → v2 маршрут; автоматического upgrade при status/resume нет.
+Форматы, backups и barrier описаны в [миграции состояния](STATE_FORMATS_AND_MIGRATION_RU.md).
+Для нового managed contract2 run `work start --max-planning-rounds N` также
+только уменьшает исходный planning limit; для native/legacy contracts override
+отклоняется. Resume не принимает новый limit и сохраняет frozen policy.
+
 `agent-harness-session goal-update --session ID --goal TEXT --expected-generation N [--operation-id ID]`
 обновляет краткую active goal через CAS. `intake [--event-file FILE]` принимает
 allowlisted metadata (default stdin); `status --root ROOT` выводит coverage.
@@ -315,6 +341,16 @@ immutable generation для repair. Полный протокол: [Memory и co
 `install --adopt-hook-sha256 SHA` явно принимает существующую single-handler
 SessionStart группу по SHA256 от installer canonical(group). По умолчанию чужой
 harness handler остаётся конфликтом; mixed groups отклоняются и с digest.
+
+Текущий SessionStart launcher возвращает bounded JSON с
+`hookSpecificOutput.hookEventName = "SessionStart"` и строкой
+`hookSpecificOutput.additionalContext`.
+Wire budget включает весь serialized JSON и escaping. Если required context
+не доставлен, hook сообщает degraded/not_delivered; успешный bootstrap не
+заявляется. SessionStart с `session_id`/`cwd` без agent fields может установить
+root scope, сохраняя observed agent identity как unknown. Config/JSON fixtures
+и `verify --native` не подтверждают fresh-client lifecycle или trust конкретного
+клиента: для этого нужна отдельная квалификация его версии и платформы.
 
 ## Verified managed contracts
 

@@ -28,15 +28,43 @@ REQUIRED_PAYLOAD = {
     "coverage": {"candidate_digest", "mission_digest", "coverage"},
 }
 
+V2_PAYLOAD = dict(REQUIRED_PAYLOAD,
+    invocation_intent=REQUIRED_PAYLOAD["invocation_intent"] | {"review_binding"},
+    review=REQUIRED_PAYLOAD["review"] | {"review_binding"},
+    coverage=REQUIRED_PAYLOAD["coverage"] | {"review_binding"},
+    plan_quality_assessment={"completion_ref", "assessment_ref", "assessment_digest", "mission_digest",
+        "contract_digest", "plan_digest", "policy_digest", "input_digest", "output_schema_digest", "round", "verdict"})
+
+
+def record_schema(version):
+    if version not in (1, 2):
+        raise HarnessError("Unsupported execution receipt version")
+    return SCHEMA if version == 1 else "execution-receipt.v2.schema.json"
+
 
 def validate_record(record):
-    validate(record, SCHEMA)
-    required = REQUIRED_PAYLOAD[record["record_type"]]
+    validate(record, record_schema(record["schema_version"]))
+    required = (REQUIRED_PAYLOAD if record["schema_version"] == 1 else V2_PAYLOAD)[record["record_type"]]
     optional = {"error"} if record["record_type"] == "completion" else set()
     if not required <= set(record["payload"]) or set(record["payload"]) - required - optional:
         raise HarnessError("Execution receipt payload fields do not match record type")
     if record["record_type"] in {"invocation_intent", "completion"} and record["invocation_id"] is None:
         raise HarnessError("Invocation identity is required for execution receipts")
+    if record["schema_version"] == 2 and record["record_type"] == "completion" and record["payload"]["dispatch_state"] == "not_dispatched_proven":
+        value = record["payload"]
+        if (value["outcome"] not in {"failed", "cancelled", "timed_out"} or value["turn_started"] is not False
+                or value["process_tree_stopped"] is not True or value["usage_status"] != "not_applicable"
+                or any(value[key] is not None for key in ("input_tokens", "output_tokens", "cached_input_tokens", "reasoning_tokens"))):
+            raise HarnessError("Contradictory no-dispatch completion evidence")
+    if record["record_type"] == "plan_quality_assessment" and record["payload"]["verdict"] not in {"approved", "requires_revision", "blocked"}:
+        raise HarnessError("Invalid plan quality assessment verdict")
+    if record["record_type"] != "plan_quality_assessment" and record["payload"].get("verdict") == "requires_revision":
+        raise HarnessError("Plan quality verdict used for a different receipt kind")
+    if record["schema_version"] == 2 and (record["record_type"] in {"review", "coverage"}
+            or record["record_type"] == "invocation_intent" and record["node_id"] == "@review"):
+        binding = record["payload"]["review_binding"]
+        if not isinstance(binding, dict) or not {binding["policy_digest"], binding["schema_digest"], digest(binding)} <= set(record["input_refs"]):
+            raise HarnessError("Review receipt lacks exact policy/schema input binding")
 
 
 def build_digest():
@@ -76,10 +104,10 @@ class ExecutionReceipts:
                 raise HarnessError("Execution receipt subject binding mismatch")
             name = "receipts/" + record_id + ".yaml"
             if self.store.path(name).exists():
-                if self.store.read(name, SCHEMA) != record:
+                if self.store.read(name, record_schema(record["schema_version"])) != record:
                     raise HarnessError("Execution receipt projection integrity conflict")
             elif repair:
-                self.store.write(name, record, SCHEMA, exclusive=True)
+                self.store.write(name, record, record_schema(record["schema_version"]), exclusive=True)
             records[record_id] = record
         return list(records.values())
 
@@ -96,13 +124,14 @@ class ExecutionReceipts:
                 return existing[record["record_id"]]
             # fsync the authoritative chain BEFORE exposing derived state.
             self.store.append_event({"kind": "execution_receipt", "receipt": record})
-            self.store.write("receipts/" + record["record_id"] + ".yaml", record, SCHEMA, exclusive=True)
+            self.store.write("receipts/" + record["record_id"] + ".yaml", record, record_schema(record["schema_version"]), exclusive=True)
             return record
 
     def envelope(self, kind, node_id, attempt_id, invocation_id=None):
+        from .completion_eligibility import policy
         state = self.supervisor.state
         plan = self.store.read(state["plan_path"], "agent-plan.schema.json") if state["plan_path"] else None
-        return {"schema_version": 1, "record_type": kind, "record_id": uuid.uuid4().hex,
+        return {"schema_version": 2 if policy(self.supervisor) else 1, "record_type": kind, "record_id": uuid.uuid4().hex,
             "project_id": self.supervisor.repository_identity(), "run_id": state["run_id"],
             "task_id": state["task_id"], "plan_digest": digest(plan) if plan else None,
             "node_id": node_id, "attempt_id": attempt_id, "invocation_id": invocation_id,
@@ -112,17 +141,23 @@ class ExecutionReceipts:
             "capability_receipt_ref": None, "execution_owner": "managed_supervisor",
             "input_refs": [state["contract_digest"]], "payload": {}}
 
-    def intent(self, node_id, attempt_id, *, checkout, owner, dependencies=(), candidate_digest=None, invocation_id=None):
+    def intent(self, node_id, attempt_id, *, checkout, owner, dependencies=(), candidate_digest=None, invocation_id=None, review_binding=None, input_refs=()):
         value = self.envelope("invocation_intent", node_id, attempt_id, invocation_id or uuid.uuid4().hex)
+        value["input_refs"] = list(dict.fromkeys([*value["input_refs"], *input_refs]))
         value["payload"] = {"checkout": str(checkout), "owner_id": owner,
             "dependency_vector": list(dependencies), "contract_digest": self.supervisor.state["contract_digest"],
             "deadline": self.supervisor.state["deadline"], "dispatch_state": "possibly_dispatched", "candidate_digest": candidate_digest}
+        if value["schema_version"] == 2:
+            value["payload"]["review_binding"] = review_binding
+            if review_binding is not None:
+                value["input_refs"].extend([review_binding["policy_digest"], review_binding["schema_digest"], digest(review_binding)])
         return self.publish(value)
 
     def completion(self, intent, result, *, duration_ms=None):
         value = self.envelope("completion", intent["node_id"], intent["attempt_id"], intent["invocation_id"])
         value["record_id"] = intent["invocation_id"] + "-completion"
         value["plan_digest"] = intent["plan_digest"]
+        value["input_refs"] = list(intent["input_refs"])
         usage = result.get("usage")
         counters = {}
         invalid = False
@@ -135,9 +170,14 @@ class ExecutionReceipts:
         usage_status = ("invalid" if invalid else "complete" if telemetry.complete_usage(usage)
             else "partial" if any(v is not None for v in counters.values()) else "unavailable")
         status = result.get("status", "unknown")
+        cleanup = result.get("process_tree_stopped")
+        if self.supervisor.contract["schema_version"] == 2 and cleanup is not None and type(cleanup) is not bool:
+            raise HarnessError("Invalid process-tree cleanup observation; expected boolean or unknown")
         no_dispatch = result.get("dispatch_state") == "not_dispatched_proven"
         if no_dispatch:
-            if result.get("turn_started") or usage is not None or result.get("process_tree_stopped") is not True:
+            if (result.get("turn_started") or usage is not None or cleanup is not True
+                    or self.supervisor.contract["schema_version"] == 2 and
+                    (result.get("turn_started") is not False or status not in {"failed", "cancelled", "timed_out"})):
                 raise HarnessError("Contradictory no-dispatch result")
             usage_status = "not_applicable"
         dispatch = ("not_dispatched_proven" if no_dispatch else "started_observed" if result.get("process_tree_stopped") is False else

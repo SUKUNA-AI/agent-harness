@@ -1,0 +1,56 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "subject_version": {
+      "const": 1
+    },
+    "manifest_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "task_id": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "trial_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "candidate_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "candidate_scheme": {
+      "const": "ordinary-tree-no-git-v1"
+    },
+    "evaluator_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "evaluator_artifact_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "bundle_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "toolchain_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  },
+  "required": [
+    "subject_version",
+    "manifest_digest",
+    "task_id",
+    "trial_id",
+    "candidate_digest",
+    "candidate_scheme",
+    "evaluator_digest",
+    "evaluator_artifact_digest",
+    "bundle_digest",
+    "toolchain_digest"
+  ]
+}

@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+from copy import deepcopy
 
 from . import evaluation, strict_yaml
 from .benchmark_importers import capture_local_git_checkout
@@ -98,6 +99,18 @@ REPORT = record('task_flow_trial_report', {'preparation_digest': HASH, 'trial_id
     'usage_coverage': {'enum': ['complete', 'partial', 'unknown']},
     'phase_seconds': array(obj({'phase': {'enum': ['initial', 'planner', 'worker', 'integration', 'reviewer', 'repair', 'retry', 'checks', 'evaluator']},
         'seconds': SECONDS}), 10000)})
+# Frozen v1 declarations remain readable; only v2 carries a strict subject chain.
+GRADE_V2 = deepcopy(GRADE)
+GRADE_V2['properties'].update(schema_version={'const': 2}, subject=evaluation.GRADE_SUBJECT,
+    candidate_scheme={'const': evaluation.CANDIDATE_SCHEME}, evaluator_input_digest=HASH, finished_at=evaluation.UTC)
+GRADE_V2['required'].extend(['subject', 'candidate_scheme', 'evaluator_input_digest'])
+REPORT_V2 = deepcopy(REPORT)
+REPORT_V2['properties'].update(schema_version={'const': 2}, candidate_digest=HASH,
+    subject=evaluation.GRADE_SUBJECT, candidate_scheme={'const': evaluation.CANDIDATE_SCHEME}, evaluator_input_digest=HASH,
+    started_at=evaluation.UTC, finished_at=evaluation.UTC)
+REPORT_V2['required'].extend(['subject', 'candidate_scheme', 'evaluator_input_digest'])
+GRADE_SCHEMA = {'oneOf': [GRADE, GRADE_V2]}
+REPORT_SCHEMA = {'oneOf': [REPORT, REPORT_V2]}
 SOURCE_CAPTURE = obj({'revision': REVISION, 'tree': REVISION, 'inventory_digest': HASH})
 SCHEDULE_ROW = obj({'task_id': ID, 'arm': {'enum': list(ARMS)}, 'seed': {'type': 'integer', 'minimum': 0},
     'rotation': {'type': 'integer', 'minimum': 0, 'maximum': 4}, 'position': {'type': 'integer', 'minimum': 0, 'maximum': 4},
@@ -115,7 +128,7 @@ PREPARATION = record('task_flow_preparation', {'spec_digest': HASH, 'input_spec_
     'files': array(obj({'path': SHORT, 'sha256': HASH, 'bytes': {'type': 'integer', 'minimum': 0},
         'mode': {'enum': ['100644', '100755']}, 'visibility': {'enum': ['solve', 'controller', 'hidden']}}), 10000),
     'preparation_digest': HASH})
-SCHEMAS = (SPEC, MISSION, DAG, EVALUATOR, CONFIGURED, OBSERVATION, GRADE, REPORT, PREPARATION)
+SCHEMAS = (SPEC, MISSION, DAG, EVALUATOR, CONFIGURED, OBSERVATION, GRADE, GRADE_V2, REPORT, REPORT_V2, PREPARATION)
 SCHEMA = {'oneOf': list(SCHEMAS)}
 MAX_BYTES = 64 * 1024 * 1024
 
@@ -216,6 +229,114 @@ def _schedule(spec, tasks):
     return rows
 
 
+class _MaterialInventory:
+    """Staged final bytes, with immutable portable paths and metadata."""
+    def __init__(self):
+        self.files = {}
+        self.paths = {}
+        self.total_bytes = 0
+
+    def put(self, name, raw, audience, mode='100644'):
+        name = _path(name).as_posix()
+        key = name.casefold()
+        value = (raw, mode, audience)
+        if key in self.paths:
+            prior_name = self.paths[key]
+            prior = self.files[prior_name]
+            if prior[2] != audience:
+                raise HarnessError('TASK_FLOW_HIDDEN_EVALUATOR_LEAK_OR_OVERLAP: VISIBILITY_CONFLICT')
+            if prior_name != name or prior != value:
+                raise HarnessError('TASK_FLOW_OUTPUT_COLLISION')
+        else:
+            self.paths[key] = name
+            self.files[name] = value
+            self.total_bytes += len(raw)
+        if len(self.files) > 10000 or self.total_bytes > MAX_BYTES:
+            raise HarnessError('TASK_FLOW_PREPARATION_BOUND')
+        return {'path': name, 'sha256': hashlib.sha256(raw).hexdigest()}
+
+
+class _InputInventory:
+    """Classify original references, including explicitly shared public inputs."""
+    def __init__(self):
+        self.refs = {}
+
+    def add(self, ref, audience):
+        name = _path(ref['path']).as_posix()
+        key = name.casefold()
+        prior = self.refs.get(key)
+        if prior is not None:
+            if prior[1] != audience:
+                raise HarnessError('TASK_FLOW_HIDDEN_EVALUATOR_LEAK_OR_OVERLAP: VISIBILITY_CONFLICT')
+            if prior[0] != ref:
+                raise HarnessError('TASK_FLOW_INPUT_REF_CONFLICT')
+        self.refs[key] = (ref, audience)
+
+
+def _final_visibility(material, spec):
+    """Rebuild visibility from frozen references and final bytes, not row claims.
+
+    This exact-byte guard is cooperative validation, not semantic leakage
+    detection, a signature, or proof of runtime mount isolation.
+    """
+    inputs = _InputInventory()
+    public_hashes, hidden_hashes = set(), set()
+    staged = _MaterialInventory()
+    for name, (raw, mode, audience) in material.items():
+        staged.put(name, raw, audience, mode)
+        expected = {'solve': 'solve', 'controller': 'controller', 'evaluator-private': 'hidden'}.get(name.split('/')[0])
+        if expected is None or audience != expected:
+            raise HarnessError('TASK_FLOW_VISIBILITY_METADATA_CONFLICT')
+        if audience == 'solve': public_hashes.add(hashlib.sha256(raw).hexdigest())
+        if audience == 'hidden': hidden_hashes.add(hashlib.sha256(raw).hexdigest())
+
+    def asset(ref, audience):
+        inputs.add(ref, audience)
+        name = ('evaluator-private' if audience == 'hidden' else 'controller')+'/inputs/'+ref['sha256']
+        if name not in material or hashlib.sha256(material[name][0]).hexdigest() != ref['sha256']:
+            raise HarnessError('TASK_FLOW_FROZEN_INPUT_BINDING')
+        if audience == 'solve': public_hashes.add(ref['sha256'])
+        return material[name][0]
+
+    asset(spec['bank_provenance'], 'controller')
+    for ref in [spec['policy']['client']['artifact'], spec['policy']['environment'],
+                *[tool['artifact'] for tool in spec['policy']['tools']],
+                *[arm['configured_effort'] for arm in spec['arms'] if arm['configured_effort']]]:
+        asset(ref, 'solve')
+    for task in spec['tasks']:
+        asset(task['mission'], 'solve')
+        if task['shared_decomposition']: asset(task['shared_decomposition'], 'solve')
+        for ref in task['public_assets']: asset(ref, 'solve')
+        evaluator = _document(asset(task['hidden_evaluator'], 'hidden'), EVALUATOR)
+        for ref in evaluator['files']: asset(ref, 'hidden')
+    if public_hashes & hidden_hashes:
+        raise HarnessError('TASK_FLOW_HIDDEN_EVALUATOR_LEAK_OR_OVERLAP')
+
+
+def _read_material(root, rows, *, complete):
+    """Read the actual complete inventory before trusting/publishing its receipt."""
+    _unique([row['path'] for row in rows], 'FROZEN_FILE')
+    expected = {row['path'] for row in rows} | ({'preparation.json'} if complete else set())
+    actual, directories = set(), set()
+    for path in root.rglob('*'):
+        _ordinary(path, directory=path.is_dir())
+        if path.is_file(): actual.add(path.relative_to(root).as_posix())
+        if path.is_dir(): directories.add(path.relative_to(root).as_posix())
+        if len(actual) > 10001: raise HarnessError('TASK_FLOW_PREPARATION_BOUND')
+    if actual != expected: raise HarnessError('TASK_FLOW_PREPARATION_INVENTORY')
+    expected_directories = {parent.as_posix() for name in expected for parent in Path(name).parents if parent != Path('.')}
+    if directories != expected_directories: raise HarnessError('TASK_FLOW_PREPARATION_DIRECTORY_INVENTORY')
+    staged = _MaterialInventory()
+    for row in rows:
+        path = root/_path(row['path']); raw = read_regular_file(path, max_bytes=MAX_BYTES)
+        if len(raw) != row['bytes'] or hashlib.sha256(raw).hexdigest() != row['sha256']:
+            raise HarnessError('TASK_FLOW_PREPARATION_BYTES_CHANGED')
+        if os.name != 'nt' and bool(path.stat().st_mode & 0o111) != (row['mode'] == '100755'):
+            raise HarnessError('TASK_FLOW_PREPARATION_MODE_CHANGED')
+        staged.put(row['path'], raw, row['visibility'], row['mode'])
+    return staged.files
+
+
 def prepare(spec_path, *, assets_root, source_roots, output_dir):
     """Freeze supplied local inputs; retries revalidate inputs and exact outputs.
 
@@ -247,44 +368,31 @@ def prepare(spec_path, *, assets_root, source_roots, output_dir):
     if output == assets_root or output.is_relative_to(assets_root) or assets_root.is_relative_to(output):
         raise HarnessError('TASK_FLOW_OUTPUT_ASSET_OVERLAP')
     _mkdir(output.parent)
-    material, inputs, visibility = {}, {}, {}
-    total_bytes = 0
-    def put(name, raw, audience, mode='100644'):
-        nonlocal total_bytes
-        name = _path(name).as_posix()
-        if name in material and material[name] != (raw, mode):
-            raise HarnessError('TASK_FLOW_OUTPUT_COLLISION')
-        if name not in material: total_bytes += len(raw)
-        material[name] = (raw, mode); visibility[name] = audience
-        if len(material) > 10000 or total_bytes > MAX_BYTES:
-            raise HarnessError('TASK_FLOW_PREPARATION_BOUND')
-        return {'path': name, 'sha256': hashlib.sha256(raw).hexdigest()}
+    staged = _MaterialInventory()
+    material, inputs = staged.files, _InputInventory()
+    put = staged.put
     def asset(ref, audience):
-        _path(ref['path']); raw = checked_bytes(ref, assets_root)
-        if any(name.casefold() == ref['path'].casefold() and prior != ref for name, prior in inputs.items()):
-            raise HarnessError('TASK_FLOW_INPUT_REF_CONFLICT')
-        inputs[ref['path']] = ref
-        put(('evaluator-private' if audience == 'hidden' else 'controller')+'/inputs/'+ref['sha256'], raw, audience)
+        inputs.add(ref, audience)
+        raw = checked_bytes(ref, assets_root)
+        put(('evaluator-private' if audience == 'hidden' else 'controller')+'/inputs/'+ref['sha256'],
+            raw, 'hidden' if audience == 'hidden' else 'controller')
         return raw
     asset(spec['bank_provenance'], 'controller')
     for ref in [spec['policy']['client']['artifact'], spec['policy']['environment'], *[t['artifact'] for t in spec['policy']['tools']]]:
-        asset(ref, 'controller')
+        asset(ref, 'solve')
     configured = {}
     for arm in spec['arms']:
         ref = arm['configured_effort']
-        value = _document(asset(ref, 'controller'), CONFIGURED) if ref else None
+        value = _document(asset(ref, 'solve'), CONFIGURED) if ref else None
         if value and (value['policy_digest'] != digest(spec['policy']) or value['effort'] != spec['policy']['effort']):
             raise HarnessError('TASK_FLOW_CONFIGURED_POLICY_MISMATCH')
         configured[arm['id']] = {'status': 'declared_unqualified' if ref else 'unavailable',
                                   'value': value['effort'] if value else None, 'evidence': ref}
-    tasks, public_hashes, hidden_hashes, public_paths, hidden_paths = [], set(), set(), set(), set()
-    for ref in [spec['policy']['client']['artifact'], spec['policy']['environment'],
-                *[t['artifact'] for t in spec['policy']['tools']], *[a['configured_effort'] for a in spec['arms'] if a['configured_effort']]]:
-        public_paths.add(ref['path']); public_hashes.add(ref['sha256'])
+    tasks = []
     with tempfile.TemporaryDirectory(prefix='task-flow-capture-', dir=output.parent) as temporary:
         capture_root = Path(temporary)
         for task in sorted(spec['tasks'], key=lambda row: row['id']):
-            name = task['id']; mission_raw = asset(task['mission'], 'controller'); mission = _document(mission_raw, MISSION)
+            name = task['id']; mission_raw = asset(task['mission'], 'solve'); mission = _document(mission_raw, MISSION)
             evaluator_raw = asset(task['hidden_evaluator'], 'hidden'); evaluator = _document(evaluator_raw, EVALUATOR)
             requirement_ids = [row['id'] for row in mission['requirements']]; _unique(requirement_ids, 'REQUIREMENT')
             _unique(evaluator['requirement_ids'], 'EVALUATOR_REQUIREMENT')
@@ -293,31 +401,29 @@ def prepare(spec_path, *, assets_root, source_roots, output_dir):
             tags = {tag for row in mission['requirements'] if row['mandatory'] for tag in row['tags']}
             if not set(FAMILIES[task['family']]) <= tags:
                 raise HarnessError('TASK_FLOW_MISSING_FAMILY_REQUIREMENTS')
-            hidden_paths.add(task['hidden_evaluator']['path']); hidden_hashes.add(task['hidden_evaluator']['sha256'])
             evaluator_files = []
             for ref in evaluator['files']:
-                asset(ref, 'hidden'); hidden_paths.add(ref['path']); hidden_hashes.add(ref['sha256'])
+                asset(ref, 'hidden')
                 evaluator_files.append({'path': 'evaluator-private/inputs/'+ref['sha256'], 'sha256': ref['sha256']})
             mission_ref = put('solve/'+name+'/mission.json', canonical(mission), 'solve')
-            public_paths.add(task['mission']['path']); public_hashes.update((task['mission']['sha256'], mission_ref['sha256']))
             shared = task['shared_decomposition']
             if (spec['comparison'] == 'mechanism') != (shared is not None):
                 raise HarnessError('TASK_FLOW_COMPARISON_INFORMATION_MISMATCH')
             shared_ref = None
             if shared:
-                raw = asset(shared, 'controller'); dag = _document(raw, DAG)
+                raw = asset(shared, 'solve'); dag = _document(raw, DAG)
                 if dag['task_id'] != name:
                     raise HarnessError('TASK_FLOW_DECOMPOSITION_BINDING')
-                _dag(dag, mission); public_paths.add(shared['path']); public_hashes.add(shared['sha256'])
+                _dag(dag, mission)
                 shared_ref = put('solve/'+name+'/decomposition.json', canonical(dag), 'solve')
             public = []
             for ref in task['public_assets']:
-                raw = asset(ref, 'controller'); public_paths.add(ref['path']); public_hashes.add(ref['sha256'])
+                raw = asset(ref, 'solve')
                 public.append(put('solve/'+name+'/assets/'+ref['sha256'], raw, 'solve'))
             files, source = _source(source_roots[name], task['source'], capture_root, 'solve/'+name+'/source')
             for item in files:
                 ref = item['asset']; raw = read_regular_file(capture_root/_path(ref['path']))
-                put(ref['path'], raw, 'solve', item['mode']); public_hashes.add(ref['sha256'])
+                put(ref['path'], raw, 'solve', item['mode'])
             evaluator_ref = put('evaluator-private/'+name+'/manifest.json', canonical({**evaluator, 'files': evaluator_files}), 'hidden')
             bundle_digest = digest({'manifest': task['hidden_evaluator'], 'files': evaluator['files']})
             arm_refs = {}
@@ -333,10 +439,9 @@ def prepare(spec_path, *, assets_root, source_roots, output_dir):
                 'requirements': requirement_ids, 'mandatory': [r['id'] for r in mission['requirements'] if r['mandatory']],
                 'evaluator': evaluator_ref, 'evaluator_bundle_digest': bundle_digest,
                 'evaluator_producer': evaluator['producer_id'], 'arm_manifests': arm_refs})
-        if public_paths & hidden_paths or public_hashes & hidden_hashes:
-            raise HarnessError('TASK_FLOW_HIDDEN_EVALUATOR_LEAK_OR_OVERLAP')
         put('controller/spec.original', raw_spec, 'controller')
         put('controller/spec.json', canonical(spec), 'controller')
+        _final_visibility(material, spec)
         schedule = _schedule(spec, tasks)
         receipt = {'schema_version': 1, 'record_type': 'task_flow_preparation', 'spec_digest': digest(spec),
             'input_spec_sha256': hashlib.sha256(raw_spec).hexdigest(), 'bank_kind': spec['bank_kind'],
@@ -344,8 +449,12 @@ def prepare(spec_path, *, assets_root, source_roots, output_dir):
             'tasks': tasks, 'schedule': schedule, 'counterbalance': 'sha256_order_cyclic_latin_5_rotations_v1',
             'qualification': QUALIFICATION,
             'files': [{'path': name, 'sha256': hashlib.sha256(raw).hexdigest(), 'bytes': len(raw), 'mode': mode,
-                       'visibility': visibility[name]} for name, (raw, mode) in sorted(material.items())]}
+                       'visibility': audience} for name, (raw, mode, audience) in sorted(material.items())]}
         receipt['preparation_digest'] = digest(receipt)
+        strict_yaml.validate(receipt, PREPARATION)
+        receipt_raw = canonical(receipt)
+        if len(receipt_raw) > 2*1024*1024:
+            raise HarnessError('TASK_FLOW_PREPARATION_BOUND')
         if output.exists():
             if not (output/'preparation.json').exists():
                 raise HarnessError('TASK_FLOW_PARTIAL_PREPARATION: preserve incomplete output and use a fresh directory')
@@ -356,19 +465,21 @@ def prepare(spec_path, *, assets_root, source_roots, output_dir):
         # Claim exclusively; a killed publication leaves a visible partial
         # directory that retries refuse. Existing user directories are preserved.
         output.mkdir(mode=0o700)
-        for name, (raw, mode) in material.items():
+        for name, (raw, mode, audience) in material.items():
             target = output/_path(name); atomic_write(target, raw, exclusive=True)
             if mode == '100755' and os.name != 'nt': target.chmod(0o700)
         # Recheck inputs after writes before publishing a complete receipt.
         if read_regular_file(safe_private(spec_path), max_bytes=2*1024*1024) != raw_spec:
             raise HarnessError('TASK_FLOW_SPEC_DRIFT')
-        for ref in inputs.values(): checked_bytes(ref, assets_root)
+        for ref, audience in inputs.refs.values(): checked_bytes(ref, assets_root)
         with tempfile.TemporaryDirectory(prefix='task-flow-recheck-', dir=output.parent) as recheck:
             for task in spec['tasks']:
                 _, source = _source(source_roots[task['id']], task['source'], Path(recheck), 'solve/'+task['id']+'/source')
                 if source != next(row['source'] for row in tasks if row['id'] == task['id']):
                     raise HarnessError('TASK_FLOW_SOURCE_DRIFT')
-        atomic_write(output/'preparation.json', canonical(receipt), exclusive=True)
+        written = _read_material(output, receipt['files'], complete=False)
+        _final_visibility(written, spec)
+        atomic_write(output/'preparation.json', receipt_raw, exclusive=True)
         return verify(output)
 
 
@@ -383,23 +494,9 @@ def verify(preparation_dir, *, expected_digest=None):
     _unique([row['path'] for row in receipt['files']], 'FROZEN_FILE')
     _unique([row['id'] for row in receipt['tasks']], 'FROZEN_TASK')
     _unique([row['trial_id'] for row in receipt['schedule']], 'TRIAL')
-    expected = {row['path'] for row in receipt['files']} | {'preparation.json'}
-    actual, directories = set(), set()
-    for path in root.rglob('*'):
-        _ordinary(path, directory=path.is_dir())
-        if path.is_file(): actual.add(path.relative_to(root).as_posix())
-        if path.is_dir(): directories.add(path.relative_to(root).as_posix())
-        if len(actual) > 10001: raise HarnessError('TASK_FLOW_PREPARATION_BOUND')
-    if actual != expected: raise HarnessError('TASK_FLOW_PREPARATION_INVENTORY')
-    expected_directories = {parent.as_posix() for name in expected for parent in Path(name).parents if parent != Path('.')}
-    if directories != expected_directories: raise HarnessError('TASK_FLOW_PREPARATION_DIRECTORY_INVENTORY')
-    for row in receipt['files']:
-        path = root/_path(row['path']); raw = read_regular_file(path, max_bytes=MAX_BYTES)
-        if len(raw) != row['bytes'] or hashlib.sha256(raw).hexdigest() != row['sha256']:
-            raise HarnessError('TASK_FLOW_PREPARATION_BYTES_CHANGED')
-        if os.name != 'nt' and bool(path.stat().st_mode & 0o111) != (row['mode'] == '100755'):
-            raise HarnessError('TASK_FLOW_PREPARATION_MODE_CHANGED')
+    material = _read_material(root, receipt['files'], complete=True)
     spec = _document(read_regular_file(root/'controller/spec.json'), SPEC)
+    _final_visibility(material, spec)
     if receipt['spec_digest'] != digest(spec) or receipt['policy_digest'] != digest(spec['policy']) or receipt['schedule'] != _schedule(spec, receipt['tasks']):
         raise HarnessError('TASK_FLOW_FROZEN_SPEC_BINDING')
     return receipt
@@ -407,6 +504,67 @@ def verify(preparation_dir, *, expected_digest=None):
 
 def _instant(value):
     return datetime.fromisoformat(value.replace('Z', '+00:00')) if value is not None else None
+
+
+def _mission_chain(prepared, task, grade, reports_root, preparation_dir):
+    pipeline = _document(checked_bytes(grade['execution_evidence'], reports_root), evaluation.GRADE_SCHEMA)
+    identity = evaluation.grade_identity(pipeline)
+    if (identity['manifest_digest'] != prepared['preparation_digest'] or identity['trial_id'] != grade['trial_id']
+            or identity['evaluator_digest'] != task['evaluator_bundle_digest']):
+        raise HarnessError('TASK_FLOW_PIPELINE_GRADE_BINDING')
+    status = evaluation.verify_execution_grade(pipeline, reports_root)
+    if grade['schema_version'] == 1: return pipeline, 'unverified_legacy'
+    subject = grade['subject']
+    expected = {'manifest_digest': prepared['preparation_digest'], 'task_id': task['id'], 'trial_id': grade['trial_id'],
+        'candidate_digest': grade['candidate_digest'], 'candidate_scheme': grade['candidate_scheme'],
+        'evaluator_digest': task['evaluator_bundle_digest']}
+    if (pipeline['schema_version'] != 2 or any(subject[key] != value for key, value in expected.items())
+            or pipeline['subject'] != subject or grade['evaluator_input_digest'] != pipeline['evaluator_input_digest']
+            or grade['finished_at'] != pipeline['finished_at']
+            or grade['requirements'] != pipeline['requirements']
+            or {row['id'] for row in pipeline['requirements']} != set(task['requirements'])):
+        raise HarnessError('TASK_FLOW_GRADE_SUBJECT_CHAIN_BINDING')
+    actual_inputs = evaluation._evidence_record(pipeline['evaluator_input'], reports_root, evaluation.EVALUATOR_INPUT)
+    evaluator = _document(checked_bytes(task['evaluator'], preparation_dir), EVALUATOR)
+    actual_hidden = {row['asset']['sha256'] for row in actual_inputs['artifacts'] if row['role'] == 'protected'}
+    if not {ref['sha256'] for ref in evaluator['files']} <= actual_hidden:
+        raise HarnessError('TASK_FLOW_EVALUATOR_INPUT_BINDING')
+    return pipeline, status
+
+
+def write_mission_grade(path, *, preparation_dir, trial_id, execution_evidence, reports_root):
+    """Create the mission wrapper from the actual validated execution chain."""
+    prepared = verify(preparation_dir)
+    row = next((row for row in prepared['schedule'] if row['trial_id'] == trial_id), None)
+    if row is None: raise HarnessError('TASK_FLOW_REPORT_BINDING')
+    task = next(task for task in prepared['tasks'] if task['id'] == row['task_id'])
+    pipeline = _document(checked_bytes(execution_evidence, reports_root), evaluation.EXECUTION_GRADE)
+    evaluation.verify_execution_grade(pipeline, reports_root)
+    subject = pipeline['subject']
+    accepted = pipeline['outcome'] == 'accepted'
+    value = {'schema_version': 2, 'record_type': 'task_flow_mission_evaluation',
+        'preparation_digest': prepared['preparation_digest'], 'trial_id': trial_id,
+        'candidate_digest': subject['candidate_digest'], 'candidate_scheme': subject['candidate_scheme'], 'subject': subject,
+        'evaluator_input_digest': pipeline['evaluator_input_digest'], 'evaluator_bundle_digest': task['evaluator_bundle_digest'],
+        'producer_id': task['evaluator_producer'], 'requirements': pipeline['requirements'],
+        'verdict': 'accepted' if accepted else 'rejected', 'finished_at': pipeline['finished_at'], 'execution_evidence': execution_evidence}
+    _mission_chain(prepared, task, value, reports_root, preparation_dir)
+    return evaluation.put_grade_evidence(reports_root, Path(path).absolute().relative_to(Path(reports_root).absolute()).as_posix(), value, GRADE_V2)
+
+
+def write_trial_report(path, *, preparation_dir, evaluator_receipt, reports_root, report):
+    """Bind a supplied observation to a validated wrapper; never echo its candidate."""
+    prepared = verify(preparation_dir)
+    grade = _document(checked_bytes(evaluator_receipt, reports_root), GRADE_V2)
+    row = next((row for row in prepared['schedule'] if row['trial_id'] == grade['trial_id']), None)
+    if row is None: raise HarnessError('TASK_FLOW_REPORT_BINDING')
+    task = next(task for task in prepared['tasks'] if task['id'] == row['task_id'])
+    _mission_chain(prepared, task, grade, reports_root, preparation_dir)
+    value = {**report, 'schema_version': 2, 'preparation_digest': prepared['preparation_digest'],
+        'trial_id': row['trial_id'], 'task_id': row['task_id'], 'arm': row['arm'], 'evaluator_receipt': evaluator_receipt,
+        **{key: grade[key] for key in ('candidate_digest', 'candidate_scheme', 'subject', 'evaluator_input_digest')}}
+    aggregate(preparation_dir, [value], reports_root=reports_root)
+    return evaluation.put_grade_evidence(reports_root, Path(path).absolute().relative_to(Path(reports_root).absolute()).as_posix(), value, REPORT_V2)
 
 
 def aggregate(preparation_dir, reports, *, reports_root):
@@ -422,14 +580,14 @@ def aggregate(preparation_dir, reports, *, reports_root):
     tasks = {row['id']: row for row in prepared['tasks']}; observed, invocations = {}, set()
     for index, report in enumerate(reports):
         if index >= 10000: raise HarnessError('TASK_FLOW_REPORT_BOUND')
-        strict_yaml.validate(report, REPORT)
+        strict_yaml.validate(report, REPORT_SCHEMA)
         key = report['trial_id']; plan = planned.get(key)
         if not plan or report['preparation_digest'] != prepared['preparation_digest'] or any(report[name] != plan[name] for name in ('task_id', 'arm')):
             raise HarnessError('TASK_FLOW_REPORT_BINDING')
         if key in observed:
             if observed[key]['report'] != report: raise HarnessError('TASK_FLOW_REPORT_COLLISION')
             continue
-        task = tasks[plan['task_id']]; grade = None
+        task = tasks[plan['task_id']]; grade = None; binding_status = 'unverified_legacy'
         policy_observation = None
         if report['observed_policy'] is not None:
             policy_observation = _document(checked_bytes(report['observed_policy'], reports_root), OBSERVATION)
@@ -437,25 +595,31 @@ def aggregate(preparation_dir, reports, *, reports_root):
             if policy_observation['coverage'] == 'complete' and policy_observation['effort'] is None:
                 raise HarnessError('TASK_FLOW_POLICY_OBSERVATION_INCOMPLETE')
         if report['evaluator_receipt'] is not None:
-            grade = _document(checked_bytes(report['evaluator_receipt'], reports_root), GRADE)
+            grade = _document(checked_bytes(report['evaluator_receipt'], reports_root), GRADE_SCHEMA)
             if any(grade[name] != report[name] for name in ('preparation_digest', 'trial_id', 'candidate_digest')) or grade['evaluator_bundle_digest'] != task['evaluator_bundle_digest'] or grade['producer_id'] != task['evaluator_producer'] or grade['producer_id'] == report['solver_id']:
                 raise HarnessError('TASK_FLOW_INDEPENDENT_GRADE_BINDING')
-            pipeline_grade = _document(checked_bytes(grade['execution_evidence'], reports_root), evaluation.GRADE)
-            if pipeline_grade['manifest_digest'] != prepared['preparation_digest'] or pipeline_grade['trial_id'] != key or pipeline_grade['evaluator_digest'] != task['evaluator_bundle_digest']:
-                raise HarnessError('TASK_FLOW_PIPELINE_GRADE_BINDING')
+            pipeline_grade, binding_status = _mission_chain(prepared, task, grade, reports_root, preparation_dir)
+            if grade['schema_version'] == 2:
+                if (report['schema_version'] != 2 or report['subject'] != grade['subject']
+                        or report['candidate_scheme'] != grade['candidate_scheme']
+                        or report['evaluator_input_digest'] != grade['evaluator_input_digest']):
+                    raise HarnessError('TASK_FLOW_REPORT_GRADE_CHAIN_BINDING')
             _unique([row['id'] for row in grade['requirements']], 'GRADE_REQUIREMENT')
             if {row['id'] for row in grade['requirements']} != set(task['requirements']):
                 raise HarnessError('TASK_FLOW_GRADE_REQUIREMENT_OMISSION')
         results = {row['id']: row['status'] for row in grade['requirements']} if grade else {}
-        verified = bool(grade and grade['verdict'] == 'accepted' and all(results[r] == 'passed' for r in task['mandatory']))
-        if grade and grade['verdict'] == 'accepted' and not verified:
+        declared_verified = bool(grade and grade['verdict'] == 'accepted' and all(results[r] == 'passed' for r in task['mandatory']))
+        verified = declared_verified and binding_status == 'verified_subject_chain'
+        if grade and grade['verdict'] == 'accepted' and not declared_verified:
             raise HarnessError('TASK_FLOW_FALSE_EVALUATOR_ACCEPTANCE')
-        if verified and pipeline_grade['outcome'] != 'accepted': raise HarnessError('TASK_FLOW_PIPELINE_GRADE_CONFLICT')
+        if declared_verified and pipeline_grade['outcome'] != 'accepted': raise HarnessError('TASK_FLOW_PIPELINE_GRADE_CONFLICT')
         if grade and grade['verdict'] == 'rejected' and pipeline_grade['outcome'] == 'accepted':
             raise HarnessError('TASK_FLOW_PIPELINE_GRADE_CONFLICT')
         if verified and report['outcome'] != 'completed': raise HarnessError('TASK_FLOW_OUTCOME_CONFLICT')
         start, finish = _instant(report['started_at']), _instant(report['finished_at'])
         verified_at = _instant(grade['finished_at']) if grade and verified else None
+        if verified and (start is None or finish is None or _instant(pipeline_grade['started_at']) < start or _instant(pipeline_grade['finished_at']) > finish):
+            raise HarnessError('TASK_FLOW_INVALID_TIMELINE')
         if start and finish and finish < start or verified_at and (start and verified_at < start or finish and verified_at > finish):
             raise HarnessError('TASK_FLOW_INVALID_TIMELINE')
         expected = report['expected_invocation_ids']; ids = [row['invocation_id'] for row in report['usage']]
@@ -474,9 +638,9 @@ def aggregate(preparation_dir, reports, *, reports_root):
         for ref in report['human_feedback']: checked_bytes(ref, reports_root)
         tokens = [value for row in report['usage'] if row['status'] != 'conflicting' for value in (row['input_tokens'], row['output_tokens']) if value is not None]
         observed[key] = {'report': report, 'verified': verified,
-            'observed_policy': policy_observation,
-            'grade_unknown': grade is None or grade['verdict'] == 'unknown',
-            'false_completion': False if report['claimed_complete'] is False else (not verified) if report['claimed_complete'] is True and grade and grade['verdict'] != 'unknown' else None,
+            'grade_binding': binding_status, 'observed_policy': policy_observation,
+            'grade_unknown': grade is None or grade['verdict'] == 'unknown' or binding_status != 'verified_subject_chain',
+            'false_completion': None if binding_status != 'verified_subject_chain' and declared_verified else False if report['claimed_complete'] is False else (not verified) if report['claimed_complete'] is True and grade and grade['verdict'] != 'unknown' else None,
             'mandatory_passed': sum(results.get(r) == 'passed' for r in task['mandatory']),
             'mandatory_failed': sum(results.get(r) == 'failed' for r in task['mandatory']),
             'requirement_unknown': sum(results.get(r, 'unknown') in ('unknown', 'not_run') for r in task['mandatory']),
@@ -492,6 +656,7 @@ def aggregate(preparation_dir, reports, *, reports_root):
         interventions = [row['report']['manual_interventions'] for row in selected if row['report']['manual_interventions'] is not None]
         arms[arm] = {'planned_trials': len(expected_rows), 'reported_trials': len(selected), 'not_run': missing,
             'reported_full_mission_verified': sum(row['verified'] for row in selected),
+            'unverified_legacy_grades': sum(row['grade_binding'] == 'unverified_legacy' and row['report']['evaluator_receipt'] is not None for row in selected),
             'full_mission_unknown': missing+sum(row['grade_unknown'] for row in selected),
             'mandatory_requirements_planned': sum(len(tasks[row['task_id']]['mandatory']) for row in expected_rows),
             'mandatory_requirements_passed': sum(row['mandatory_passed'] for row in selected),

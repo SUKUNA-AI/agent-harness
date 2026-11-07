@@ -801,6 +801,16 @@ class Run:
             if source.exists():
                 shutil.copyfile(source, target)
 
+    def prepare_supervisor_attempt(self, preparation):
+        """Separate journal-bound verification generation; not a CLI attempt.
+
+        The Supervisor owns model reservations and checks its original budgets.
+        The protocol verifies exact authority, physical ownership and pre/post
+        state while preserving this run's origin baseline and attempt history.
+        """
+        from .root_preparation import prepare_core
+        return prepare_core(self, preparation)
+
     def new_attempt(self, contract, *, reason):
         validate_contract(contract)
         if not isinstance(reason, str) or not reason.strip():

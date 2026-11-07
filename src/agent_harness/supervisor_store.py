@@ -19,6 +19,19 @@ from .file_io import read_regular_file, ParentDirectory
 from . import strict_yaml
 
 MAX_JOURNAL_BYTES = 64 * 1024 * 1024
+JOURNAL_READ_SCHEMA = "supervisor-journal-event.v2.schema.json"
+
+
+def _event_version(payload, version):
+    kind = payload.get("kind", "")
+    root = isinstance(kind, str) and kind.startswith(("root_core_preparation_", "root_model_reservation", "root_preparation_failure"))
+    if type(version) is not int or version not in (1, 2) or root != (version == 2):
+        raise HarnessError("Unsupported journal/root protocol version; compatible writer required")
+    if root:
+        from .root_preparation import EVENT_SCHEMAS
+        if kind not in EVENT_SCHEMAS:
+            raise HarnessError("Unsupported root journal operation")
+        strict_yaml.validate(payload, EVENT_SCHEMAS[kind])
 
 
 def _ordinary(path, directory=False, missing_ok=False):
@@ -260,10 +273,11 @@ class SupervisorStore:
             if not line or len(line) > strict_yaml.MAX_BYTES:
                 raise HarnessError("Invalid or oversized journal record")
             try:
-                record = strict_yaml.loads(line, EVENT_SCHEMA)
+                record = strict_yaml.loads(line, JOURNAL_READ_SCHEMA)
             except (ValueError, UnicodeError) as error:
                 raise HarnessError("Corrupt journal record " + str(index)) from error
             expected = dict(record)
+            _event_version(record["payload"], record["schema_version"])
             expected.pop("hash")
             if record["sequence"] != index or record["previous_hash"] != previous or _digest(expected) != record["hash"]:
                 raise HarnessError("Journal sequence/hash chain mismatch")
@@ -316,13 +330,14 @@ class SupervisorStore:
             self.append_event({"kind": "tail_repair", "receipt": receipt})
             return {**receipt, "recovery_required": True}
 
-    def append_event(self, event):
+    def append_event(self, event, *, format_version=1):
         with self._writing():
             strict_yaml.validate(event, {"type": "object", "additionalProperties": True})
+            _event_version(event, format_version)
             head = self._head()
-            record = {"schema_version": 1, "sequence": head[1] + 1, "event_id": uuid.uuid4().hex, "timestamp": now(), "previous_hash": head[2], "payload": event}
+            record = {"schema_version": format_version, "sequence": head[1] + 1, "event_id": uuid.uuid4().hex, "timestamp": now(), "previous_hash": head[2], "payload": event}
             record["hash"] = _digest(record)
-            strict_yaml.validate(record, EVENT_SCHEMA)
+            strict_yaml.validate(record, JOURNAL_READ_SCHEMA)
             path = self.path("journal/events.jsonl")
             _mkdir(path.parent)
             _parents(path)

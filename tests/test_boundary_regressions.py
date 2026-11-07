@@ -15,7 +15,7 @@ from agent_harness.benchmark_environments import _safe_join
 from agent_harness.benchmark_upstream_evaluator import _patch
 from agent_harness.core import HarnessError
 from agent_harness.file_io import ParentDirectory
-from agent_harness.supervisor_store import SupervisorStore, EVENT_SCHEMA
+from agent_harness.supervisor_store import SupervisorStore, JOURNAL_READ_SCHEMA
 import test_install as baseline
 
 
@@ -202,7 +202,11 @@ class JournalHeadTests(unittest.TestCase):
                 for index in range(100):self.store.append_event({'n':index})
                 for index in range(5):self.store.commit({'n':index},'snapshot')
             self.assertEqual(decode.call_count,0)
-            self.assertGreaterEqual(sum(call.args[1] == EVENT_SCHEMA for call in validate.call_args_list if len(call.args)>1),105)
+            # The versioned reader schema validates both legacy outer-v1 rows
+            # and current root-operation rows. Keep the real validator and the
+            # per-append/no-prefix-replay assertions, rather than a stale schema
+            # object that the writer no longer passes to validate().
+            self.assertGreaterEqual(sum(call.args[1] == JOURNAL_READ_SCHEMA for call in validate.call_args_list if len(call.args)>1),105)
             self.assertEqual(len(self.store.events()),105)
             self.assertEqual(decode.call_count,1)
         resumed=SupervisorStore(self.root)

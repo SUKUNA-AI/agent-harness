@@ -13,8 +13,8 @@ import os
 import sys
 import hashlib
 
-from . import strict_yaml
-from .benchmark_bundles import GRADE_INPUT, _deadline, _hash, _relative
+from . import strict_yaml, evaluation
+from .benchmark_bundles import GRADE_INPUT_SCHEMA, _deadline, _hash, _relative
 from .benchmark_importers import verify_upstream_materialization, _json
 from .benchmark_protocol import checked_bytes
 from .core import HarnessError, digest
@@ -81,12 +81,14 @@ def prepare_evaluation(receipt_path, grade_input, assets_root, *, receipt_digest
     """Concrete immutable evaluator inputs + native suite command; no execution."""
     _deadline(deadline)
     value=verify_upstream_materialization(receipt_path,receipt_digest=receipt_digest,deadline=deadline)
-    inputs=strict_yaml.load(grade_input,GRADE_INPUT)
-    if inputs['trial_id']!=value['trial_id'] or inputs['manifest_digest']!=value['manifest_digest'] or inputs['cwd']!=value['source_root']:
+    inputs=strict_yaml.load(grade_input,GRADE_INPUT_SCHEMA)
+    identity=inputs if inputs["schema_version"]==1 else inputs["subject"]
+    if identity['trial_id']!=value['trial_id'] or identity['manifest_digest']!=value['manifest_digest'] or inputs['cwd']!=value['source_root']:
         raise HarnessError('BENCH_EVALUATOR_SUBJECT_MISMATCH')
     if inputs['solve_outcome']=='unknown':raise HarnessError('BENCH_UNKNOWN_SOLVE_OUTCOME')
     if inputs['solve_outcome']not in('completed','failed'):
         return {'terminal_outcome':inputs['solve_outcome'],'value':value,'inputs':inputs}
+    transfer=None
     plan=value['plan'];controller=Path(receipt_path).parent
     from .benchmark_protocol import validate_prepared_profile
     validated=validate_prepared_profile(plan['profile_ref'],assets_root)
@@ -138,6 +140,8 @@ def prepare_evaluation(receipt_path, grade_input, assets_root, *, receipt_digest
                 atomic_write(destination,read_regular_file(path),exclusive=True)
                 declared=next((item.get('mode','100644') for item in plan['solve_files'] if item['path']==path.relative_to(source).as_posix()),'100644')
                 os.chmod(destination,0o700 if (declared=='100755' if os.name=='nt' else _ordinary(path).st_mode&0o111) else 0o600)
+        if inputs['schema_version']==2:
+            transfer=evaluation.transfer_candidate(inputs,cwd)
         for label in ('tests','examples'):
             for path in (protected/label).rglob('*') if (protected/label).exists() else ():
                 _deadline(deadline);_ordinary(path,directory=path.is_dir())
@@ -157,6 +161,7 @@ def prepare_evaluation(receipt_path, grade_input, assets_root, *, receipt_digest
             'terminal_tests_source':str(protected/'task/tests') if plan['protocol']=='harbor-task-v1' else None,
             'terminal_reward_target':'/logs/verifier' if plan['protocol']=='harbor-task-v1' else None},
         'timeout':plan['parameters']['verifier_timeout_seconds'],
+        'transfer':transfer,
         'dispatch_digest':digest([value['plan_digest'],inputs['solve_digest'],command,str(result_path)])}
 
 
@@ -191,6 +196,14 @@ def evaluate_upstream(receipt_path, grade_input, assets_root, *, receipt_digest,
     """Run only via an explicit evaluator boundary; default refuses before IO."""
     if boundary is None:raise HarnessError('ENVIRONMENT_ISOLATION_UNAVAILABLE')
     request=prepare_evaluation(receipt_path,grade_input,assets_root,receipt_digest=receipt_digest,deadline=deadline)
+    context=None
+    if request['inputs']['schema_version']==2:
+        value=request['value']
+        artifact_roots=[('protected',value['evaluator_root']),('candidate',value['source_root'])]
+        if 'output_root'in request:artifact_roots.append(('generated',request['output_root']))
+        context=evaluation.begin_evaluation(grade_input,receipt_path,bundle_digest=value['plan_digest'],
+            task_id=value['plan']['task_id'],manifest_digest=value['manifest_digest'],trial_id=value['trial_id'],
+            artifact_roots=artifact_roots,transfer=request.get('transfer'))
     if 'terminal_outcome'in request:outcome=request['terminal_outcome']
     else:
         from .benchmark_protocol import validate_prepared_profile
@@ -207,9 +220,12 @@ def evaluate_upstream(receipt_path, grade_input, assets_root, *, receipt_digest,
         # Revalidate protected metadata and exact receipt after evaluator IO.
         verify_upstream_materialization(receipt_path,receipt_digest=receipt_digest,deadline=deadline)
         outcome=parse_upstream_result(request,execution)
+    if context is not None:
+        return evaluation.finish_evaluation(context,outcome=outcome,command=request.get('command',[]),
+            returncode=execution['returncode'] if 'execution'in locals() else None)
+    # Explicit v1 request compatibility only; never fallback from v2 failure.
     inputs=request['inputs']
     grade={'schema_version':1,'record_type':'independent_grade','manifest_digest':inputs['manifest_digest'],
         'trial_id':inputs['trial_id'],'evaluator_digest':inputs['evaluator_digest'],'outcome':outcome}
-    from . import evaluation
     strict_yaml.validate(grade,evaluation.GRADE);_deadline(deadline)
     return grade

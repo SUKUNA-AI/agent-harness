@@ -223,7 +223,8 @@ class TaskFlowPreparationTests(unittest.TestCase):
         arm = summary['arms'][report['arm']]
         self.assertEqual(arm['reported_trials'], 1); self.assertEqual(arm['observed_tokens'], 14)
         self.assertEqual(arm['usage_coverage'], 'partial'); self.assertEqual(arm['reported_wall_seconds'], [5])
-        self.assertEqual(arm['time_to_verified_seconds'], [4]); self.assertEqual(arm['reported_full_mission_verified'], 1)
+        self.assertEqual(arm['time_to_verified_seconds'], [None]); self.assertEqual(arm['reported_full_mission_verified'], 0)
+        self.assertEqual(arm['unverified_legacy_grades'], 1)
         self.assertEqual(sum(p['seconds'] or 0 for p in arm['phase_seconds']), 8)
         self.assertIsNone(arm['manual_interventions_observed']); self.assertEqual(summary['measurement_kind'], 'synthetic')
         report['usage_coverage'] = 'complete'

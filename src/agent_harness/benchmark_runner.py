@@ -94,7 +94,7 @@ PAYLOADS = {
     "measurements": MEASUREMENTS,
     "grade_intent": object_schema({"execution_id": SHORT, "solve_digest": HASH, "input_ref": evaluation.FILE_REF},
         ("execution_id", "solve_digest", "input_ref")),
-    "grade": evaluation.GRADE,
+    "grade": evaluation.GRADE_SCHEMA,
     "trial": evaluation.TRIAL,
 }
 # The empty registry is intentional. A Python flag, transcript or manifest file
@@ -160,6 +160,8 @@ class CodexBenchmarkAdapter:
     production adapter must be registered in reviewed package code after actual
     boundary qualification; a caller cannot assert itself into that registry.
     """
+    grade_protocol_version = 2
+
     def identity(self):
         raise HarnessError("ENVIRONMENT_ISOLATION_UNAVAILABLE: no prepared transport")
 
@@ -304,7 +306,7 @@ class BenchmarkRunner:
                     raise HarnessError("BENCH_COMPLETION_WITHOUT_DISPATCH")
                 if kind in {"measurements", "grade_intent", "grade", "trial"} and ("solve", trial_id) not in by_subject:
                     raise HarnessError("BENCH_GRADING_WITHOUT_SOLVE")
-            if kind in {"prepared", "grade", "trial"} and row["payload"]["trial_id"] != trial_id:
+            if kind in {"prepared", "grade", "trial"} and (evaluation.grade_identity(row["payload"]) if kind == "grade" else row["payload"])["trial_id"] != trial_id:
                 raise HarnessError("BENCH_TRIAL_BINDING_MISMATCH")
         return records
 
@@ -625,20 +627,48 @@ class BenchmarkRunner:
         self._contract(prepared)
         self._binding(prepared, solve["result_snapshot_digest"])
         trial_id = row["trial_id"]
-        grade = next((r for r in records if r["kind"] == "grade" and r["trial_id"] == trial_id), None)
+        grade = next((r for r in records if r['kind'] == 'grade' and r['trial_id'] == trial_id), None)
+        intent = next((r for r in records if r['kind'] == 'grade_intent' and r['trial_id'] == trial_id), None)
         if grade:
-            return grade["payload"]
-        intent = next((r for r in records if r["kind"] == "grade_intent" and r["trial_id"] == trial_id), None)
+            if intent is None: raise HarnessError('BENCH_GRADE_INPUT_BINDING')
+            from .benchmark_bundles import GRADE_INPUT_SCHEMA
+            frozen = loads(evaluation.checked_ref(intent['payload']['input_ref'], self.store.root), GRADE_INPUT_SCHEMA)
+            identity = evaluation.grade_identity(grade['payload'])
+            if (grade['payload']['schema_version'] != frozen['schema_version'] or frozen['solve_digest'] != digest(solve)
+                    or any(identity[key] != frozen[key] for key in ('manifest_digest', 'trial_id', 'evaluator_digest'))):
+                raise HarnessError('BENCH_GRADE_INPUT_BINDING')
+            evaluation.verify_execution_grade(grade['payload'], self.store.root,
+                expected_subject=frozen.get('subject'), expected_input_ref=intent['payload']['input_ref'])
+            return grade['payload']
         if intent:
             raise HarnessError("BENCH_UNKNOWN_GRADE_OUTCOME: reconcile exact grading operation; no replay")
         suite = next(s for s in self.manifest["suites"] if s["id"] == row["suite"])
         relative = "trials/" + trial_id + "/grade-input.yaml"
-        inputs = {"schema_version": 1, "manifest_digest": self.state["manifest_digest"], "trial_id": trial_id,
-            "evaluator_digest": suite["evaluator"]["sha256"], "solve_digest": digest(solve),
-            "cwd": prepared["cwd"], "solve_outcome": solve["outcome"]}
-        self.store.write(relative, inputs, {"type": "object", "properties": {
-            "schema_version": {"const": 1}, "manifest_digest": HASH, "trial_id": HASH, "evaluator_digest": HASH,
-            "solve_digest": HASH, "cwd": SHORT, "solve_outcome": SHORT}, "required": list(inputs)}, exclusive=True)
+        # Real materialized producers independently validate this bundle pin.
+        controller = Path(prepared['contract_path']).parent
+        bundle_digest = digest(prepared)
+        for name in ('materialized.yaml', 'upstream-materialized.yaml'):
+            if (controller/name).is_file():
+                materialized = loads(read_regular_file(controller/name))
+                bundle_digest = materialized.get('bundle_digest', materialized.get('plan_digest'))
+                break
+        # An explicit controller API version selects the frozen compatibility
+        # branch. Missing/unknown versions and v2 failures never downgrade.
+        protocol = getattr(self.adapter, 'grade_protocol_version', 2)
+        if type(protocol) is not int or protocol not in (1, 2):
+            raise HarnessError('BENCH_UNSUPPORTED_GRADE_PROTOCOL')
+        if protocol == 1:
+            from .benchmark_bundles import GRADE_INPUT
+            inputs = {'schema_version': 1, 'manifest_digest': self.state['manifest_digest'], 'trial_id': trial_id,
+                'evaluator_digest': suite['evaluator']['sha256'], 'solve_digest': digest(solve),
+                'cwd': prepared['cwd'], 'solve_outcome': solve['outcome']}
+            self.store.write(relative, inputs, GRADE_INPUT, exclusive=True)
+        else:
+            inputs = evaluation.write_grade_input(self.store.path(relative), evidence_root=self.store.root,
+                manifest_digest=self.state['manifest_digest'], task_id=row['task_id'], trial_id=trial_id,
+                source_root=prepared['cwd'], evaluator_bytes=evaluation.checked_ref(suite['evaluator'], self.state['assets_root']),
+                toolchain_bytes=evaluation.checked_ref(suite['toolchain'], self.state['assets_root']),
+                bundle_digest=bundle_digest, solve_digest=digest(solve), solve_outcome=solve['outcome'])
         ref = {"path": relative, "sha256": hashlib.sha256(read_regular_file(self.store.path(relative))).hexdigest()}
         self._record("grade_intent", trial_id, {"execution_id": uuid.uuid4().hex, "solve_digest": digest(solve), "input_ref": ref}, record_id=trial_id + "-grade-intent")
         evaluator = evaluation.checked_ref(suite["evaluator"], self.state["assets_root"])
@@ -651,7 +681,7 @@ class BenchmarkRunner:
             # A callback is the sole dispatch path once selected. An unknown
             # external outcome must never fall back to a second argv run.
             grade = self._call_phase(independent, row, prepared, self.store.path(relative))
-            validate(grade, evaluation.GRADE)
+            validate(grade, evaluation.GRADE_SCHEMA)
         else:
             argv = self._call_phase(self.adapter.evaluator_argv, row, prepared, self.store.path(relative))
             if not argv or str(evaluator_path) not in argv:
@@ -659,8 +689,12 @@ class BenchmarkRunner:
             result = self._capture(argv, 30)
             if result.returncode:
                 raise HarnessError("BENCH_UNKNOWN_GRADE_OUTCOME: evaluator failed; preserve intent and diagnostics")
-            grade = loads(result.stdout, evaluation.GRADE)
-        if any(grade[key] != inputs[key] for key in ("manifest_digest", "trial_id", "evaluator_digest")):
+            grade = loads(result.stdout, evaluation.GRADE_SCHEMA)
+        if grade['schema_version'] != protocol:
+            raise HarnessError('BENCH_GRADE_PROTOCOL_MISMATCH')
+        evaluation.verify_execution_grade(grade, self.store.root, expected_subject=inputs["subject"] if grade["schema_version"] == 2 else None, expected_input_ref=ref)
+        identity = evaluation.grade_identity(grade)
+        if any(identity[key] != inputs[key] for key in ("manifest_digest", "trial_id", "evaluator_digest")):
             raise HarnessError("BENCH_GRADE_BINDING_MISMATCH")
         forced = {"timeout", "cancelled", "environment_error"}
         if solve["outcome"] in forced and grade["outcome"] != solve["outcome"]:
@@ -741,7 +775,7 @@ class BenchmarkRunner:
                 grade = self._grade(row, prepared, solve, self.records())
                 grade_ref = "grades/" + row["trial_id"] + ".yaml"
                 if not self.store.path(grade_ref).exists():
-                    self.store.write(grade_ref, grade, evaluation.GRADE, exclusive=True)
+                    self.store.write(grade_ref, grade, evaluation.GRADE_SCHEMA, exclusive=True)
                 ref = {"path": grade_ref, "sha256": hashlib.sha256(read_regular_file(self.store.path(grade_ref))).hexdigest()}
                 dispatched_at = datetime.fromisoformat(dispatch["created_at"].replace("Z", "+00:00"))
                 elapsed = max(solve["elapsed_seconds"], (datetime.now(timezone.utc) - dispatched_at).total_seconds())
@@ -750,6 +784,9 @@ class BenchmarkRunner:
                     "usage_coverage": solve["usage_coverage"], "usage": solve["usage"], "claimed_accepted": solve["claimed_accepted"],
                     "time_to_accepted_seconds": elapsed if grade["outcome"] == "accepted" else None,
                     "evaluator_receipt": ref, **measured}
+                if grade['schema_version'] == 2:
+                    trial.update(schema_version=trial['schema_version']+2, grade_subject=grade['subject'],
+                        evaluator_input_digest=grade['evaluator_input_digest'])
                 self._record("trial", row["trial_id"], trial, record_id=row["trial_id"] + "-trial")
                 return self.status()
             except (HarnessError, OSError, ValueError) as error:

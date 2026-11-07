@@ -66,6 +66,11 @@ def compile_packet(supervisor, instructions, payload):
 def schema_file(supervisor, name, version):
     """Give the client one concrete schema, without conditional legacy branches."""
     from .strict_yaml import _schema
+    if name == "managed-review.schema.json" and version == 3:
+        schema = _schema("managed-review.v3.schema.json")
+        return _publish(supervisor, (json.dumps(schema, sort_keys=True) + "\n").encode("utf-8"), ".schema.json")["path"]
+    if version not in (1, 2):
+        raise HarnessError("Unsupported output schema version")
     schema = deepcopy(_schema(name))
     schema.pop("allOf", None)
     schema["properties"]["schema_version"] = {"const": version}
@@ -142,10 +147,9 @@ def invoke(adapter, prompt, *, slot, **options):
         result = {"status": "failed", "error": str(error), "usage": None,
             "dispatch_state": "not_dispatched_proven", "process_tree_stopped": True,
             "thread_id": options.get("session_id"), "turn_started": False, "events": 0, "logs": {}}
-        slot.complete(result)
         return result
     except Exception as error:
         # Validation was already completed. An arbitrary adapter exception can
         # happen after a side effect even when on_process never reached us.
         return {"status": "unknown_outcome", "error": "Adapter outcome uncertain: " + type(error).__name__,
-            "usage": None, "process_tree_stopped": False, "turn_started": False, "logs": {}}
+            "usage": None, "process_tree_stopped": None, "turn_started": False, "logs": {}}

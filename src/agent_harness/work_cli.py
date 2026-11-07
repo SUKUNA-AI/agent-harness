@@ -111,6 +111,7 @@ def dispatch(argv):
             p.add_argument("--contract", required=True)
             p.add_argument("--cwd", default=os.getcwd())
             p.add_argument("--plan", help="Explicit versioned task plan; semantic validation is mandatory")
+            p.add_argument("--max-planning-rounds", type=int, help="Only tighten managed contract2 plan-quality rounds")
             p.add_argument("--native-disabled-proof", help="Version/binary-bound native tools inventory proof for managed concurrency")
         if action == "mission-update":
             p.add_argument("--contract", required=True)
@@ -128,7 +129,7 @@ def dispatch(argv):
     commands.add_parser("memory", help="Opt-in repository memory; memory --help")
     commands.add_parser("format-bench", help="Measured JSON/Markdown/TOON selection; format-bench --help")
     commands.add_parser("benchmark", help="Offline frozen portfolio validation and paired accounting; benchmark --help")
-    commands.add_parser("migrate", help="Explicit versioned state migration; migrate --help")
+    commands.add_parser("migrate", help="Explicit v1 to v2 or --target-version 3 plan-quality upgrade; migrate --help")
     args = parser.parse_args(argv)
     try:
         from .supervisor import Supervisor, TERMINAL
@@ -136,7 +137,8 @@ def dispatch(argv):
         if args.action == "start":
             run_dir = Path(args.run_dir).absolute() if args.run_dir else state_dir / "runs" / ("work-" + uuid.uuid4().hex)
             supervisor = Supervisor.create(args.contract, run_dir=run_dir, cwd=args.cwd,
-                                           state_dir=state_dir, adapter=_adapter(args.codex))
+                                           state_dir=state_dir, adapter=_adapter(args.codex),
+                                           max_planning_rounds=args.max_planning_rounds)
             supervisor.plan_input = args.plan
             supervisor.native_disabled_proof = args.native_disabled_proof
             result = _foreground(supervisor, supervisor.start)

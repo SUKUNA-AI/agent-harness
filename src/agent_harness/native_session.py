@@ -365,13 +365,45 @@ def hook_packet(state, event, *, max_bytes=4096):
         raise HarnessError("Invalid agent identity")
     from .native_observability import observe
     observe(state, event)
-    if not agent and (event.get("agent_type") != "root" or event.get("parent_session_id")):
+    # Shipped SessionStart has no agent fields. Infer only the bootstrap scope;
+    # the original observed identity above stays unknown/unbound. Explicit child,
+    # unknown or null type without a stable agent ID must not claim root scope.
+    root_scope = (event.get("parent_session_id") is None
+                  and ("agent_type" not in event or event["agent_type"] == "root"))
+    if not agent and not root_scope:
         raise HarnessError("AMBIGUOUS_AGENT_IDENTITY: unbound hook cannot update root checkpoint")
     key = hashlib.sha256((identifier + "\0" + (agent or "root") + "\0" + str(root)).encode()).hexdigest()[:32]
     session_id = "native-" + key
     exists = (Path(state) / "native-sessions" / session_id / "session.json").exists()
     return session_packet(state, root=root, goal=None if exists else HOOK_GOAL, session=session_id,
                           lifecycle_source=event["source"], max_bytes=max_bytes)
+
+
+def hook_output(value, *, max_bytes):
+    """Encode the complete consumer envelope once; never rerun bootstrap to fit."""
+    def encode(context):
+        return json_bytes({"hookSpecificOutput": {"hookEventName": "SessionStart",
+            "additionalContext": HOOK_HEADER.decode("utf-8") + canonical(context).decode("utf-8")}}, max_bytes=max_bytes)
+
+    try:
+        return encode(value)
+    except HarnessError as error:
+        if not str(error).startswith("BUDGET_TOO_SMALL"):
+            raise
+    if "packet" in value:
+        # The already saved reducer packet owns every omitted item and pointer.
+        # Required fields are indivisible, including goal/constraints and IDs.
+        minimal = {key: value[key] for key in ("session", "root", "evidence")}
+        minimal["packet"] = {"required": value["packet"]["required"], "complete": False,
+            "optional_context": {"omitted": True, "reason": "hook_wire_budget", "pointer": value["evidence"]}}
+        try:
+            return encode(minimal)
+        except HarnessError as error:
+            if not str(error).startswith("BUDGET_TOO_SMALL"):
+                raise
+    # Do not silently clip mandatory context or claim successful delivery.
+    return encode({"schema_version": 1, "degraded": True, "acceptance": "not_performed",
+                   "reason_code": "BUDGET_TOO_SMALL", "required_context": "not_delivered"})
 
 
 def main(argv=None):
@@ -468,7 +500,7 @@ def main(argv=None):
             raw = sys.stdin.buffer.read(65537)
             if len(raw) > 65536:
                 raise HarnessError("Hook input exceeds 65536 bytes")
-            packet = hook_packet(state, json.loads(raw), max_bytes=args.max_bytes - len(HOOK_HEADER))
+            packet = hook_packet(state, json.loads(raw), max_bytes=args.max_bytes)
         else:
             if not SESSION_ID.fullmatch(args.session):
                 raise HarnessError("Invalid session ID")
@@ -479,9 +511,6 @@ def main(argv=None):
             ledger = Ledger(directory, current["repository_identity"], task_id="native-session")
             packet = ledger.govern({"argv": json.loads(args.argv_json), "cwd": str(root),
                                     "effect": args.effect}, current)
-        if args.action == "hook":
-            # Plain text SessionStart stdout является поддержанным additional context.
-            write_utf8(HOOK_HEADER)
         if args.action == "govern":
             target = directory / ("packet-" + uuid.uuid4().hex + ".json")
             persist(target, packet)
@@ -489,15 +518,21 @@ def main(argv=None):
         else:
             packet = {"session": packet["required"]["session"], "root": packet["required"]["root"],
                       "evidence": packet["required"]["packet_pointer"], "packet": packet}
-        write_json(packet, max_bytes=args.max_bytes - (len(HOOK_HEADER) if args.action == "hook" else 0))
+        if args.action == "hook":
+            write_utf8(hook_output(packet, max_bytes=args.max_bytes))
+        else:
+            write_json(packet, max_bytes=args.max_bytes)
         return 0
     except BrokenPipeError:
         # The operation receipt, when requested, survives failed stdout delivery.
         return 2
     except (OSError, ValueError, KeyError, RuntimeError) as error:
-        if args.action == "hook" and isinstance(error, HarnessError) and str(error).startswith(("AMBIGUOUS_", "OWN_")):
-            write_json({"schema_version": 1, "degraded": True, "acceptance": "not_performed",
-                        "reason_code": "NATIVE_BOOTSTRAP_UNAVAILABLE"}, max_bytes=args.max_bytes)
+        if (args.action == "hook" and 2048 <= args.max_bytes <= 65536 and isinstance(error, HarnessError)
+                and str(error).startswith(("AMBIGUOUS_", "OWN_", "BUDGET_TOO_SMALL"))):
+            budget = str(error).startswith("BUDGET_TOO_SMALL")
+            write_utf8(hook_output({"schema_version": 1, "degraded": True, "acceptance": "not_performed",
+                "reason_code": "BUDGET_TOO_SMALL" if budget else "NATIVE_BOOTSTRAP_UNAVAILABLE",
+                "required_context": "not_delivered"}, max_bytes=args.max_bytes))
             return 0
         # Не эхоим malformed JSON: его текст может содержать prompt или секрет.
         print(json.dumps({"error": "Native session failed", "type": type(error).__name__}), file=sys.stderr)

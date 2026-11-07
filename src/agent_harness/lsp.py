@@ -140,7 +140,7 @@ def doctor(root=".", *, file=None, server=None, language=None, max_bytes=8192):
 
 class Session:
     """A bounded stdio JSON-RPC session with tree cleanup on every exit path."""
-    def __init__(self, root, argv, *, timeout=20, settings=None):
+    def __init__(self, root, argv, *, timeout=20, settings=None, backend=None):
         if (type(timeout) not in (int, float) or not 0.1 <= timeout <= 120
                 or (settings is not None and not isinstance(settings, dict))):
             raise HarnessError("LSP timeout must be 0.1..120 seconds and settings must be an object")
@@ -159,6 +159,12 @@ class Session:
         self.capabilities = {}
         self.server_info = {"name": Path(argv[0]).name}
         self.initialized = False
+        self.backend = backend if backend is not None else os.environ.get("AGENT_HARNESS_LSP_BACKEND", "python")
+        if not isinstance(self.backend,str) or self.backend not in {"python", "native"}:
+            raise HarnessError("AGENT_HARNESS_LSP_BACKEND must be python or native")
+        self._native = None
+        self._native_shutdown_ack = False
+        self._native_exit_admitted = False
 
     def _post(self, value):
         while not self.stop.is_set():
@@ -244,6 +250,9 @@ class Session:
         remaining = (self.deadline if deadline is None else deadline) - time.monotonic()
         if remaining <= 0:
             raise HarnessError("LSP session timed out")
+        if self._native is not None:
+            self._native.send(body, self.deadline if deadline is None else deadline)
+            return
         try:
             self.outgoing.put(b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n\r\n" + body,
                               timeout=remaining)
@@ -336,17 +345,23 @@ class Session:
     def __enter__(self):
         flags = subprocess.CREATE_NEW_PROCESS_GROUP | 0x00000004 if os.name == "nt" else 0
         try:
-            self.process = subprocess.Popen(self.argv, cwd=self.root, stdin=subprocess.PIPE,
+            if self.backend == "native":
+                from .lsp_native import NativeTransport
+                self._native_shutdown_ack = self._native_exit_admitted = False
+                self._native = NativeTransport(self.root,self.argv,self.deadline,self._post)
+                self._native.start()
+            else:
+                self.process = subprocess.Popen(self.argv, cwd=self.root, stdin=subprocess.PIPE,
                                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0,
                                             shell=False, start_new_session=os.name != "nt", creationflags=flags)
-            if os.name == "nt":
-                from .runner import WindowsJob
-                self.job = WindowsJob(self.process)
-                self.job.resume_suspended_process(self.process)
-            for target in (self._read, self._write, self._stderr):
-                thread = threading.Thread(target=target, daemon=True)
-                thread.start()
-                self.threads.append(thread)
+                if os.name == "nt":
+                    from .runner import WindowsJob
+                    self.job = WindowsJob(self.process)
+                    self.job.resume_suspended_process(self.process)
+                for target in (self._read, self._write, self._stderr):
+                    thread = threading.Thread(target=target, daemon=True)
+                    thread.start()
+                    self.threads.append(thread)
             initialized = self.request("initialize", {
                 "processId": os.getpid(), "clientInfo": {"name": "agent-harness"},
                 "rootUri": self.root.as_uri(), "rootPath": str(self.root),
@@ -376,8 +391,14 @@ class Session:
             self.notify("initialized", {})
             self.notify("workspace/didChangeConfiguration", {"settings": self.settings})
             return self
-        except BaseException:
-            self.close()
+        except BaseException as error:
+            if self._native is not None:
+                try:
+                    self.close()
+                except (HarnessError,OSError) as close_error:
+                    error.add_note("Native LSP closure also failed: "+str(close_error)[:300])
+            else:
+                self.close()
             raise
 
     def open(self, source, language):
@@ -410,6 +431,37 @@ class Session:
         return {"request_barrier": barrier, "progress_quiet": True, "complete_index_verified": False}
 
     def close(self):
+        if self._native is not None:
+            transport = self._native
+            try:
+                if self.initialized and not transport._cancelled:
+                    transport.closing = True
+                    deadline = time.monotonic()+0.4
+                    try:
+                        if transport.error or transport._closed.is_set():
+                            raise HarnessError("Native LSP ended before shutdown acknowledgement")
+                        if self.request("shutdown",None,deadline=deadline) is not None:
+                            raise HarnessError("LSP shutdown acknowledgement must have a null result")
+                        self._native_shutdown_ack = True
+                        self.notify("exit",None,deadline=deadline)
+                        self._native_exit_admitted = True
+                    except (HarnessError,OSError) as error:
+                        if transport.error is None:
+                            close_error = HarnessError("Native LSP shutdown/exit handshake failed")
+                            close_error.__cause__ = error
+                            transport.error = close_error
+            finally:
+                self.stop.set()
+                try:
+                    transport.close(require_terminal=self.initialized and not transport._cancelled)
+                finally:
+                    if not (self._native_shutdown_ack and self._native_exit_admitted) or transport._cancelled:
+                        transport.session_complete = False
+                    self.stderr_bytes = transport.stderr_bytes
+                    self.stderr_tail = transport.stderr_tail
+                    if transport.cleanup_complete:
+                        self._native = None
+            return
         if self.process is None:
             return
         process = self.process
@@ -442,6 +494,12 @@ class Session:
             self.process = None
 
     def __exit__(self, exc_type, exc, traceback):
+        if self._native is not None and exc is not None:
+            try:
+                self.close()
+            except (HarnessError,OSError) as close_error:
+                exc.add_note("Native LSP closure also failed: "+str(close_error)[:300])
+            return False
         self.close()
 
 

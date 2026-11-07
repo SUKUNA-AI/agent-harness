@@ -730,6 +730,17 @@ def redacted_diff(path: Path, old: bytes | None, new: bytes) -> str:
     return "\n".join("<redacted sensitive line>" if SENSITIVE.search(line) and not line.startswith(("---", "+++")) else line for line in lines)
 
 
+def _supported_install_manifest(value):
+    if not isinstance(value, dict) or type(value.get("schema_version")) is not int or value["schema_version"] not in {1, 2, 3}:
+        return False
+    if value["schema_version"] == 3:
+        keys = {"schema_version", "policy_version", "package_root", "install_id", "created", "files",
+            "previous_manifest", "status", "boundary_protocol", "commit_protocol"}
+        return (set(value) == keys and value["commit_protocol"] == "active-binding-v1"
+            and value["boundary_protocol"] == "physical-parent-v2")
+    return True
+
+
 def active_manifest(state: Path) -> dict | None:
     p = state / "active.json"
     if not p.exists():
@@ -741,7 +752,7 @@ def active_manifest(state: Path) -> dict | None:
     if not target.is_file() or digest(required_read(target)) != ref["sha256"]:
         raise InstallError("Active installation manifest is missing or modified")
     manifest = json.loads(decode(required_read(target)))
-    if not isinstance(manifest, dict) or manifest.get("schema_version") not in {1, 2} or manifest.get("status") != "written_pending_native_verification":
+    if not _supported_install_manifest(manifest) or manifest.get("status") != "written_pending_native_verification":
         raise InstallError("Active installation manifest is not a committed installation")
     return manifest
 
@@ -750,7 +761,7 @@ def manifest_chain(manifest: dict | None) -> list[dict]:
     chain = []
     seen = set()
     while manifest:
-        if not isinstance(manifest, dict) or manifest.get("schema_version") not in {1, 2}:
+        if not _supported_install_manifest(manifest):
             raise InstallError("Unsupported installation manifest version")
         identity = manifest["install_id"]
         if identity in seen:
@@ -1043,7 +1054,7 @@ def apply_plan(plans: list[dict], state: Path, package: Path) -> dict:
         atomic(installed, p["after"])
         files.append({"path": str(p["path"]), "before_sha256": digest(p["before"]) if p["before"] is not None else None, "after_sha256": digest(p["after"]), "backup": str(backup) if p["before"] is not None else None, "installed_copy": str(installed), "kind": p["kind"], "meta": p["meta"], "metadata_before": p["_metadata"]["security"] if p["_metadata"] else None,
                       "parent_binding": p["_parent_binding"], "target_before": p["_metadata"], "progress": "pending"})
-    manifest = {"schema_version": 2, "policy_version": VERSION, "package_root": str(package), "install_id": stamp, "created": dt.datetime.now(dt.timezone.utc).isoformat(), "files": files, "previous_manifest": json.loads(previous_ref) if previous_ref else None, "status": "prepared", "boundary_protocol": "physical-parent-v2"}
+    manifest = {"schema_version": 3, "policy_version": VERSION, "package_root": str(package), "install_id": stamp, "created": dt.datetime.now(dt.timezone.utc).isoformat(), "files": files, "previous_manifest": json.loads(previous_ref) if previous_ref else None, "status": "prepared", "boundary_protocol": "physical-parent-v2", "commit_protocol": "active-binding-v1"}
     manifest_path = transaction / "manifest.json"
     atomic(manifest_path, canonical(manifest))
     def preparing(index, receipt):
@@ -1105,9 +1116,18 @@ def apply_plan(plans: list[dict], state: Path, package: Path) -> dict:
                     recovery_errors.append(str(p["path"]) + " (concurrent edit preserved)")
             except (OSError, InstallError):
                 recovery_errors.append(str(p["path"]))
-        manifest["status"] = "failed_recovery_required" if recovery_errors else "failed_restored_unchanged_targets"
+        failure_status = "failed_recovery_required" if recovery_errors else "failed_restored_unchanged_targets"
         try:
-            atomic(manifest_path, canonical(manifest))
+            if "_applied_metadata" in pointer_plan:
+                # Once active publication may have happened, its referenced
+                # manifest is immutable, even if compensation restored active.
+                atomic(transaction / "recovery.json", canonical({"schema_version": 1,
+                    "record_type": "installation_recovery", "status": failure_status,
+                    "manifest": {"manifest": str(manifest_path), "sha256": digest(required_read(manifest_path))},
+                    "error": str(original_error), "unrestored": recovery_errors}))
+            else:
+                manifest["status"] = failure_status
+                atomic(manifest_path, canonical(manifest))
         except (OSError, InstallError):
             recovery_errors.append("transaction status")
         if recovery_errors:
@@ -1116,14 +1136,122 @@ def apply_plan(plans: list[dict], state: Path, package: Path) -> dict:
                 "Unrestored or unrecorded targets: " + ", ".join(recovery_errors)
             ) from original_error
         raise
+    # The active binding is the commit point, not native verification and not
+    # this extra historical proof. Failure here must not roll back or rewrite
+    # the manifest already selected by active.json.
+    _retain_install_commit(state, manifest_path, manifest, new_ref, pointer_plan)
     return {"status": manifest["status"], "manifest": str(manifest_path), "files_changed": len(files), "policy_version": VERSION,
             "hook_status": "configured_trust_and_runtime_pending",
             "next_step": "Open a fresh Codex process, inspect /hooks and trust the exact handler in the client; verify a new session. Trust state is not edited."}
 
 
+def _retain_install_commit(state, manifest_path, manifest, active_bytes, pointer_plan):
+    from .supervisor_store import atomic_write
+    from .core import HarnessError
+    pointer = state / "active.json"
+    if read(pointer) != active_bytes or not owns_applied_metadata(pointer_plan):
+        raise InstallError("Installation published; commit observation changed; recovery_required, preserve targets and manifest")
+    value = {"schema_version": 1, "record_type": "installation_commit",
+        "install_id": manifest["install_id"], "manifest": json.loads(active_bytes),
+        "active_pointer": str(pointer), "parent_binding": parent_binding(pointer),
+        "publication": pointer_plan["_applied_metadata"]}
+    value["record_digest"] = digest(canonical(value))
+    path = manifest_path.parent / "commit.json"
+    raw = canonical(value)
+    previous = read(path)
+    if previous is not None:
+        if previous != raw:
+            raise InstallError("Installation commit receipt integrity conflict; recovery_required")
+        return
+    try:
+        atomic_write(path, raw, exclusive=True)
+    except (OSError, ValueError, HarnessError) as error:
+        raise InstallError("Installation committed; commit receipt publication incomplete; preserve active binding and recover") from error
+
+
+def _installation_committed(manifest, *, state=None, source_ref=None):
+    """Verify current/historical commit proof, without trusting a status label.
+
+    Legacy unbound manifests retain their existing targeted rollback policy;
+    they are not upgraded into physical-parent-v2 ownership evidence.
+    """
+    if not _supported_install_manifest(manifest):
+        raise InstallError("Unsupported installation manifest version or commit protocol")
+    if manifest.get("boundary_protocol") != "physical-parent-v2" and "install_id" not in manifest:
+        if manifest.get("status") == "prepared" or any("progress" in row for row in manifest.get("files", [])):
+            raise InstallError("Legacy interrupted installation ownership is unavailable; recovery_required")
+        return None
+    rows = manifest.get("files", [])
+    if not rows or not isinstance(manifest.get("install_id"), str):
+        raise InstallError("Installation manifest binding is incomplete")
+    transaction = Path(rows[0]["installed_copy"]).parent
+    inferred_state = transaction.parent.parent
+    if transaction.name != manifest["install_id"] or transaction.parent.name != "installs":
+        raise InstallError("Installation transaction path binding conflict")
+    if state is not None and Path(state) != inferred_state:
+        raise InstallError("Installation state binding conflict")
+    state = inferred_state
+    if any(Path(row["installed_copy"]).parent != transaction or
+           row.get("backup") and Path(row["backup"]).parent != transaction for row in rows):
+        raise InstallError("Installation backup path binding conflict")
+    path = transaction / "manifest.json"
+    raw = required_read(path)
+    if canonical(json.loads(raw)) != canonical(manifest):
+        raise InstallError("Installation immutable manifest binding conflict")
+    expected_ref = {"manifest": str(path), "sha256": digest(raw)}
+    if source_ref is not None and source_ref != expected_ref:
+        raise InstallError("Installation source manifest binding conflict")
+    retained = read(transaction / "commit.json")
+    committed = False
+    if retained is not None:
+        try:
+            def unique(items):
+                value = {}
+                for key, item in items:
+                    if key in value:
+                        raise ValueError("duplicate installation commit key")
+                    value[key] = item
+                return value
+            def finite(value):
+                raise ValueError("non-finite installation commit value")
+            value = json.loads(retained, object_pairs_hook=unique, parse_constant=finite)
+            keys = {"schema_version", "record_type", "install_id", "manifest", "active_pointer", "parent_binding", "publication", "record_digest"}
+            if (not isinstance(value, dict) or set(value) != keys or type(value["schema_version"]) is not int
+                    or value["schema_version"] != 1 or value["record_type"] != "installation_commit"
+                    or value["install_id"] != manifest["install_id"] or value["manifest"] != expected_ref
+                    or value["active_pointer"] != str(state / "active.json")
+                    or not isinstance(value["publication"], dict)
+                    or set(value["publication"]) != {"identity", "security"}
+                    or not isinstance(value["publication"]["identity"], list)
+                    or len(value["publication"]["identity"]) != 8
+                    or any(type(item) is not int for item in value["publication"]["identity"])
+                    or not isinstance(value["publication"]["security"], dict)
+                    or not isinstance(value["parent_binding"], list) or not value["parent_binding"]
+                    or value["record_digest"] != digest(canonical({k: v for k, v in value.items() if k != "record_digest"}))):
+                raise ValueError("invalid commit receipt")
+            verify_parent_binding(state / "active.json", value["parent_binding"])
+            committed = True
+        except (ValueError, TypeError, KeyError, RecursionError, FileReadError) as error:
+            raise InstallError("Installation commit receipt integrity conflict; recovery_required") from error
+    active = active_manifest(state)
+    for current in manifest_chain(active):
+        if current.get("install_id") == manifest["install_id"]:
+            if canonical(current) != canonical(manifest):
+                raise InstallError("Installation committed manifest integrity conflict")
+            return True
+    if committed:
+        return True
+    active_ref = read(state / "active.json")
+    previous = manifest.get("previous_manifest")
+    if active_ref is not None and json.loads(active_ref) != previous:
+        raise InstallError("Installation commit evidence ambiguous; recovery_required, no targets changed")
+    return False
+
+
 def rollback_plan(manifest: dict, current_files: dict | None = None) -> list[dict]:
-    if not isinstance(manifest, dict) or manifest.get("schema_version") not in {1, 2}:
+    if not _supported_install_manifest(manifest):
         raise InstallError("Unsupported installation manifest version")
+    committed = _installation_committed(manifest)
     plans = []
     for p in reversed(manifest["files"]):
         path = Path(p["path"])
@@ -1145,7 +1273,7 @@ def rollback_plan(manifest: dict, current_files: dict | None = None) -> list[dic
             raise InstallError(f"Backup integrity error: {path}")
         if current == before:
             continue
-        if manifest.get("status") == "prepared" and "progress" in p:
+        if committed is False:
             receipt = {"identity": p.get("publication_identity"), "security": p.get("metadata_after")}
             if p["progress"] not in {"publishing", "applied"} or receipt["identity"] is None or not matches_receipt(path, receipt):
                 raise InstallError(f"Interrupted installation conflict; user edit preserved: {path}")
@@ -1502,6 +1630,7 @@ def dispatch(command: str, argv: list[str]) -> int:
                     raise InstallError("No active installation manifest; nothing removed")
                 if read(state / "active.json") != active_before:
                     raise InstallError("Concurrent edit to the active installation reference while planning rollback")
+                _installation_committed(manifest, state=state, source_ref=source_ref)
                 planned = rollback_plan(manifest)
                 if command == "uninstall":
                     virtual = {}

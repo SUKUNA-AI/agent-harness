@@ -35,6 +35,18 @@ class GradeCallbackTests(unittest.TestCase):
         self.assertEqual(len(self.effects), 1)
         self.assertEqual(sum(row["kind"] == "grade" for row in runner.records()), 1)
 
+    def test_v2_request_never_downgrades_to_legacy_callback_response(self):
+        self.fixture.adapter.grade_protocol_version = 2
+        self.fixture.adapter.independent_grade = self.grade
+        runner = self.fixture.runner()
+        with patch.object(self.fixture.adapter, 'evaluator_argv', side_effect=AssertionError('no fallback')):
+            first = runner.advance()
+            second = runner.advance()
+        self.assertEqual(first['reason_code'], 'BENCH_GRADE_PROTOCOL_MISMATCH', first)
+        self.assertEqual(second['reason_code'], 'BENCH_UNKNOWN_GRADE_OUTCOME', second)
+        self.assertEqual(len(self.effects), 1)
+        self.assertFalse(any(row['kind'] == 'grade' for row in runner.records()))
+
     def test_callback_effect_then_failure_is_not_replayed_or_given_argv_fallback(self):
         def interrupted(*args, **options):
             self.grade(*args, **options)

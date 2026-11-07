@@ -7,7 +7,10 @@
 
 Публичные API: `prepare(spec_path, *, assets_root, source_roots, output_dir)`,
 `verify(preparation_dir, *, expected_digest=None)` и
-`aggregate(preparation_dir, reports, *, reports_root)`. CLI integration point —
+`aggregate(preparation_dir, reports, *, reports_root)`. Subject-bound producers:
+`write_mission_grade(path, *, preparation_dir, trial_id, execution_evidence, reports_root)`
+и `write_trial_report(path, *, preparation_dir, evaluator_receipt, reports_root, report)`.
+CLI integration point —
 `dispatch(argv)`, для forwarding из основного CLI без дополнительного процесса.
 В основном CLI доступен `work benchmark task-flow-experiment prepare|verify|aggregate`; standalone CLI работает через `python -m agent_harness.task_flow_experiment`.
 
@@ -167,7 +170,21 @@ conflicting report и пересекающиеся invocation IDs разных t
 bundle digest, candidate/trial/preparation binding и producer, отличным от solver.
 Его `execution_evidence` обязан быть существующим benchmark `independent_grade`
 receipt с теми же subject digests и согласованным outcome. Просто normalized
-evaluator assets или preparation receipt не проходят эту проверку. Проверка
+evaluator assets или preparation receipt не проходят эту проверку.
+
+Строгий путь использует `independent_grade` v2, `task_flow_mission_evaluation` v2
+и `task_flow_trial_report` v2. Полный subject связывает candidate capture,
+frozen evaluator request, фактически перенесённый/materialized grade input,
+execution и grade с wrapper/report. Проверяются
+`candidate_scheme=ordinary-tree-no-git-v1` и `evaluator_input_digest`; физический root digest не
+подменяет portable candidate projection. Для публикации wrapper передайте
+actual execution-grade ref в `write_mission_grade`; затем передайте полученный
+ref как `evaluator_receipt` в `write_trial_report`. Эти helpers выводят subject
+из проверенной цепочки, сохраняя отдельно supplied usage/observations отчёта.
+Legacy v1 читается как `unverified_legacy` и не увеличивает
+`reported_full_mission_verified`, даже при заявленном accepted.
+
+Проверка
 локальных bytes не аутентифицирует producer и не доказывает запуск без
 квалифицированного runtime: summary называется `supplied_reports_unqualified`,
 сохраняет synthetic/observed-declaration distinction и никогда не выдаёт winner.
