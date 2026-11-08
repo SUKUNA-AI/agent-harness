@@ -166,9 +166,10 @@ def _publish(supervisor, value):
 
 
 def _read(supervisor, ref):
-    if ref['path'].replace('\\', '/') != 'context/required-' + ref['sha256'] + '.json':
+    relative = ref['path'].replace('\\', '/')
+    if relative != 'context/required-' + ref['sha256'] + '.json':
         raise HarnessError('Plan-quality artifact is outside its addressed owned path')
-    raw = read_regular_file(supervisor.store.path(ref['path']))
+    raw = read_regular_file(supervisor.store.path(relative))
     if _hash(raw) != ref['sha256']:
         raise HarnessError('Plan-quality immutable input/assessment artifact changed')
     return json.loads(raw)
@@ -655,12 +656,13 @@ def _proposal(supervisor, capabilities, request):
         return plan
     explicit = request['explicit_ref']
     if explicit:
-        if explicit['path'].replace('\\', '/') != 'context/required-' + explicit['sha256'] + '.plan.yaml':
+        relative = explicit['path'].replace('\\', '/')
+        if relative != 'context/required-' + explicit['sha256'] + '.plan.yaml':
             raise HarnessError('Explicit plan escaped immutable input ownership')
-        raw = read_regular_file(supervisor.store.path(explicit['path']), max_bytes=2 * 1024 * 1024)
+        raw = read_regular_file(supervisor.store.path(relative), max_bytes=2 * 1024 * 1024)
         if _hash(raw) != explicit['sha256']:
             raise HarnessError('Frozen explicit plan changed')
-        supervisor.plan_input = str(supervisor.store.path(explicit['path']))
+        supervisor.plan_input = str(supervisor.store.path(relative))
     else:
         supervisor.plan_input = None
     supervisor.plan_quality_request = request
