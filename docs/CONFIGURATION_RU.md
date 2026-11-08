@@ -96,7 +96,10 @@ worktree — правила координации; они не являются
 
 ## Отдельные параметры work supervisor
 
-`work` наследует установленный model/provider/reasoning. При разрешённой edit
+`work` наследует установленный model/provider, но managed worker получает
+per-invocation effort из `agent-plan` (см. [DAG](DYNAMIC_AGENTS_RU.md#effort-managed-исполнителей)).
+Отсутствующий explicit effort выбирается по роли и `risk`, не меняя effort
+координатора. При разрешённой edit
 phase adapter выбирает per-invocation workspace-write; explicit installed
 read-only сохраняется. Managed workers получают локальное отключение native
 children, reviewer — read-only. Эти argv overrides не переписывают TOML.

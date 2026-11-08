@@ -1,5 +1,6 @@
 """A published bind marker must not still have an open writer on Windows."""
 from pathlib import Path
+from contextlib import ExitStack
 import os
 import sys
 import tempfile
@@ -8,11 +9,29 @@ import unittest
 from unittest.mock import patch
 
 sys.path[:0] = [str(Path(__file__).resolve().parents[1] / "src")]
-from agent_harness.agent_lifecycle import GlobalSlots
+from agent_harness.agent_lifecycle import GlobalSlots, SlotCapacityUnavailable, MAX_MANAGED_MODEL_SLOTS
 from managed_process_fixture import BoundFixtureCodexAdapter, bound_fake_script
 
 
 class ManagedFixturePublicationTests(unittest.TestCase):
+    def test_twelve_global_model_slots_but_no_more_than_three_reviewers(self):
+        with tempfile.TemporaryDirectory() as temp:
+            registry = GlobalSlots(Path(temp) / "state")
+            with ExitStack() as stack:
+                reviewers = [stack.enter_context(registry.acquire("run", f"review-{i}", "reviewer", timeout=1))
+                             for i in range(3)]
+                with self.assertRaises(SlotCapacityUnavailable):
+                    with registry.acquire("another-run", "review-4", "reviewer", timeout=0.15):
+                        self.fail("Fourth reviewer must not acquire a model slot")
+                workers = [stack.enter_context(registry.acquire("run", f"worker-{i}", "owner", timeout=1))
+                           for i in range(MAX_MANAGED_MODEL_SLOTS - len(reviewers))]
+                self.assertEqual(len(registry.inventory()), MAX_MANAGED_MODEL_SLOTS)
+                with self.assertRaises(SlotCapacityUnavailable):
+                    with registry.acquire("other", "overflow", "owner", timeout=0.15):
+                        self.fail("Thirteenth model invocation must not acquire a slot")
+                for lease in reviewers + workers:
+                    lease.complete()
+
     def test_real_child_consumes_only_a_closed_binding_marker(self):
         script = '''import sys,json,pathlib,time,uuid,os
 args=sys.argv[1:]

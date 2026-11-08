@@ -8,7 +8,7 @@ native child cap и supervisor global quota имеют разную семант
 | Режим | Кто управляет model sessions | Ограничение |
 | --- | --- | --- |
 | `mode: native` | Одна coordinator session Codex; её native children остаются под управлением Codex | Contract managed concurrency=1; установленный child cap=5 не включает primary |
-| `mode: managed` | Supervisor запускает отдельные Codex exec/resume в принадлежащих run worktrees | Contract cap 1–5; global active model sessions≤5, включая planner, reviewer и integration owner |
+| `mode: managed` | Supervisor запускает отдельные Codex exec/resume в принадлежащих run worktrees | Contract cap 1–12; global active model sessions≤12, включая planner, reviewer и integration owner; не больше 3 reviewers одновременно |
 
 Локальный Python controller не потребляет model slot. Другой managed run с
 тем же `--state-dir` использует тот же OS-backed registry. Изолированные
@@ -55,7 +55,26 @@ Scheduler ранжирует ready nodes по оставшемуся крити�
 Observed durations уточняют estimates. Spawn cost может исключить лишний
 короткий параллельный node. Это heuristic, не точный ETA и не доказанный
 оптимум. Заблокированные dependencies не порождают бесполезные sessions.
-Контракт разрешает до пяти workers, но не требует запускать пять.
+Контракт разрешает до 12 одновременных managed model sessions (включая не-worker
+роли), но не требует занимать все слоты. Scheduler не выбирает больше трёх
+reviewers в одной волне; глобальный OS-backed reviewer admission guard применяет
+тот же предел ко всем runs с общим state root. Неиспользуемые reviewer slots
+не резервируются и могут использоваться разработчиками.
+
+## Effort managed-исполнителей
+
+Каждый узел DAG может явно задать `reasoning_effort`. Допустимые значения:
+
+- `owner` / `architect` / `diagnostician`: `medium` или `high`;
+- `reviewer`: `high` или `ultra`.
+
+Если поле отсутствует, `risk: high` выбирает `high` для разработчика и `ultra`
+для reviewer; `risk: low|medium` выбирает соответственно `medium` и `high`.
+Effort передаётся только на конкретный `codex exec/resume` через CLI override.
+Это не меняет установленный `model`, provider, effort координатора или TOML.
+Если выбранная модель не поддерживает запрошенный effort, Codex может отклонить
+вызов; harness не подменяет effort молча. Native-роли и native child cap
+настраиваются отдельно и этой политикой не изменяются.
 
 ## Подавление рекурсивного native spawn
 

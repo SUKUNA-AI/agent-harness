@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from .agent_lifecycle import GlobalSlots, Worktrees, git, guard_invocations, invocation_timeout, InvocationUnresolved
 from .core import HarnessError, digest, now, snapshot
 from .work_contract import legacy_contract
-from .scheduling import Scheduler, validate_plan
+from .scheduling import Scheduler, validate_plan, worker_effort
 from .strict_yaml import load, validate
 from . import telemetry
 from .task_packets import compile_packet, preflight, invoke, NotDispatched, schema_file
@@ -481,8 +481,10 @@ def execute_managed(supervisor, *, recovering=False):
                 if current_deps != agent["dependency_vector"]:
                     raise NotDispatched("Verified dependency vector changed before dispatch")
         review_schema = schema_file(supervisor, "managed-review.schema.json", 1) if verified_flow.enabled(supervisor) and node["role"] == "reviewer" else None
+        effort = worker_effort(node)
         preflight(supervisor._adapter(), prompt, read_only=node["read_only"], native_children=False, output_schema=review_schema,
-            write_authorized=not node["read_only"], session_id=agent["thread_id"] if agent["attempts_used"] else None)
+            write_authorized=not node["read_only"], session_id=agent["thread_id"] if agent["attempts_used"] else None,
+            reasoning_effort=effort)
         attempt = agent["attempts_used"] + 1
         agent.update(attempts_used=agent["attempts_used"] + 1, status="spawned",
             attempt_id=name + "-" + str(agent["attempts_used"] + 1))
@@ -522,7 +524,7 @@ def execute_managed(supervisor, *, recovering=False):
                             raise NotDispatched("Verified predecessor changed while waiting")
                 preflight(supervisor._adapter(), prompt, read_only=node["read_only"], native_children=False,
                     write_authorized=not node["read_only"], output_schema=review_schema,
-                    session_id=agent["thread_id"] if attempt > 1 else None)
+                    session_id=agent["thread_id"] if attempt > 1 else None, reasoning_effort=effort)
                 if plan_quality.enabled(supervisor):
                     errors = plan_quality.evidence_errors(supervisor, plan)
                     if errors:
@@ -539,6 +541,7 @@ def execute_managed(supervisor, *, recovering=False):
                 session_id=agent["thread_id"] if attempt > 1 else None, output_schema=review_schema,
                 cancel_file=supervisor.path / "cancel.yaml", on_process=process, on_event=event,
                 read_only=node["read_only"], native_children=False, write_authorized=not node["read_only"],
+                reasoning_effort=effort,
                 log_dir=supervisor.path / "codex" / name)
             result["slot_wait_ms"] = slot.wait_seconds * 1000
             completion = receipts.completion(intent, result, duration_ms=(time.monotonic() - model_start) * 1000)

@@ -57,9 +57,12 @@ python tools/harness.py work resume --run-dir /absolute/private/run
 approvals. Явный пользовательский `sandbox_mode="read-only"` сохраняется и
 блокирует запись. Reviewer получает `read-only`; bypass flags не применяются.
 
-**Два разных лимита.** `agents.max_concurrent_threads_per_session=5` считает
-native children без root. Managed global slots ограничивают пять отдельных
-model sessions, включая planner/reviewer; native recursion в них отключается.
+**Два разных лимита.** `agents.max_concurrent_threads_per_session=5` —
+настраиваемое начальное предпочтение для native children без root (его можно
+явно увеличить через `install --max-child-threads 12`). Managed global slots
+допускают до 12 model sessions на общий state root, включая planner/reviewer,
+но одновременно допускают не больше трёх reviewer sessions. Managed native
+recursion отключается.
 Concurrency выше одного требует свежего binary/version-bound inventory proof.
 При отсутствии proof используется явный native/single вариант.
 
@@ -321,6 +324,7 @@ keys, comments и чужие роли.
 | Legacy `agents.max_threads` | Обратимо переносится в canonical key; при конфликте старых значений выбирается более строгий предел без явного override |
 | `agents.interrupt_message` | Добавляет default при отсутствии |
 | Effort ролей | Owner/reviewer — `high`, helper — `medium`; effort координатора сохраняется |
+| Managed effort | Worker: `medium`/`high`; reviewer: `high`/`ultra` по risk или явному `reasoning_effort` задачи; совместимость проверяет Codex |
 | `tool_output_token_limit` | Не меняет; пример `4096` доступен отдельно для оценки на своих задачах |
 
 **`500000` — порог автоматического сжатия истории.** Он не расширяет context

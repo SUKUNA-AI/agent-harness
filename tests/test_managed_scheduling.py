@@ -13,7 +13,7 @@ from agent_harness.core import HarnessError
 from managed_process_fixture import BoundFixtureCodexAdapter as CodexAdapter, bound_fake_script
 from agent_harness.strict_yaml import dump
 from agent_harness.work_contract import normalize
-from agent_harness.scheduling import Scheduler, validate_plan
+from agent_harness.scheduling import Scheduler, validate_plan, worker_effort
 from agent_harness.supervisor import Supervisor
 from test_work_supervisor import FAKE
 
@@ -69,10 +69,54 @@ class ManagedSchedulingTests(unittest.TestCase):
         self.assertEqual(scheduler.next(completed=["left"])["selected"], ["right"])
         self.assertEqual(scheduler.next(active=["left"])["selected"], [])
 
+    def test_twelve_managed_tasks_and_three_reviewer_selection_limit(self):
+        contract = deepcopy(self.contract)
+        contract["budgets"]["max_concurrent_managed_agents"] = 12
+        names = [f"worker-{index}.py" for index in range(9)]
+        contract["task"]["allowed_write_scopes"] = [*names, "left.py"]
+        plan = {"schema_version": 1, "task_id": "managed", "tasks": []}
+        for index, name in enumerate(names):
+            plan["tasks"].append(node(f"worker-{index}", scopes=[name]))
+        for index in range(4):
+            review = node(f"review-{index}", scopes=["left.py"])
+            review.update(role="reviewer", read_only=True, read_scope=["left.py"],
+                          write_scope=[], outputs=["left.py"])
+            plan["tasks"].append(review)
+        scheduler = Scheduler(plan, contract)
+        selected = scheduler.next()["selected"]
+        self.assertEqual(len(selected), 12)
+        self.assertEqual(sum(scheduler.nodes[name]["role"] == "reviewer" for name in selected), 3)
+        self.assertEqual(scheduler.next(active=["review-0", "review-1", "review-2"])["selected"],
+                         [f"worker-{index}" for index in range(9)])
+
+    def test_managed_role_effort_defaults_and_overrides(self):
+        developer = node("left")
+        self.assertEqual(worker_effort(developer), "medium")
+        developer["risk"] = "high"
+        self.assertEqual(worker_effort(developer), "high")
+        developer["reasoning_effort"] = "medium"
+        self.assertEqual(worker_effort(developer), "medium")
+        developer["reasoning_effort"] = "ultra"
+        with self.assertRaisesRegex(HarnessError, "incompatible"):
+            validate_plan({"schema_version": 1, "task_id": "managed", "tasks": [developer]}, self.contract)
+        review = node("review", scopes=["left.py"])
+        review.update(role="reviewer", read_only=True, read_scope=["left.py"],
+                      write_scope=[], outputs=["left.py"])
+        self.assertEqual(worker_effort(review), "high")
+        review["risk"] = "high"
+        self.assertEqual(worker_effort(review), "ultra")
+        review["reasoning_effort"] = "high"
+        self.assertEqual(worker_effort(review), "high")
+        validate_plan({"schema_version": 1, "task_id": "managed", "tasks": [review]}, self.contract)
+
     def test_two_worktrees_integrate_into_new_frozen_candidate(self):
+        observed_efforts = []
         class FakeManaged(CodexAdapter):
             def capabilities(self):
                 return {**super().capabilities(), "native_children_disabled": True}
+            def run(self, prompt, **options):
+                observed_efforts.append(options.get("reasoning_effort"))
+                return super().run(prompt, **options)
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             source = root / "source"
@@ -95,6 +139,7 @@ class ManagedSchedulingTests(unittest.TestCase):
             self.assertNotEqual(result["cwd"], str(source))
             self.assertEqual((source / "left.py").read_text(), "VALUE = 0\n")
             self.assertEqual(result["metrics"]["managed_spawns"], 2)
+            self.assertEqual(observed_efforts.count("medium"), 2)
             self.assertGreater(result["metrics"]["spawn_seconds"], 0)
             self.assertEqual(result["metrics"]["spawn_measurements"], 4)
             self.assertGreater(result["metrics"]["worktree_seconds"], 0)

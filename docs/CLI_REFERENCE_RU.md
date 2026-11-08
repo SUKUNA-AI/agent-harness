@@ -65,7 +65,7 @@ Contract: [work schema](../schemas/work-contract.schema.json). Defaults:
 max_attempts3 (initial edit включён), managed concurrency1, max_wall_seconds7200,
 turn_timeout_seconds1800, mode native, ledger inform. Default `memory` — `false`
 для contract v1 и `true` для contract v2; явное значение сохраняется. Global cap
-managed sessions5; contract может понизить до1. Max tokens проверяется по native
+managed sessions12 (не больше 3 reviewer одновременно); contract может понизить до1. Max tokens проверяется по native
 reported usage на границах turns, не внутри скрытого model runtime.
 
 `inputs` — до 128 объектов `{path, sha256?}`; `path` абсолютный ordinary file,
@@ -78,7 +78,7 @@ cwd должен находиться внутри source checkout; внутре
 | Work budget | Default | Допустимые значения |
 | --- | --- | --- |
 | `max_attempts` | 3 | 1–100; initial edit включён |
-| `max_concurrent_managed_agents` | 1 | 1–5; native mode требует 1 |
+| `max_concurrent_managed_agents` | 1 | 1–12; native mode требует 1, reviewer cap=3 |
 | `max_wall_seconds` | 7200 s | 1–604800; исходный deadline не сбрасывается |
 | `turn_timeout_seconds` | 1800 s | 1–86400; ограничен оставшимся deadline |
 | `max_tokens` | Отсутствует | 1–100000000; проверяется по reported usage между turns |

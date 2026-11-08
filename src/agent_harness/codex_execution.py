@@ -261,14 +261,20 @@ class CodexAdapter:
                 return {"status": "unavailable", "reason": type(error).__name__, "native_children_disabled": False}
         return {"status": "observed", "version": values["version"].strip(), "binary_sha256": _binary_hash(self.executable[0]), "json": "--json" in values["exec"], "resume": "SESSION_ID" in values["resume"], "output_schema": "--output-schema" in values["exec"], "resume_output_schema": "--output-schema" in values["resume"], "configured_settings": configured_settings(environment=self.environment), "native_children_disabled": False, "suppression_proof": "Separate observed tool inventory bound to this binary/version is required"}
 
-    def argv(self, prompt, *, session_id=None, output_schema=None, native_children=False, read_only=False, write_authorized=False, allow_non_git=False):
+    def argv(self, prompt, *, session_id=None, output_schema=None, native_children=False, read_only=False, write_authorized=False, allow_non_git=False, reasoning_effort=None):
         if not isinstance(prompt, str) or not prompt or len(prompt.encode("utf-8")) > MAX_PROMPT_BYTES or "\x00" in prompt:
             raise HarnessError("Prompt must be nonempty and within the explicit byte budget; chunk it without discarding requirements")
         if any(type(value) is not bool for value in (native_children, read_only, write_authorized, allow_non_git)):
             raise HarnessError("Agent mode flags must be booleans")
         if session_id is not None and (not isinstance(session_id, str) or not SESSION.fullmatch(session_id)):
             raise HarnessError("An exact safe session ID is required; --last is forbidden")
+        if reasoning_effort is not None and reasoning_effort not in {"medium", "high", "ultra"}:
+            raise HarnessError("Unsupported explicit managed worker reasoning effort")
         argv = list(self.executable)
+        if reasoning_effort is not None:
+            # Per-invocation only: never change the coordinator's installed model
+            # or reasoning defaults. The selected model must support this effort.
+            argv += ["-c", f'model_reasoning_effort="{reasoning_effort}"']
         if not native_children:
             argv += ["-c", "agents.enabled=false", "-c", "features.multi_agent_v2=false"]
         if read_only:
@@ -303,7 +309,7 @@ class CodexAdapter:
         """Validate this transport without starting a process; decorators delegate it."""
         return self.argv(prompt, **options)
 
-    def run(self, prompt, *, cwd, session_id=None, timeout=600, cancel_file=None, on_process=None, on_event=None, output_schema=None, native_children=False, read_only=False, log_dir=None, deadline=None, write_authorized=False, allow_non_git=False):
+    def run(self, prompt, *, cwd, session_id=None, timeout=600, cancel_file=None, on_process=None, on_event=None, output_schema=None, native_children=False, read_only=False, log_dir=None, deadline=None, write_authorized=False, allow_non_git=False, reasoning_effort=None):
         from .task_packets import NotDispatched
         if type(timeout) not in (int, float) or not 0 < timeout <= 86400:
             raise NotDispatched("Codex turn timeout must be finite and between 0 and 86400 seconds")
@@ -312,7 +318,7 @@ class CodexAdapter:
             raise NotDispatched("Codex cwd must be an existing absolute directory")
         try:
             argv = self.argv(prompt, session_id=session_id, output_schema=output_schema, native_children=native_children, read_only=read_only,
-                             write_authorized=write_authorized, allow_non_git=allow_non_git)
+                             write_authorized=write_authorized, allow_non_git=allow_non_git, reasoning_effort=reasoning_effort)
         except (HarnessError, OSError, ValueError) as error:
             raise NotDispatched(str(error)) from error
         log_dir = Path(log_dir) if log_dir else Path(tempfile.mkdtemp(prefix="harness-codex-"))

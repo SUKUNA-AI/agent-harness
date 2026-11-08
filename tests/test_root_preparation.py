@@ -18,7 +18,7 @@ import unittest
 from unittest.mock import patch
 
 from agent_harness import root_preparation as protocol
-from agent_harness.agent_lifecycle import GlobalSlots
+from agent_harness.agent_lifecycle import GlobalSlots, MAX_MANAGED_MODEL_SLOTS
 from agent_harness.core import HarnessError, Run, canonical, digest, file_hash
 from agent_harness.failure_policy import PreparationFailure, PREPARATION_TARGETS
 from agent_harness.strict_yaml import dump, load
@@ -563,7 +563,7 @@ raise AssertionError('Named hard exit boundary was not reached')
                 def prepared(reason):
                     value=prepare(reason)
                     if kind=='busy_slots':
-                        for n in range(5):foreign.append(stack.enter_context(GlobalSlots(owner.state_dir).acquire('independent-'+str(n),'foreign-task','owner',timeout=1)))
+                        for n in range(MAX_MANAGED_MODEL_SLOTS):foreign.append(stack.enter_context(GlobalSlots(owner.state_dir).acquire('independent-'+str(n),'foreign-task','owner',timeout=1)))
                         before.update({lease.name:lease.store.path(lease.name).read_bytes() for lease in foreign})
                     return value
                 def entered(run,*args,**options):
