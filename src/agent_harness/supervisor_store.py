@@ -148,6 +148,10 @@ class SupervisorStore:
         # Every reuse checks the complete physical mutation stamp under lease.
         # Explicit replay/resume always validates the entire immutable prefix.
         self._journal_head = None
+        # Windows st_ctime is creation time, while write timestamps may be
+        # restored/coalesced. Retain bounded SHA256 state, never journal rows,
+        # and prove the actual bytes before reusing the parsed head there.
+        self._journal_content_hash = None
 
     def path(self, relative):
         relative = Path(relative)
@@ -223,6 +227,7 @@ class SupervisorStore:
                 if self._journal_head is not None and self._journal_head[1]:
                     raise HarnessError("Validated journal prefix disappeared")
                 self._journal_head = None
+                self._journal_content_hash = None
                 return []
             _parents(path)
             before = self._journal_stamp(path)
@@ -236,6 +241,8 @@ class SupervisorStore:
                 raise HarnessError("Validated journal prefix changed; recovery required")
             self._journal_head = (after, len(records), records[-1]["hash"] if records else "0" * 64,
                                   sum(r["payload"].get("kind") == "checkpoint" for r in records))
+            if os.name == "nt":
+                self._journal_content_hash = hashlib.sha256(raw)
             return records
 
     @staticmethod
@@ -260,9 +267,22 @@ class SupervisorStore:
         # same-size edit invalidates the prefix; a fresh store has no trust.
         path = self.path("journal/events.jsonl")
         stamp = self._journal_stamp(path)
-        if self._journal_head is None or self._journal_head[0] != stamp:
+        if (self._journal_head is None or self._journal_head[0] != stamp
+                or os.name == "nt" and not self._journal_content_matches(path)):
             self.events()
         return self._journal_head or (None, 0, "0" * 64, 0)
+
+    def _journal_content_matches(self, path, expected=None):
+        """Prove Windows cache freshness without replaying validated rows.
+
+        Use the existing bounded, anchored, double-pass reader; a metadata
+        cache hit alone cannot establish that the hash-chain bytes survived.
+        The metadata-only _journal_stamp is also persisted in slot receipts,
+        so its established representation must remain unchanged.
+        """
+        expected = self._journal_content_hash if expected is None else expected
+        return (expected is not None and hashlib.sha256(
+            read_regular_file(path, max_bytes=MAX_JOURNAL_BYTES)).digest() == expected.digest())
 
     @staticmethod
     def _decode_events(raw):
@@ -343,11 +363,16 @@ class SupervisorStore:
             _parents(path)
             _ordinary(path, missing_ok=True)
             data = _canonical(record) + b"\n"
+            expected_content = None
+            if os.name == "nt":
+                expected_content = self._journal_content_hash.copy() if self._journal_content_hash is not None else hashlib.sha256()
+                expected_content.update(data)
             if len(data) > strict_yaml.MAX_BYTES or path.exists() and path.stat().st_size + len(data) > MAX_JOURNAL_BYTES:
                 raise HarnessError("Journal storage budget exhausted")
             flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
             with ParentDirectory(path) as parent:
-                if self._journal_stamp(path) != head[0]:
+                if (self._journal_stamp(path) != head[0]
+                        or os.name == "nt" and head[0] is not None and not self._journal_content_matches(path)):
                     raise HarnessError("Journal head changed before append")
                 fd = parent.open(flags)
                 with os.fdopen(fd, "ab") as output:
@@ -367,8 +392,12 @@ class SupervisorStore:
                 stamp = self._journal_stamp(path)
                 if not self._matches_open_stamp(stamp, written):
                     raise HarnessError("Journal changed during append")
+                if os.name == "nt" and not self._journal_content_matches(path, expected_content):
+                    raise HarnessError("Journal content changed during append")
                 self._journal_head = (stamp, record["sequence"], record["hash"],
                                       head[3] + (event.get("kind") == "checkpoint"))
+                if os.name == "nt":
+                    self._journal_content_hash = expected_content
             return record
 
     def commit(self, state, reason, owner="supervisor", attempt_id=None):

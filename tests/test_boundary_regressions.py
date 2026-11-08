@@ -233,11 +233,51 @@ class JournalHeadTests(unittest.TestCase):
 
     def test_same_size_edit_restored_mtime_invalidates_and_fails_closed(self):
         self.store.append_event({'label':'original'})
-        path=self.root/'journal/events.jsonl';before=path.stat()
+        path=self.root/'journal/events.jsonl';before=path.stat();stamp=self.store._journal_stamp(path)
         path.write_bytes(path.read_bytes().replace(b'original',b'modified'))
         os.utime(path,ns=(before.st_atime_ns,before.st_mtime_ns))
+        if os.name=='nt':self.assertEqual(self.store._journal_stamp(path),stamp)
+        corrupted=path.read_bytes()
         with self.assertRaisesRegex(HarnessError,'hash'):
             self.store.append_event({'must':'fail'})
+        self.assertEqual(path.read_bytes(),corrupted)
+
+    @unittest.skipUnless(os.name=='nt','Windows coalesced/restored journal metadata')
+    def test_same_metadata_edit_after_head_check_cannot_receive_append(self):
+        self.store.append_event({'label':'original'})
+        path=self.root/'journal/events.jsonl';before=path.stat();stamp=self.store._journal_stamp(path)
+        original=self.store._journal_stamp;calls=0
+        corrupted=path.read_bytes().replace(b'original',b'modified')
+        def race(candidate):
+            nonlocal calls
+            calls+=1
+            if calls==2:
+                path.write_bytes(corrupted)
+                os.utime(path,ns=(before.st_atime_ns,before.st_mtime_ns))
+                self.assertEqual(original(candidate),stamp)
+            return original(candidate)
+        with patch.object(self.store,'_journal_stamp',side_effect=race),self.assertRaisesRegex(HarnessError,'head changed before append'):
+            self.store.append_event({'must':'fail'})
+        self.assertEqual(path.read_bytes(),corrupted)
+        with self.assertRaisesRegex(HarnessError,'hash'):self.store.append_event({'must':'still fail'})
+
+    @unittest.skipUnless(os.name=='nt','Windows coalesced/restored journal metadata')
+    def test_same_metadata_edit_while_opening_append_cannot_publish_trusted_head(self):
+        self.store.append_event({'label':'original'})
+        path=self.root/'journal/events.jsonl';before=path.stat();stamp=self.store._journal_stamp(path)
+        corrupted=path.read_bytes().replace(b'original',b'modified')
+        original=ParentDirectory.open
+        def race(parent,flags,*args,**kwargs):
+            descriptor=original(parent,flags,*args,**kwargs)
+            if parent.path==path and flags&os.O_APPEND:
+                path.write_bytes(corrupted)
+                os.utime(path,ns=(before.st_atime_ns,before.st_mtime_ns))
+                self.assertEqual(self.store._journal_stamp(path),stamp)
+            return descriptor
+        with patch.object(ParentDirectory,'open',new=race),self.assertRaisesRegex(HarnessError,'content changed during append'):
+            self.store.append_event({'must':'fail'})
+        self.assertTrue(path.read_bytes().startswith(corrupted))
+        with self.assertRaisesRegex(HarnessError,'hash'):self.store.append_event({'must':'still fail'})
 
     def test_external_append_replacement_and_truncate_invalidate(self):
         self.store.append_event({'n':1})
@@ -261,11 +301,11 @@ class JournalHeadTests(unittest.TestCase):
         self.store.append_event({'n':1})
         path=self.root/'journal/events.jsonl';raw=path.read_bytes()
         original=ParentDirectory.open
-        def race(parent,*args,**kwargs):
-            if parent.path==path:
+        def race(parent,flags,*args,**kwargs):
+            if parent.path==path and flags&os.O_APPEND:
                 replacement=path.with_name('replacement');replacement.write_bytes(raw)
                 replacement.replace(path)
-            return original(parent,*args,**kwargs)
+            return original(parent,flags,*args,**kwargs)
         with patch.object(ParentDirectory,'open',new=race),self.assertRaisesRegex(HarnessError,'head changed while opening'):
             self.store.append_event({'must':'fail'})
         self.assertEqual(path.read_bytes(),raw)
