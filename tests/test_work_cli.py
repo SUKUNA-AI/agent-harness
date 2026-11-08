@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 
@@ -90,3 +91,109 @@ class WorkCLITests(unittest.TestCase):
             return original(action, *args, **options)
         with patch.object(self, "command", delayed_stop):
             self.test_cli_stop_cancels_live_owned_process_and_watch_reports_failure()
+
+    def test_stop_snapshot_serializes_separate_process_checkpoint_after_validation(self):
+        self.check_stop_snapshot_publication("after_validation")
+
+    def test_stop_snapshot_serializes_separate_process_checkpoint_before_read(self):
+        self.check_stop_snapshot_publication("before_read")
+
+    def check_stop_snapshot_publication(self, boundary):
+        """A real writer probes the kernel guard during stop's validated read."""
+        from agent_harness.core import process_identity
+        from agent_harness.file_io import ParentDirectory
+        from agent_harness.supervisor import Supervisor
+        self.start_args("slow")
+        owner = Supervisor.create(self.root / "task.yaml", run_dir=self.run_dir,
+            cwd=self.source, state_dir=self.root / "state")
+        state = {**owner.state, "generation": owner.state["generation"] + 1}
+        payload = self.root / "writer-input.json"
+        payload.write_text(json.dumps(state), encoding="utf-8")
+        reader = Supervisor(self.run_dir)
+        paused, release, probed = (threading.Event() for _ in range(3))
+        errors, results, lines = [], [], []
+        decode = reader.store._decode_events
+        def pause():
+            paused.set()
+            if not release.wait(15):
+                raise AssertionError("snapshot reader barrier not released")
+        def validated(raw):
+            records = decode(raw)
+            pause()
+            return records
+        opening = ParentDirectory.open
+        def before_read(parent, *args, **kwargs):
+            if parent.path.name == "events.jsonl" and threading.current_thread() is stopping:
+                pause()
+            return opening(parent, *args, **kwargs)
+        def stop():
+            try:
+                results.append(reader.stop("deterministic concurrent publication"))
+            except BaseException as error:
+                errors.append(error)
+        code = r'''
+from contextlib import contextmanager
+import json,sys
+from pathlib import Path
+from agent_harness import core
+from agent_harness.supervisor_store import SupervisorStore
+original=core._os_lock
+reported=False
+@contextmanager
+def observed(path):
+ global reported
+ try:
+  with original(path):yield
+ except core.HarnessError as error:
+  if Path(path).name=='journal-snapshot.guard' and str(error).startswith('Resource busy') and not reported:
+   reported=True;print('blocked',flush=True)
+  raise
+core._os_lock=observed
+store=SupervisorStore(sys.argv[1])
+state=json.loads(Path(sys.argv[2]).read_text(encoding='utf-8'))
+with store.lease('deterministic live writer'):
+ store.commit(state,'concurrent committed state')
+print('committed',flush=True)
+'''
+        process = None
+        identity = None
+        stopping = threading.Thread(target=stop)
+        probe = None
+        hook = (patch.object(reader.store, "_decode_events", side_effect=validated) if boundary == "after_validation"
+                else patch.object(ParentDirectory, "open", new=before_read))
+        with hook:
+            try:
+                stopping.start()
+                self.assertTrue(paused.wait(15), "stop did not reach validated journal read")
+                process = subprocess.Popen([sys.executable, "-c", code, str(self.run_dir), str(payload)],
+                    env={**self.environment, "PYTHONPATH": str(self.tool.parents[1] / "src")},
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8")
+                identity = process_identity(process.pid)
+                def observe():
+                    lines.append(process.stdout.readline())
+                    probed.set()
+                probe = threading.Thread(target=observe)
+                probe.start()
+                self.assertTrue(probed.wait(15), "writer did not report its kernel lock probe")
+                self.assertEqual(lines, ["blocked\n"])
+                release.set()
+                stopping.join(15)
+                stdout, stderr = process.communicate(timeout=15)
+                self.assertEqual(process.returncode, 0, stdout + stderr)
+                self.assertIn("committed", stdout)
+                self.assertEqual(errors, [])
+                self.assertEqual(results[0]["status"], "CANCEL_REQUESTED")
+                self.assertEqual(results[0]["run_id"], owner.state["run_id"])
+                self.assertTrue((self.run_dir / "cancel.yaml").is_file())
+            finally:
+                release.set()
+                stopping.join(15)
+                if process is not None and process.poll() is None:
+                    self.assertIsNotNone(identity, "owned writer identity unavailable")
+                    self.assertEqual(process_identity(process.pid), identity)
+                    process.terminate()
+                    process.communicate(timeout=10)
+                if probe is not None:
+                    probe.join(15)
+        self.assertFalse(stopping.is_alive())
+        self.assertEqual(reader.store.recover(read_only=True)["state"]["generation"], state["generation"])

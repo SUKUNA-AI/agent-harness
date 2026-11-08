@@ -242,6 +242,20 @@ class JournalHeadTests(unittest.TestCase):
             self.store.append_event({'must':'fail'})
         self.assertEqual(path.read_bytes(),corrupted)
 
+    def test_real_byte_edit_with_simulated_metadata_collision_rejects_cached_head(self):
+        self.store.append_event({'label':'original'})
+        path=self.root/'journal/events.jsonl';stamp=self.store._journal_stamp(path)
+        corrupted=path.read_bytes().replace(b'original',b'modified')
+        # Model a coalesced metadata observation, not a fake journal/read:
+        # real bytes change and the native anchored double-pass reader stays on.
+        path.write_bytes(corrupted)
+        before={str(item.relative_to(self.root)):item.read_bytes() for item in self.root.rglob('*') if item.is_file()}
+        with patch.object(self.store,'_journal_stamp',return_value=stamp):
+            with self.assertRaisesRegex(HarnessError,'hash'):
+                self.store.append_event({'must':'fail'})
+        self.assertEqual(path.read_bytes(),corrupted)
+        self.assertEqual({str(item.relative_to(self.root)):item.read_bytes() for item in self.root.rglob('*') if item.is_file()},before)
+
     @unittest.skipUnless(os.name=='nt','Windows coalesced/restored journal metadata')
     def test_same_metadata_edit_after_head_check_cannot_receive_append(self):
         self.store.append_event({'label':'original'})

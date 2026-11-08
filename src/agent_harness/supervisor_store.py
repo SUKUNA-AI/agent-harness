@@ -148,10 +148,11 @@ class SupervisorStore:
         # Every reuse checks the complete physical mutation stamp under lease.
         # Explicit replay/resume always validates the entire immutable prefix.
         self._journal_head = None
-        # Windows st_ctime is creation time, while write timestamps may be
-        # restored/coalesced. Retain bounded SHA256 state, never journal rows,
-        # and prove the actual bytes before reusing the parsed head there.
+        # Windows st_ctime is creation time; POSIX timestamps can coalesce too.
+        # Retain bounded SHA256 state, never journal rows, and prove the actual
+        # bytes before reusing a parsed head, even when metadata is unchanged.
         self._journal_content_hash = None
+        self._snapshot_depth = 0
 
     def path(self, relative):
         relative = Path(relative)
@@ -180,6 +181,9 @@ class SupervisorStore:
 
     @contextmanager
     def lease(self, purpose="supervisor"):
+        with self._mutex:
+            if self._snapshot_depth and self._lease is None:
+                raise HarnessError("Cannot upgrade a read snapshot to a supervisor writer lease")
         if self._lease is not None:
             raise HarnessError("Supervisor lease is not reentrant")
         guard = self.path("locks/supervisor.guard")
@@ -213,15 +217,78 @@ class SupervisorStore:
         # still serialize journal sequence allocation inside that process.
         with self._mutex:
             if self._lease is not None:
-                yield
-            else:
-                with self.lease():
+                with self._snapshot(writing=True):
                     yield
+            else:
+                if self._snapshot_depth:
+                    raise HarnessError("Cannot upgrade a read snapshot to a supervisor writer lease")
+                with self.lease():
+                    with self._snapshot(writing=True):
+                        yield
+
+    @contextmanager
+    def _snapshot(self, *, writing=False):
+        """Serialize short journal/projection publications across processes.
+
+        Writers acquire their lifetime lease first. Readers never acquire it,
+        so a live model cannot prevent status or cancellation. Legacy read-only
+        stores lacking the new coordination anchor are inspected strictly with
+        no filesystem writes; mixed-version live writers receive no guarantee.
+        """
+        with self._mutex:
+            if self._snapshot_depth:
+                yield
+                return
+            guard = self.path("locks/journal-snapshot.guard")
+            if writing:
+                _mkdir(guard.parent)
+            from .native_observability import observer_lock
+            pinned = guard
+            while not pinned.parent.exists() and not pinned.parent.is_symlink():
+                pinned = pinned.parent
+            with ParentDirectory(pinned) as parent:
+                before = _ordinary(self.path("locks/journal-snapshot.guard"), missing_ok=True)
+                lease = self.path("locks/journal-snapshot")
+                _ordinary(lease, missing_ok=True)
+                if before is None and not writing:
+                    self._snapshot_depth = 1
+                    try:
+                        yield
+                    finally:
+                        self._snapshot_depth = 0
+                    parent.check()
+                    if _ordinary(self.path("locks/journal-snapshot.guard"), missing_ok=True) is not None:
+                        raise HarnessError("Journal snapshot anchor appeared during legacy read")
+                    _ordinary(self.path("locks/journal-snapshot"), missing_ok=True)
+                    return
+                with observer_lock(lease, purpose="journal snapshot"):
+                    opened = _ordinary(guard)
+                    _ordinary(lease)
+                    descriptor = parent.open(os.O_RDONLY | getattr(os, "O_BINARY", 0))
+                    try:
+                        pinned_info = os.fstat(descriptor)
+                        if (not stat.S_ISREG(pinned_info.st_mode)
+                                or (pinned_info.st_dev, pinned_info.st_ino) != (opened.st_dev, opened.st_ino)):
+                            raise HarnessError("Journal snapshot anchor changed while opening")
+                    finally:
+                        os.close(descriptor)
+                    read_regular_file(lease, max_bytes=strict_yaml.MAX_BYTES)
+                    if before is not None and (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
+                        raise HarnessError("Journal snapshot anchor changed while locking")
+                    self._snapshot_depth = 1
+                    try:
+                        yield
+                    finally:
+                        self._snapshot_depth = 0
+                    parent.check()
+                    after = _ordinary(guard)
+                    if (opened.st_dev, opened.st_ino) != (after.st_dev, after.st_ino):
+                        raise HarnessError("Journal snapshot anchor changed during publication")
 
     def events(self):
         # A strict read checks the leaf before and after opening. An append by
         # this store is legitimate only outside that entire read/validation.
-        with self._mutex:
+        with self._snapshot():
             path = self.path("journal/events.jsonl")
             if not path.exists():
                 if self._journal_head is not None and self._journal_head[1]:
@@ -241,8 +308,7 @@ class SupervisorStore:
                 raise HarnessError("Validated journal prefix changed; recovery required")
             self._journal_head = (after, len(records), records[-1]["hash"] if records else "0" * 64,
                                   sum(r["payload"].get("kind") == "checkpoint" for r in records))
-            if os.name == "nt":
-                self._journal_content_hash = hashlib.sha256(raw)
+            self._journal_content_hash = hashlib.sha256(raw)
             return records
 
     @staticmethod
@@ -268,12 +334,12 @@ class SupervisorStore:
         path = self.path("journal/events.jsonl")
         stamp = self._journal_stamp(path)
         if (self._journal_head is None or self._journal_head[0] != stamp
-                or os.name == "nt" and not self._journal_content_matches(path)):
+                or not self._journal_content_matches(path)):
             self.events()
         return self._journal_head or (None, 0, "0" * 64, 0)
 
     def _journal_content_matches(self, path, expected=None):
-        """Prove Windows cache freshness without replaying validated rows.
+        """Prove cache freshness without replaying validated rows.
 
         Use the existing bounded, anchored, double-pass reader; a metadata
         cache hit alone cannot establish that the hash-chain bytes survived.
@@ -363,16 +429,14 @@ class SupervisorStore:
             _parents(path)
             _ordinary(path, missing_ok=True)
             data = _canonical(record) + b"\n"
-            expected_content = None
-            if os.name == "nt":
-                expected_content = self._journal_content_hash.copy() if self._journal_content_hash is not None else hashlib.sha256()
-                expected_content.update(data)
+            expected_content = self._journal_content_hash.copy() if self._journal_content_hash is not None else hashlib.sha256()
+            expected_content.update(data)
             if len(data) > strict_yaml.MAX_BYTES or path.exists() and path.stat().st_size + len(data) > MAX_JOURNAL_BYTES:
                 raise HarnessError("Journal storage budget exhausted")
             flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
             with ParentDirectory(path) as parent:
                 if (self._journal_stamp(path) != head[0]
-                        or os.name == "nt" and head[0] is not None and not self._journal_content_matches(path)):
+                        or head[0] is not None and not self._journal_content_matches(path)):
                     raise HarnessError("Journal head changed before append")
                 fd = parent.open(flags)
                 with os.fdopen(fd, "ab") as output:
@@ -392,12 +456,11 @@ class SupervisorStore:
                 stamp = self._journal_stamp(path)
                 if not self._matches_open_stamp(stamp, written):
                     raise HarnessError("Journal changed during append")
-                if os.name == "nt" and not self._journal_content_matches(path, expected_content):
+                if not self._journal_content_matches(path, expected_content):
                     raise HarnessError("Journal content changed during append")
                 self._journal_head = (stamp, record["sequence"], record["hash"],
                                       head[3] + (event.get("kind") == "checkpoint"))
-                if os.name == "nt":
-                    self._journal_content_hash = expected_content
+                self._journal_content_hash = expected_content
             return record
 
     def commit(self, state, reason, owner="supervisor", attempt_id=None):
@@ -416,7 +479,7 @@ class SupervisorStore:
     def recover(self, *, read_only=False):
         # Read-only status uses the same authoritative head without publishing
         # missing projections or acquiring a writing lease.
-        with self._mutex if read_only else self._writing():
+        with self._snapshot() if read_only else self._writing():
             records = self.events()
             marker = self.read("recovery-required.yaml", RECOVERY_SCHEMA) if self.path("recovery-required.yaml").exists() else None
             checkpoints = [r for r in records if r["payload"].get("kind") == "checkpoint"]

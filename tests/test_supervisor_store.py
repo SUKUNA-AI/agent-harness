@@ -110,6 +110,93 @@ class SupervisorStoreTests(unittest.TestCase):
         self.assertEqual(restored["state"]["status"], "accepted")
         self.assertFalse(self.store.recover()["recovered"])
 
+    def test_readonly_recovery_preserves_legacy_and_current_store_contents(self):
+        self.store.commit({"schema_version": 1, "status": "pending"}, "start")
+        guard = self.root / "locks/journal-snapshot.guard"
+        self.assertTrue(guard.is_file())
+        for legacy in (False, True):
+            if legacy:
+                guard.unlink()
+            before = {str(path.relative_to(self.root)): path.read_bytes()
+                      for path in self.root.rglob("*") if path.is_file()}
+            reader = SupervisorStore(self.root, SCHEMA, create=False)
+            self.assertEqual(reader.recover(read_only=True)["state"]["status"], "pending")
+            after = {str(path.relative_to(self.root)): path.read_bytes()
+                     for path in self.root.rglob("*") if path.is_file()}
+            self.assertEqual(after, before)
+
+    def test_legacy_read_rejects_new_snapshot_anchor_without_adopting_publication(self):
+        self.store.commit({"schema_version": 1, "status": "pending"}, "start")
+        guard = self.root / "locks/journal-snapshot.guard"
+        guard.unlink()
+        reader = SupervisorStore(self.root, SCHEMA, create=False)
+        decode = reader._decode_events
+        def publication(raw):
+            records = decode(raw)
+            guard.write_bytes(b"")
+            return records
+        with patch.object(reader, "_decode_events", side_effect=publication):
+            with self.assertRaisesRegex(HarnessError, "anchor appeared during legacy read"):
+                reader.recover(read_only=True)
+
+    def test_read_snapshot_cannot_upgrade_to_lifetime_writer_lease(self):
+        self.store.commit({"schema_version": 1, "status": "pending"}, "start")
+        with self.store._snapshot():
+            with self.assertRaisesRegex(HarnessError, "Cannot upgrade"):
+                self.store.append_event({"must": "not publish"})
+            with self.assertRaisesRegex(HarnessError, "Cannot upgrade"):
+                with self.store.lease():
+                    self.fail("reader acquired a lifetime lease")
+        self.assertEqual(len(self.store.events()), 1)
+
+    def test_snapshot_rejects_linked_guard_or_lease_before_external_open(self):
+        self.store.commit({"schema_version": 1, "status": "pending"}, "start")
+        external = Path(self.temp.name) / "external"
+        external.write_bytes(b"external bytes must remain unchanged")
+        opening = Path.open
+        def checked(path, *args, **kwargs):
+            if path in (self.root / "locks/journal-snapshot.guard", self.root / "locks/journal-snapshot"):
+                raise AssertionError("linked coordination path was opened")
+            return opening(path, *args, **kwargs)
+        for name in ("journal-snapshot.guard", "journal-snapshot"):
+            path = self.root / "locks" / name
+            original = path.read_bytes() if path.exists() else None
+            if path.exists():
+                path.unlink()
+            for target in (external, external.with_name("missing-external")):
+                try:
+                    path.symlink_to(target)
+                except OSError:
+                    if original is not None:
+                        path.write_bytes(original)
+                    self.skipTest("Symlink privilege unavailable")
+                try:
+                    with patch.object(Path, "open", new=checked):
+                        with self.assertRaisesRegex(HarnessError, "Symlink/reparse"):
+                            self.store.recover(read_only=True)
+                finally:
+                    path.unlink()
+            if original is not None:
+                path.write_bytes(original)
+        self.assertEqual(external.read_bytes(), b"external bytes must remain unchanged")
+        self.assertFalse(external.with_name("missing-external").exists())
+
+    @unittest.skipUnless(os.name == "nt", "Windows junction substitution")
+    def test_legacy_snapshot_rejects_junction_created_in_missing_lock_parent(self):
+        empty = SupervisorStore(Path(self.temp.name) / "empty")
+        outside = Path(self.temp.name) / "outside"
+        outside.mkdir()
+        locks = empty.root / "locks"
+        try:
+            with self.assertRaisesRegex(HarnessError, "Symlink/reparse|Unsupported"):
+                with empty._snapshot():
+                    linked = subprocess.run(["cmd", "/d", "/c", "mklink", "/J", str(locks), str(outside)], capture_output=True)
+                    self.assertEqual(linked.returncode, 0, linked.stderr)
+        finally:
+            if locks.exists():
+                locks.rmdir()
+        self.assertEqual(list(outside.iterdir()), [])
+
     def test_crash_after_durable_journal_rebuilds_checkpoint(self):
         original = self.store.write
         def fail_checkpoint(name, *args, **kwargs):
