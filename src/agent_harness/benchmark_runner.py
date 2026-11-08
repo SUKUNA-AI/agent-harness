@@ -30,6 +30,7 @@ from .execution_ledger import HASH, SHORT, object_schema
 from .execution_receipts import build_digest
 from .file_io import read_regular_file
 from .runner import _contained_capture
+from .task_packets import NotDispatched
 from .strict_yaml import loads, validate
 from .supervisor import Supervisor
 from .supervisor_store import SupervisorStore, _parents, _ordinary
@@ -134,7 +135,12 @@ class _DeadlineCodexAdapter(CodexAdapter):
 
     def run(self, prompt, **options):
         end = self.runner._earliest_deadline(self.deadline, options.get("deadline"))
-        remaining = self.runner._require_remaining(end)
+        try:
+            remaining = self.runner._require_remaining(end)
+        except HarnessError as error:
+            # The backend has not been entered, so this deadline refusal is
+            # proven local. Exceptions after backend.run remain uncertain.
+            raise NotDispatched(str(error)) from error
         options.update(deadline=end, timeout=min(options.get("timeout", remaining), remaining))
         # Returning usage after expiry is still mandatory reconciliation. Do
         # not discard an already-dispatched completion as a free failure.
@@ -555,11 +561,17 @@ class BenchmarkRunner:
             claimed = report["recorded_status"] == "ACCEPTED"
             coverage = "complete" if accounting["intents"] and report["metrics"].get("coverage_status") == "complete" else "unknown"
         else:
-            raw = backend.run(contract["task"]["objective"], cwd=prepared["cwd"],
-                timeout=min(self._require_remaining(deadline), contract["budgets"]["turn_timeout_seconds"]),
-                deadline=deadline, native_children=True,
-                read_only=contract["task"]["read_only"], write_authorized=not contract["task"]["read_only"],
-                allow_non_git=True, log_dir=root / "codex")
+            try:
+                # The deadline wrapper clamps timeout and proves expiry before
+                # backend entry. Persist that local refusal for crash recovery.
+                raw = backend.run(contract["task"]["objective"], cwd=prepared["cwd"],
+                    timeout=contract["budgets"]["turn_timeout_seconds"],
+                    deadline=deadline, native_children=True,
+                    read_only=contract["task"]["read_only"], write_authorized=not contract["task"]["read_only"],
+                    allow_non_git=True, log_dir=root / "codex")
+            except NotDispatched:
+                raw = {"status": "failed", "outcome_known": True, "process_tree_stopped": True,
+                    "usage": {"input_tokens": 0, "output_tokens": 0}}
             outcome = {"completed": "completed", "timed_out": "timeout", "cancelled": "cancelled"}.get(raw["status"], "failed" if raw.get("outcome_known") else "unknown")
             if raw.get("process_tree_stopped") is False:
                 outcome = "unknown"

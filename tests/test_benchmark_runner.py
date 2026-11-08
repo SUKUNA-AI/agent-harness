@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 import tempfile
 import time
+import traceback
 import unittest
 from unittest.mock import patch
 
@@ -58,6 +59,7 @@ class FixtureCodexAdapter(BoundFixtureCodexAdapter):
 
     def run(self, prompt, *, on_process=None, **options):
         observation = {"cwd": str(options["cwd"]), "managed_callback": on_process is not None}
+        self.observations.append(observation)
         def observed(process):
             try:
                 if on_process is not None:
@@ -69,9 +71,13 @@ class FixtureCodexAdapter(BoundFixtureCodexAdapter):
             except BaseException as error:
                 observation["callback_error"] = type(error).__name__ + ": " + str(error)
                 raise
-        result = super().run(prompt, on_process=observed, **options)
+        try:
+            result = super().run(prompt, on_process=observed, **options)
+        except Exception as error:
+            observation["adapter_exception"] = (type(error).__name__ + ": " + str(error))[:1024]
+            observation["traceback"] = "".join(traceback.format_exception(error, limit=10))[-8192:]
+            raise
         observation["transport"] = result
-        self.observations.append(observation)
         return result
 
 
@@ -81,10 +87,14 @@ class FixtureAdapter(CodexBenchmarkAdapter):
 
     def __init__(self, root, *, kind="synthetic"):
         self.root, self.kind, self.modes, self.bound = root, kind, {}, 4
-        self.wall = 10
+        # Whole managed solve includes immutable bootstrap/context publication.
+        # Native Windows measured >14s before transport entry; reuse the 60s
+        # task budget from the original-grant test, keeping turn/grant bounds.
+        self.wall = 60
         self.turn_timeout = 10  # Successful fixture includes bounded spawn + real bind overhead.
         self.phase_deadlines = []
         self.observations = []
+        self.deadline_observations = []
         self.fake = root / "fake.py"
         self.fake.write_text(bound_fake_script(FAKE))
         self.grader = root / "grader.py"
@@ -149,6 +159,23 @@ class BenchmarkRunnerTests(unittest.TestCase):
         environment.start()
         self.addCleanup(environment.stop)
         self.adapter = FixtureAdapter(self.assets)
+        original_run = benchmark_runner._DeadlineCodexAdapter.run
+        def diagnostic_run(wrapper, prompt, **options):
+            started = time.monotonic()
+            deadline = wrapper.runner._earliest_deadline(wrapper.deadline, options.get("deadline"))
+            observation = {"cwd": str(options["cwd"]), "deadline": deadline,
+                "remaining_at_entry": (datetime.fromisoformat(deadline.replace("Z", "+00:00")) - datetime.now(timezone.utc)).total_seconds()}
+            try:
+                return original_run(wrapper, prompt, **options)
+            except Exception as error:
+                observation["adapter_exception"] = (type(error).__name__ + ": " + str(error))[:1024]
+                observation["traceback"] = "".join(traceback.format_exception(error, limit=10))[-8192:]
+                raise
+            finally:
+                observation["elapsed_seconds"] = time.monotonic() - started
+                self.adapter.deadline_observations.append(observation)
+        diagnostic = patch.object(benchmark_runner._DeadlineCodexAdapter, "run", diagnostic_run)
+        diagnostic.start();self.addCleanup(diagnostic.stop)
         def ref(name):
             raw = (self.assets / name).read_bytes()
             return {"path": name, "sha256": hashlib.sha256(raw).hexdigest()}
@@ -171,10 +198,12 @@ class BenchmarkRunnerTests(unittest.TestCase):
         return path.read_text().splitlines() if path.exists() else []
 
     def solve_diagnostic(self, runner, result):
-        if not result.get("unknown_outcome_trial_ids"):
+        if result.get("status") == "complete":
             return result
         rows = []
-        for trial in result["unknown_outcome_trial_ids"][:2]:
+        selected = list(dict.fromkeys(result.get("unknown_outcome_trial_ids", []) + result.get("failed_trials", [])
+            + result.get("usage", {}).get("unknown_trial_ids", []) + result.get("pending_grade_trial_ids", [])))
+        for trial in selected[:2]:
             root = runner.store.path("trials/" + trial)
             scheduled = next(item for item in evaluation.schedule(self.manifest) if item["trial_id"] == trial)
             row = {"trial_id": trial, "arm": scheduled["arm"]}
@@ -188,11 +217,11 @@ class BenchmarkRunnerTests(unittest.TestCase):
                     row[name] = {"omitted_bytes": path.stat().st_size}
             rows.append(row)
         transports = []
-        for value in sorted(self.adapter.observations[-10:], key=lambda value: bool(value["transport"].get("outcome_known"))):
-            raw = value["transport"]
+        for value in sorted(self.adapter.observations[-10:], key=lambda value: bool(value.get("transport", {}).get("outcome_known"))):
+            raw = value.get("transport", {})
             row = {key: raw.get(key) for key in ("status", "error", "usage", "outcome_known", "exit_code",
                 "turn_started", "turn_completed", "process_tree_stopped", "elapsed_seconds", "spawn_seconds")}
-            row.update({key: value.get(key) for key in ("cwd", "managed_callback", "callback_error")})
+            row.update({key: value.get(key) for key in ("cwd", "managed_callback", "callback_error", "adapter_exception", "traceback")})
             row["log_tails"] = {}
             for stream, name in raw.get("logs", {}).items():
                 path = Path(name)
@@ -201,7 +230,8 @@ class BenchmarkRunnerTests(unittest.TestCase):
                         source.seek(max(0, path.stat().st_size - 1024))
                         row["log_tails"][stream] = source.read(1024).decode("utf-8", errors="replace")
             transports.append(row)
-        value = json.dumps({"transports": transports, "trials": rows, "cohort": result}, ensure_ascii=True)
+        value = json.dumps({"deadline_adapters": self.adapter.deadline_observations[-10:],
+            "transports": transports, "trials": rows, "cohort": result}, ensure_ascii=True)
         return value[:24000] + ("... diagnostic truncated" if len(value) > 24000 else "")
 
     def test_delayed_real_bind_keeps_fast_fake_alive(self):
@@ -250,8 +280,60 @@ class BenchmarkRunnerTests(unittest.TestCase):
         self.assertEqual(runner.advance()["reason_code"], "BENCH_UNKNOWN_SOLVE_OUTCOME")
         self.assertEqual(calls, self.calls())
 
-    def test_full_cohort_executes_existing_engines_and_never_replays_completed_trials(self):
+    def test_expired_transport_deadline_is_proven_not_dispatched(self):
+        from agent_harness.task_packets import invoke
         runner = self.runner()
+        backend = self.adapter.codex({})
+        expired = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+        adapter = benchmark_runner._DeadlineCodexAdapter(backend, runner, expired)
+        result = invoke(adapter, "synthetic expired deadline", slot=None, cwd=self.root)
+        self.assertEqual(result["dispatch_state"], "not_dispatched_proven", result)
+        self.assertEqual(result["status"], "failed")
+        self.assertTrue(result["process_tree_stopped"])
+        self.assertIn("BENCH_DEADLINE_EXHAUSTED", result["error"])
+        self.assertEqual(self.adapter.observations, [])
+        self.assertEqual(self.calls(), [])
+
+    def test_adapter_exception_keeps_unknown_policy_and_bounded_fixture_traceback(self):
+        from agent_harness.task_packets import invoke
+        runner = self.runner()
+        backend = self.adapter.codex({})
+        adapter = benchmark_runner._DeadlineCodexAdapter(backend, runner, runner.state["authorization"]["deadline"])
+        message = "injected transport entry failure"
+        with patch.object(BoundFixtureCodexAdapter, "run", side_effect=HarnessError(message)):
+            result = invoke(adapter, "synthetic arbitrary exception", slot=None, cwd=self.root)
+        self.assertEqual(result["status"], "unknown_outcome")
+        self.assertEqual(result["error"], "Adapter outcome uncertain: HarnessError")
+        diagnostic = self.solve_diagnostic(runner, {"status": "blocked"})
+        self.assertIn(message, diagnostic)
+        self.assertIn("Traceback", diagnostic)
+        self.assertLessEqual(len(diagnostic.encode("ascii")), 24032)
+        self.assertEqual(self.calls(), [])
+
+    def test_plain_local_refusal_reconciles_without_unknown_or_model_replay(self):
+        from agent_harness.task_packets import NotDispatched
+        self.assertTrue(evaluation.schedule(self.manifest)[0]["arm"].startswith("plain_"))
+        runner = self.runner()
+        original = runner._record
+        def crash_before_projection(kind, *args, **options):
+            if kind == "solve":raise Crash()
+            return original(kind, *args, **options)
+        with patch.object(benchmark_runner._DeadlineCodexAdapter, "run", side_effect=NotDispatched("expired before backend entry")), patch.object(runner, "_record", crash_before_projection):
+            with self.assertRaises(Crash):runner.advance()
+        self.assertEqual(self.calls(), [])
+        recovered = BenchmarkRunner(self.root / "run", self.adapter)
+        result = recovered.advance()
+        self.assertEqual(result["completed_trials"], 1, self.solve_diagnostic(recovered, result))
+        self.assertEqual(result["unknown_outcome_trial_ids"], [])
+        self.assertEqual(result["usage"]["observed_tokens"], 0)
+        self.assertEqual(result["usage"]["coverage"], "complete")
+        self.assertEqual(result["usage"]["unknown_execution_ids"], [])
+        self.assertEqual(self.adapter.observations, [])
+        self.assertEqual(self.calls(), [])
+
+    def test_full_cohort_executes_existing_engines_and_never_replays_completed_trials(self):
+        # One fixed explicit grant covers every declared synthetic lifecycle.
+        runner = self.runner(seconds=len(evaluation.schedule(self.manifest)) * self.adapter.wall)
         result = runner.run()
         self.assertEqual(result["status"], "complete", self.solve_diagnostic(runner, result))
         self.assertEqual((result["planned_trials"], result["completed_trials"]), (10, 10))
@@ -324,7 +406,7 @@ class BenchmarkRunnerTests(unittest.TestCase):
         self.manifest["comparison"] = "matched"
         first = evaluation.schedule(self.manifest)[0]
         self.adapter.modes[first["trial_id"]] = "failed"
-        runner = self.runner()
+        runner = self.runner(seconds=len(evaluation.schedule(self.manifest)) * self.adapter.wall)
         result = runner.run()
         self.assertEqual(result["completed_trials"], 10, result)
         self.assertEqual(result["failed_trials"], [first["trial_id"]])
@@ -494,19 +576,36 @@ class BenchmarkRunnerTests(unittest.TestCase):
         self.adapter.wall = 60
         runner = self.runner(seconds=30)
         original_start, original_capture = Supervisor.start, benchmark_runner._contained_capture
-        deadlines, timeouts = [], []
+        deadlines, timeouts, commands = [], [], []
         def start(supervisor):
             deadlines.append(supervisor.state["deadline"])
             return original_start(supervisor)
         def capture(argv, **options):
+            commands.append(argv)
             timeouts.append((options["timeout"], runner._remaining()))
             self.assertLessEqual(options["timeout"], runner._remaining() + .02)
             return original_capture(argv, **options)
         with patch.object(Supervisor, "start", start), patch.object(benchmark_runner, "_contained_capture", capture), patch("agent_harness.codex_execution._contained_capture", capture):
             result = runner.advance()
-        self.assertEqual(result["completed_trials"], 1, result)
+        # This checks the original grant, not controller IO throughput. A known
+        # completion may exhaust it before grading; no action may extend it.
+        if result["completed_trials"] == 1:
+            self.assertGreaterEqual(len(timeouts), 5)  # qualification, probes, evaluator
+        else:
+            self.assertEqual(result["completed_trials"], 0, self.solve_diagnostic(runner, result))
+            self.assertEqual(result["reason_code"], "BENCH_DEADLINE_EXHAUSTED", self.solve_diagnostic(runner, result))
+            self.assertEqual(result["usage"]["observed_tokens"], 4)
+            self.assertEqual(result["usage"]["coverage"], "complete")
+            for key in ("unknown_trial_ids", "unknown_invocation_ids", "unknown_execution_ids"):
+                self.assertEqual(result["usage"][key], [])
+            self.assertEqual(result["unknown_outcome_trial_ids"], [], self.solve_diagnostic(runner, result))
+            self.assertEqual(len(result["pending_grade_trial_ids"]), 1)
+            self.assertGreaterEqual(len(timeouts), 4)  # qualification and three probes
+            self.assertFalse(any(str(self.adapter.grader) in argv for argv in commands))
+            calls = self.calls()
+            self.assertEqual(runner.advance()["reason_code"], "BENCH_DEADLINE_EXHAUSTED")
+            self.assertEqual(self.calls(), calls)
         self.assertEqual(deadlines, [runner.state["authorization"]["deadline"]])
-        self.assertGreaterEqual(len(timeouts), 5)  # qualification, three probes, independent evaluator
         self.assertTrue(all(deadline == runner.state["authorization"]["deadline"] for phase, deadline in self.adapter.phase_deadlines if phase != "backend"))
         self.assertEqual(len(self.calls()), 1)
 
