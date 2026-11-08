@@ -348,12 +348,26 @@ if manifest:
 
     def test_explicit_mission_revision_preserves_budget_and_drops_old_acceptance(self):
         from agent_harness.core import digest
+        from datetime import datetime
         # Two complete generations share one frozen deadline. Allow the real
         # verification/receipt work to finish; the assertions below still require
         # that mission revision never extends it or resets attempts/usage.
-        supervisor, _ = self.fixture(contract_edit=lambda c: c["budgets"].update(max_wall_seconds=900))
+        original_wall_seconds = 900
+        def original_node_budgets(plan):
+            for node in plan["tasks"]:
+                node["max_wall_seconds"] = original_wall_seconds
+        supervisor, _ = self.fixture(
+            contract_edit=lambda c: c["budgets"].update(max_wall_seconds=original_wall_seconds),
+            plan_edit=original_node_budgets)
         self.assertEqual(supervisor.start()["status"], "ACCEPTED")
         old_deadline, old_attempts = supervisor.state["deadline"], supervisor.state["attempts_used"]
+        original_paths = {name: supervisor.agent_path(name) for name in ("left", "right")}
+        original_nodes = {name: supervisor.store.read(path) for name, path in original_paths.items()}
+        root_deadline = datetime.fromisoformat(old_deadline.replace("Z", "+00:00"))
+        for agent in original_nodes.values():
+            node_deadline = datetime.fromisoformat(agent["deadline"].replace("Z", "+00:00"))
+            self.assertLessEqual(node_deadline, root_deadline)
+            self.assertEqual(node_deadline, root_deadline)  # min() selects the original root bound.
         usage = deepcopy(supervisor.state["metrics"])
         revised = deepcopy(supervisor.contract)
         revised["mission"].update(generation=2, previous_digest=digest(supervisor.contract["mission"]),
@@ -367,6 +381,8 @@ if manifest:
         self.assertEqual(supervisor.state["attempts_used"], old_attempts)
         self.assertEqual(supervisor.state["metrics"]["input_tokens"], usage["input_tokens"])
         self.assertTrue(all(c["status"] == "pending" for c in supervisor.state["acceptance"]))
+        for name, path in original_paths.items():
+            self.assertEqual(supervisor.store.read(path), original_nodes[name])
         reloaded = Supervisor(supervisor.path, adapter=supervisor.adapter)
         reloaded.load(recover=True)
         self.assertEqual(reloaded.contract["mission"]["generation"], 2)
@@ -380,6 +396,13 @@ if manifest:
         reloaded.plan_input = str(self.root / "mission-plan.yaml")
         completed = reloaded.resume()
         self.assertEqual(completed["status"], "ACCEPTED", completed)
+        for name, original in original_nodes.items():
+            agent = reloaded.store.read(reloaded.agent_path(name))
+            self.assertEqual(agent["deadline"], original["deadline"])
+            self.assertLessEqual(datetime.fromisoformat(agent["deadline"].replace("Z", "+00:00")), root_deadline)
+            self.assertEqual(agent["max_attempts"], original["max_attempts"])
+            self.assertEqual(agent["attempts_used"], original["attempts_used"] + 1)
+            self.assertEqual(reloaded.store.read(original_paths[name]), original)
         self.assertEqual(reloaded.store.read(reloaded.agent_path("left"))["attempts_used"], 2)
         self.assertEqual(reloaded.state["attempts_used"], old_attempts + 1)
         self.assertGreater(reloaded.state["metrics"]["input_tokens"], usage["input_tokens"])
