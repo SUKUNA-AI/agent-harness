@@ -6,7 +6,7 @@ checks are not a filesystem sandbox or a lock against an external file writer.
 from __future__ import annotations
 
 import os
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from pathlib import Path
 import stat
 
@@ -214,21 +214,34 @@ def parent_binding(path):
 @contextmanager
 def _directory_address(path):
     """Pin the existing directory chain, retaining any not-yet-created suffix."""
-    path = Path(os.path.abspath(path))
-    suffix = []
-    while True:
-        try:
-            path.lstat()
-            break
-        except FileNotFoundError:
-            suffix.insert(0, path.name)
-            if path == path.parent:
-                raise
-            path = path.parent
-    # The sentinel is never opened. ParentDirectory inspects and pins path
-    # itself as well as every ancestor, before any resolution can hide a link.
-    with ParentDirectory(path / '.directory-address') as parent:
+    with ExitStack() as anchors:
+        pinned = []
+        original = Path(path).absolute()
+        if '..' in original.parts:
+            current = Path(original.anchor)
+            for part in original.parts[1:]:
+                if part == '..':
+                    # abspath would erase this prefix. Inspect it first so
+                    # alias/.. cannot hide a link or a nonexistent ancestor.
+                    pinned.append(anchors.enter_context(ParentDirectory(current / '.directory-address')))
+                current = current / part
+        path = Path(os.path.abspath(original))
+        suffix = []
+        while True:
+            try:
+                path.lstat()
+                break
+            except FileNotFoundError:
+                suffix.insert(0, path.name)
+                if path == path.parent:
+                    raise
+                path = path.parent
+        # The sentinel is never opened. Inspect and pin path itself as well
+        # as every ancestor before resolution can hide a link.
+        parent = anchors.enter_context(ParentDirectory(path / '.directory-address'))
         yield parent, tuple(suffix)
+        for anchor in pinned:
+            anchor.check()
 
 
 def canonical_directory(path):

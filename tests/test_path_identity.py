@@ -52,6 +52,15 @@ class DirectoryAddressTests(unittest.TestCase):
             with self.subTest(path=path):
                 with self.assertRaises(FileReadError): canonical_directory(path)
                 with self.assertRaises(FileReadError): same_directory(path, target)
+        with self.assertRaises(FileReadError): canonical_directory(alias / '..')
+        with self.assertRaises(FileReadError): same_directory(alias / '..', self.root)
+
+    def test_ordinary_parent_traversal_keeps_native_directory_semantics(self):
+        directory = self.root / 'child'; directory.mkdir()
+        self.assertEqual(canonical_directory(directory / '..'), self.root)
+        self.assertTrue(same_directory(directory / '..', self.root))
+        with self.assertRaises(FileNotFoundError):
+            canonical_directory(self.root / 'nonexistent' / '..')
 
     @unittest.skipUnless(os.name == 'nt', 'Windows path aliases')
     def test_short_names_and_case_share_existing_and_future_directory_addresses(self):
