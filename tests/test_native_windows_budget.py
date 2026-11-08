@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from agent_harness import native_session as session
 from agent_harness.context_reducer import reduce, retrieve_recordset
@@ -138,6 +139,7 @@ class LongNativePathTests(unittest.TestCase):
         self.base = Path(self.temp.name).resolve()
         while len(str(self.base)) < 190:
             self.base /= "long-native-profile"
+        self.base /= "p" * (219 - len(str(self.base)))
         self.base.mkdir(parents=True)
         self.root = self.base / "project"
         self.root.mkdir()
@@ -238,3 +240,62 @@ class LongNativePathTests(unittest.TestCase):
         self.assertTrue(session.packet_path(packet, "raw_pointer").is_file())
         resumed = session.session_packet(self.state, session=packet["required"]["session"], max_bytes=2048)
         self.assertEqual(resumed["required"]["snapshot_id"], packet["required"]["snapshot_id"])
+
+    def check_service_packet(self, state):
+        packet = session.session_packet(state, root=self.root, goal="Inspect fixture", max_bytes=2048)
+        required = packet["required"]
+        self.assertEqual(required["path_encoding"], "service_relative_v1")
+        self.assertEqual(len(str(self.base)), 220)
+        self.assertEqual(required["root"], str(self.root))
+        self.assertEqual(Path(required["raw_pointer"]).name, required["raw_pointer"])
+        self.assertEqual(Path(required["packet_pointer"]).name, required["packet_pointer"])
+        self.assertEqual(session.packet_path(packet, "root"), self.root)
+        self.assertTrue(session.packet_path(packet, "raw_pointer").is_file())
+        self.assertEqual(json.loads(session.packet_path(packet, "packet_pointer").read_bytes()), packet)
+        self.assertLessEqual(len(canonical(session.packet_envelope(packet))) + 2, 2048)
+        wire = session.hook_output(session.packet_envelope(packet), max_bytes=2048)
+        self.assertLessEqual(len(wire) + 1, 2048)
+        text = json.loads(wire)["hookSpecificOutput"]["additionalContext"]
+        context = json.loads(text[len(session.HOOK_HEADER.decode("utf-8")):])
+        self.assertEqual(context["packet"]["required"], required)
+        args = dict(session=required["session"], note="Cross-drive checkpoint", next_step="Review",
+                    operation_id="cross-drive-op", max_bytes=2048)
+        checkpoint = session.session_packet(state, **args)
+        self.assertEqual(session.session_packet(state, **args), checkpoint)
+        self.assertLessEqual(len(canonical(session.packet_envelope(checkpoint))) + 2, 2048)
+        self.assertEqual(checkpoint["required"]["constraints"], session.SESSION_CONSTRAINTS)
+        for path in ("../outside", r"..\outside", str(self.root)):
+            changed = deepcopy(checkpoint)
+            changed["required"]["raw_pointer"] = path
+            with self.subTest(path=path), self.assertRaises(HarnessError):
+                session.packet_path(changed, "raw_pointer")
+        with self.assertRaisesRegex(HarnessError, "BUDGET_TOO_SMALL"):
+            session.session_packet(state, root=self.root, goal="g" * 4096, max_bytes=2048)
+
+    def test_service_relative_fallback_with_forced_cross_drive(self):
+        with patch.object(session.os.path, "commonpath", side_effect=ValueError("different drives")):
+            self.check_service_packet(self.state)
+
+    @unittest.skipUnless(os.name == "nt", "Windows separate drives")
+    def test_service_relative_on_available_second_fixed_drive(self):
+        import ctypes
+        from ctypes import wintypes
+        drive_type = ctypes.WinDLL("kernel32", use_last_error=True).GetDriveTypeW
+        drive_type.argtypes = [wintypes.LPCWSTR]
+        drive_type.restype = wintypes.UINT
+        for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+            drive = Path(letter + ":/")
+            if str(drive).casefold() == self.root.anchor.casefold() or drive_type(str(drive)) != 3:
+                continue
+            try:
+                other = tempfile.TemporaryDirectory(prefix="harness-packet-", dir=drive)
+            except OSError:
+                continue
+            self.addCleanup(other.cleanup)
+            state = Path(other.name).resolve()
+            while len(str(state)) < 220:
+                state /= "long-private-state"
+            self.assertNotEqual(state.anchor.casefold(), self.root.anchor.casefold())
+            self.check_service_packet(state)
+            return
+        self.skipTest("No writable second fixed drive")

@@ -88,12 +88,13 @@ def packet_path(packet, field):
         raise HarnessError("Invalid native packet path field")
     required = packet["required"]
     value = required[field]
-    if "path_encoding" not in required:
-        if not Path(value).is_absolute():
-            raise HarnessError("Legacy native packet path must be absolute")
-        return safe_private(Path(value))
-    if required["path_encoding"] != "base_relative_v1":
+    encoding = required.get("path_encoding")
+    if encoding not in {None, "base_relative_v1", "service_relative_v1"}:
         raise HarnessError("Unsupported native packet path encoding")
+    if encoding is None or (encoding == "service_relative_v1" and field == "root"):
+        if not Path(value).is_absolute():
+            raise HarnessError("Native packet root/legacy path must be absolute")
+        return safe_private(Path(value))
     base = Path(required["path_base"])
     relative = Path(value)
     # Reject both separator spellings even on POSIX; a drive/UNC reference is
@@ -112,7 +113,7 @@ def packet_path(packet, field):
 def packet_envelope(packet):
     """Keep the legacy wire shape; compact packets carry their envelope once."""
     required = packet["required"]
-    if required.get("path_encoding") == "base_relative_v1":
+    if required.get("path_encoding") in {"base_relative_v1", "service_relative_v1"}:
         return {"packet": packet}
     return {"session": required["session"], "root": required["root"],
             "evidence": required["packet_pointer"], "packet": packet}
@@ -368,11 +369,14 @@ def session_packet(state, *, root=None, goal=None, session=None, note=None,
             if packet is None:
                 try:
                     base = Path(os.path.commonpath([str(root), str(directory)]))
+                    encoding = "base_relative_v1"
                 except ValueError:  # Different Windows drives have no shared base.
-                    raise error
-                compact = {**required, "path_encoding": "base_relative_v1", "path_base": str(base)}
+                    base = directory
+                    encoding = "service_relative_v1"
+                compact = {**required, "path_encoding": encoding, "path_base": str(base)}
                 for field, path in (("root", root), ("raw_pointer", raw_path), ("packet_pointer", packet_path)):
-                    compact[field] = path.relative_to(base).as_posix()
+                    if field != "root" or encoding == "base_relative_v1":
+                        compact[field] = path.relative_to(base).as_posix()
                 overhead = len(canonical({"packet": None})) - len(b"null")
                 packet = reduce(records, category="handoff", max_bytes=max_bytes - overhead,
                                 recordset_store=directory / "recordsets", required=compact, compact_reference=True)

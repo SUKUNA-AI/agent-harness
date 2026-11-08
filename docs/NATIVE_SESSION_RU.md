@@ -24,6 +24,9 @@ stale counters явные. Whole-tree snapshot digest пересчитывает
 за базу. Обязательные goal, constraints и identity hashes остаются в пакете;
 реальная нехватка бюджета возвращает `BUDGET_TOO_SMALL`. Старые абсолютные
 адреса, ссылки recordset, checkpoints и operation receipts продолжают читаться.
+Если проект и private state находятся на разных дисках, маркер
+`service_relative_v1` оставляет `root` абсолютным, а `path_base` указывает
+каталог native-сессии; относительно него заданы только служебные pointers.
 
 После существенного результата:
 
