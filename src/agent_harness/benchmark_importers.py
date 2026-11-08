@@ -70,11 +70,11 @@ def _paths(files):
 
 
 def capture_local_git_checkout(repository, revision, assets_root, *, prefix='checkout', deadline=None):
-    """Capture an immutable, raw-byte Git baseline, without running filters.
+    """Capture immutable Git blob bytes, without running repository filters.
 
     Git-clean is weaker than byte identity (EOL/clean filters can hide changes).
-    The supported input is an untransformed checkout; capture never silently
-    canonicalizes worktree bytes or invokes repository-provided filters.
+    Only a uniform LF-to-CRLF checkout conversion is supported in addition to
+    exact bytes. Assets always contain the original blob, not checkout bytes.
     """
     from datetime import datetime,timezone
     def git(*args):
@@ -104,9 +104,18 @@ def capture_local_git_checkout(repository, revision, assets_root, *, prefix='che
         algorithm=hashlib.sha1 if len(oid)==40 else hashlib.sha256
         if algorithm(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()!=oid.decode():
             canonical=git('cat-file','blob',oid.decode())
-            if b'\r\n' in raw and raw.replace(b'\r\n',b'\n')==canonical:
-                raise HarnessError('BENCH_BASE_CHECKOUT_FILTERED_BYTES_UNSUPPORTED: CRLF worktree differs from immutable Git blob; prepare a raw-byte checkout with EOL/filter transforms disabled')
-            raise HarnessError('BENCH_DIRTY_BASE_CHECKOUT: worktree bytes differ from immutable Git blob; clean/smudge, encoding and ident transforms are unsupported')
+            # Never ask Git to clean/hash the worktree: that could execute a
+            # configured filter. Check the sole supported transform ourselves.
+            crlf_only=(b'\n' in canonical and b'\r' not in canonical and b'\0' not in canonical
+                and raw==canonical.replace(b'\n',b'\r\n'))
+            if not crlf_only:
+                raise HarnessError('BENCH_DIRTY_BASE_CHECKOUT: worktree bytes differ from immutable Git blob; clean/smudge, encoding and ident transforms are unsupported')
+            fields=git('check-attr','-z','filter','working-tree-encoding','ident','text','--',name).split(b'\0')
+            attributes={fields[index+1]:fields[index+2] for index in range(0,len(fields)-1,3)}
+            if (any(attributes.get(key) not in (b'unspecified',b'unset') for key in (b'filter',b'working-tree-encoding',b'ident'))
+                    or attributes.get(b'text') not in (b'unspecified',b'set',b'auto')):
+                raise HarnessError('BENCH_BASE_CHECKOUT_FILTERED_BYTES_UNSUPPORTED: only text CRLF checkout conversion is supported')
+            raw=canonical
         relative=_relative(prefix)+'/'+name
         atomic_write(store.path(relative),raw,exclusive=True)
         files.append({'path':name,'asset':{'path':relative,'sha256':_hash(raw)},'mode':mode.decode()})

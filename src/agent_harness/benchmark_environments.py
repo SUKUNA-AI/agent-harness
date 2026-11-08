@@ -214,8 +214,6 @@ class ArmHomeBuilder:
             return {'workspace':None,'git_root_observed':False,'ancestor_documents':[],
                 'client_document_boundary':'unavailable','qualification':'unavailable'}
         workspace=Path(workspace).absolute()
-        with ParentDirectory(workspace/'.binding'):
-            pass
         _check(deadline)
         git_root=False
         if _present(workspace/'.git') and (workspace/'.git').is_dir():
@@ -227,10 +225,19 @@ class ArmHomeBuilder:
             if deadline is not None:timeout=min(timeout,max(.001,(datetime.fromisoformat(deadline.replace('Z','+00:00'))-datetime.now(timezone.utc)).total_seconds()))
             git=shutil.which('git',path=self.tool_path)
             if git is None:raise HarnessError('BENCH_ENVIRONMENT_GIT_UNAVAILABLE')
-            result=_contained_capture([str(Path(git).resolve()),'-C',str(workspace),'rev-parse','--show-toplevel'],timeout=timeout,env=environment)
-            if result.returncode==0:
-                top=Path(os.fsdecode(result.stdout.removesuffix(b'\n').removesuffix(b'\r'))).resolve()
-                git_root=top==workspace
+            # Pin both original spellings before comparing physical directories.
+            # resolve() on just Git's spelling loses Windows aliases and could
+            # hide a reparse ancestor before the no-link check.
+            with ParentDirectory(workspace/'.binding') as workspace_parent:
+                result=_contained_capture([str(Path(git).resolve()),'-C',str(workspace),'rev-parse','--show-toplevel'],timeout=timeout,env=environment)
+                if result.returncode==0:
+                    top=Path(os.fsdecode(result.stdout.removesuffix(b'\n').removesuffix(b'\r')))
+                    if top.is_absolute():
+                        with ParentDirectory(top/'.binding') as top_parent:
+                            git_root=workspace_parent.physical_identity()==top_parent.physical_identity()
+        else:
+            with ParentDirectory(workspace/'.binding'):
+                pass
         _check(deadline)
         documents=[]
         for parent in workspace.parents:

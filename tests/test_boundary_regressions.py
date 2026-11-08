@@ -153,7 +153,7 @@ class GitByteBoundaryTests(unittest.TestCase):
         for name in ('','.', './a','a//b','a/../b','a/','/a','a\\b','C:/a','//server/share'):
             with self.subTest(name=name),self.assertRaises(HarnessError):_safe_join(self.root,name)
 
-    def test_git_clean_crlf_is_explicitly_unsupported_without_raw_normalization(self):
+    def test_git_clean_crlf_captures_original_blob_without_mutating_checkout(self):
         (self.repo/'file').write_bytes(b'a\nb\n')
         self.git('add','.');self.git('commit','-m','baseline')
         revision=self.git('rev-parse','HEAD').decode().strip()
@@ -162,8 +162,9 @@ class GitByteBoundaryTests(unittest.TestCase):
         (self.repo/'file').unlink();self.git('checkout','--','file')
         (self.repo/'file').write_bytes(b'a\r\nb\r\n')
         self.assertEqual(self.git('status','--porcelain'),b'')
-        with self.assertRaisesRegex(HarnessError,'FILTERED_BYTES_UNSUPPORTED.*raw-byte checkout'):
-            capture_local_git_checkout(self.repo,revision,self.root/'assets')
+        files,checkout=capture_local_git_checkout(self.repo,revision,self.root/'assets')
+        self.assertEqual((self.root/'assets'/files[0]['asset']['path']).read_bytes(),b'a\nb\n')
+        self.assertEqual(checkout['tree'],self.git('rev-parse','HEAD^{tree}').decode().strip())
         self.assertEqual((self.repo/'file').read_bytes(),b'a\r\nb\r\n')
 
     def test_patch_lf_only_records_apply_to_exact_bytes_and_modes(self):
