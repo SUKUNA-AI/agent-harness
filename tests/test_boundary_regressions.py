@@ -41,6 +41,17 @@ def replace(parent,name):
     if parent.path==state/'active.json' and boundary=='active_after':os._exit(73)
     return result
 i.ParentDirectory.replace=replace
+original_windows_helper=i.windows_helper
+
+def windows_helper(name,*args,**kwargs):
+    # Existing Windows targets use ReplaceFileW to preserve their DACL; they
+    # deliberately bypass ParentDirectory.replace. Fault the actual boundary.
+    addressed=name=='_windows_replace' and args[0]==target
+    if addressed and boundary=='before':os._exit(73)
+    result=original_windows_helper(name,*args,**kwargs)
+    if addressed and boundary=='after':os._exit(73)
+    return result
+i.windows_helper=windows_helper
 original_atomic=i.atomic
 def atomic(path,data):
     if path.name=='manifest.json' and boundary=='final' and b'"status": "written_pending_native_verification"' in data:os._exit(73)
@@ -68,7 +79,10 @@ with i.lock(state):i.apply_plan(plans,state,package)
 
     def test_hard_exit_before_replace_can_rollback_then_install_repeat(self):
         path,manifest=self.kill_install('before')
-        self.assertEqual(manifest['files'][0]['progress'],'publishing')
+        row=manifest['files'][0]
+        self.assertEqual(row['progress'],'publishing')
+        current=install.read(Path(row['path']))
+        self.assertEqual(install.digest(current) if current is not None else None,row['before_sha256'])
         self.reconcile(path,manifest)
         self.assertEqual(self.apply()['status'],'written_pending_native_verification')
         self.assertEqual(self.apply()['status'],'unchanged')
@@ -77,6 +91,8 @@ with i.lock(state):i.apply_plan(plans,state,package)
         path,manifest=self.kill_install('after')
         row=manifest['files'][0]
         self.assertEqual(row['progress'],'publishing')
+        self.assertEqual(install.digest(Path(row['path']).read_bytes()),row['after_sha256'])
+        self.assertEqual(install.metadata(Path(row['path']))['identity'][:-1],tuple(row['publication_identity']))
         backups={Path(r['backup']):Path(r['backup']).read_bytes() for r in manifest['files'] if r['backup']}
         self.reconcile(path,manifest)
         self.assertEqual(install.read(Path(row['path'])),install.read(Path(row['backup'])) if row['backup'] else None)
