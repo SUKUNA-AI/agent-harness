@@ -538,7 +538,6 @@ class SupervisorStore:
                 state_raw = read_regular_file(self.path("state.yaml"), max_bytes=strict_yaml.MAX_BYTES, missing_ok=True)
             records = self._validate_journal(stamp, raw)
             marker = strict_yaml.loads(marker_raw, RECOVERY_SCHEMA) if marker_raw is not None else None
-            current = strict_yaml.loads(state_raw, self.state_schema) if state_raw is not None else None
             checkpoints = [r for r in records if r["payload"].get("kind") == "checkpoint"]
             if not checkpoints:
                 if state_raw is not None:
@@ -563,7 +562,10 @@ class SupervisorStore:
                 elif not read_only:
                     writes.append((name, expected, CHECKPOINT_SCHEMA, True))
             state = checkpoints[-1]["payload"]["state"]
-            recovered = current != state
+            recovered = False
+            if marker is None:
+                current = strict_yaml.loads(state_raw, self.state_schema) if state_raw is not None else None
+                recovered = current != state
             if recovered and not read_only and marker is None:
                 writes.append(("state.yaml", state, self.state_schema, False))
             if writes:

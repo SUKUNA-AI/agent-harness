@@ -110,6 +110,39 @@ class SupervisorStoreTests(unittest.TestCase):
         self.assertEqual(restored["state"]["status"], "accepted")
         self.assertFalse(self.store.recover()["recovered"])
 
+    def test_recovery_marker_preserves_corrupt_projection_and_returns_journal_state(self):
+        expected = {"schema_version": 1, "status": "pending"}
+        self.store.commit(expected, "start")
+        journal = self.root / "journal/events.jsonl"
+        journal.write_bytes(journal.read_bytes() + b'{"partial":')
+        self.store.repair_torn_tail()
+        state = self.root / "state.yaml"
+        state.write_bytes(b"{broken:")
+        marker = self.root / "recovery-required.yaml"
+        receipt = self.store.read("recovery-required.yaml")
+        before = {"journal": journal.read_bytes(), "marker": marker.read_bytes(), "state": state.read_bytes()}
+        checkpoint = self.root / "checkpoints/000001.yaml"
+        checkpoint.unlink()  # Read-only keeps it missing; authorized recovery reconstructs it.
+        for read_only in (True, False):
+            with self.subTest(read_only=read_only):
+                result = self.store.recover(read_only=read_only)
+                self.assertTrue(result["recovery_required"])
+                self.assertEqual(result["state"], expected)
+                self.assertEqual(result["recovery_receipt"], receipt)
+                self.assertEqual(state.read_bytes(), before["state"])
+                self.assertEqual(marker.read_bytes(), before["marker"])
+                self.assertEqual(journal.read_bytes(), before["journal"])
+                self.assertEqual(checkpoint.exists(), not read_only)
+
+    def test_no_checkpoint_provenance_precedes_corrupt_projection_parsing(self):
+        state = self.root / "state.yaml"
+        state.write_bytes(b"{broken:")
+        for read_only in (True, False):
+            with self.subTest(read_only=read_only):
+                with self.assertRaisesRegex(HarnessError, "State lacks committed journal provenance"):
+                    self.store.recover(read_only=read_only)
+                self.assertEqual(state.read_bytes(), b"{broken:")
+
     def test_readonly_recovery_preserves_legacy_and_current_store_contents(self):
         self.store.commit({"schema_version": 1, "status": "pending"}, "start")
         guard = self.root / "locks/journal-snapshot.guard"
