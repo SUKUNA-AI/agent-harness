@@ -18,6 +18,14 @@ SCHEMA = {"type": "object", "required": ["schema_version", "status"], "propertie
 
 
 class StrictYAMLTests(unittest.TestCase):
+    def test_numeric_looking_windows_file_ids_roundtrip_as_strings(self):
+        from agent_harness.strict_yaml import dumps, loads
+        for value in ('12e999', '960e0000000000000000000000000000', '1e12', '-2E3',
+                      'true', 'null', '2026-11-08', '0000123'):
+            with self.subTest(value=value):
+                document = {value: {'inode': value}}
+                self.assertEqual(loads(dumps(document)), document)
+
     def test_block_yaml_roundtrip_json_scalar_policy(self):
         value = sy.loads("schema_version: 1\nstatus: pending\ncount: 2\n", SCHEMA)
         self.assertEqual(value["count"], 2)

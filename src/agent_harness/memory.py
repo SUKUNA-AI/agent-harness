@@ -122,7 +122,10 @@ class Memory:
                 raise HarnessError("Memory provenance needs safe relative paths")
         target = safe_private(self.root / directory, create=True)
         from .native_observability import observer_lock
-        with observer_lock(self.root / ".lock", purpose="memory write", timeout=self.checkpoint_limits["deadline_ms"] / 1000):
+        # The scan deadline bounds the optional derived index, not admission
+        # of an authoritative checkpoint write. Use the existing writer-lock
+        # timeout, as other native store writers do.
+        with observer_lock(self.root / ".lock", purpose="memory write"):
             dump(target / (value["id"] + ".yaml"), value, schema, exclusive=not mutable)
             if directory == "short_term":
                 try:

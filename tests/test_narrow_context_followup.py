@@ -194,6 +194,34 @@ class NarrowContextFollowup(unittest.TestCase):
         index_row = load(index.path)
         self.assertEqual({row["id"] for row in index_row["entries"]}, {"initial", *(row["id"] for row in rows)})
 
+    def test_checkpoint_write_uses_writer_admission_not_optional_scan_deadline(self):
+        import threading
+        import time
+        from agent_harness.core import lock
+        memory = Memory(self.state / 'memory', self.project, enabled=True,
+                        checkpoint_limits={'deadline_ms': 1})
+        entered, release, writing = threading.Event(), threading.Event(), threading.Event()
+        def hold():
+            with lock(memory.root / '.lock', purpose='concurrent native writer'):
+                entered.set()
+                if not release.wait(5): raise AssertionError('writer was not released')
+        def write():
+            writing.set()
+            return memory.update_short_term(self.short('queued'))
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            holder = pool.submit(hold)
+            try:
+                self.assertTrue(entered.wait(5))
+                writer = pool.submit(write)
+                self.assertTrue(writing.wait(5))
+                time.sleep(.05)
+                self.assertFalse(writer.done(), 'scan budget prematurely refused authoritative write')
+            finally:
+                release.set()
+            holder.result(timeout=5)
+            self.assertEqual(writer.result(timeout=5)['id'], 'queued')
+        self.assertEqual(load(memory.root / 'short_term' / 'queued.yaml')['id'], 'queued')
+
     def event(self, **kwargs):
         return {"hook_event_name": "PostModelRequest", "session_id": "runtime", "cwd": str(self.root),
                 "agent_type": "root", "event_id": "event-one", "request_id": "request-one", "attempt_id": "attempt-one", **kwargs}
