@@ -143,7 +143,7 @@ class NativeSessionTests(unittest.TestCase):
         for _ in range(3):
             self.start()
         packet = self.start(evidence=receipt, max_bytes=2048)
-        raw = json.loads(Path(packet["required"]["raw_pointer"]).read_text())
+        raw = json.loads(session.packet_path(packet, "raw_pointer").read_text())
         self.assertEqual(raw["evidence"]["sha256"], hashlib.sha256(receipt.read_bytes()).hexdigest())
         self.assertLessEqual(len(canonical(packet)) + 2, 2048)
         self.assertTrue(packet["required"]["raw_pointer"])
@@ -183,10 +183,11 @@ class EscapedPathNativeBudgetTests(unittest.TestCase):
         result = subprocess.run([sys.executable, str(ROOT / "tools/session.py"), "--state", str(self.state),
             "--max-bytes", "2048", "start", "--root", str(self.root), "--goal", "Inspect fixture"],
             capture_output=True, env={**os.environ, "PYTHONIOENCODING": "ascii"}, timeout=20)
-        self.assertEqual(result.returncode, 2, result.stderr)
-        self.assertEqual(result.stdout, b"")
-        with self.assertRaisesRegex(HarnessError, "BUDGET_TOO_SMALL"):
-            self.start(max_bytes=2048)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertLessEqual(len(result.stdout) + 1, 2048)
+        small = json.loads(result.stdout)["packet"]
+        self.assertEqual(session.packet_path(small, "root"), self.root)
+        self.assertTrue(session.packet_path(small, "packet_pointer").is_file())
         result = subprocess.run([sys.executable, str(ROOT / "tools/session.py"), "--state", str(self.state),
             "--max-bytes", "4096", "start", "--root", str(self.root), "--goal", "Inspect fixture"],
             capture_output=True, env={**os.environ, "PYTHONIOENCODING": "ascii"}, timeout=20)
@@ -201,16 +202,12 @@ class EscapedPathNativeBudgetTests(unittest.TestCase):
         receipt.write_text('{"status":"observed"}\n')
         for _ in range(3):
             self.start()
-        with self.assertRaisesRegex(HarnessError, "BUDGET_TOO_SMALL"):
-            self.start(evidence=receipt, max_bytes=2048)
-        packet = self.start(evidence=receipt, max_bytes=4096)
+        packet = self.start(evidence=receipt, max_bytes=2048)
         required = packet["required"]
-        outer = {"session": required["session"], "root": required["root"],
-                 "evidence": required["packet_pointer"], "packet": packet}
-        self.assertLessEqual(len(canonical(outer)) + 2, 4096)
-        raw = json.loads(Path(required["raw_pointer"]).read_text())
+        self.assertLessEqual(len(canonical(session.packet_envelope(packet))) + 2, 2048)
+        raw = json.loads(session.packet_path(packet, "raw_pointer").read_text())
         self.assertEqual(raw["evidence"]["sha256"], hashlib.sha256(receipt.read_bytes()).hexdigest())
-        store = Path(required["packet_pointer"]).parent / "recordsets"
+        store = session.packet_path(packet, "packet_pointer").parent / "recordsets"
         parts, offset = [], 0
         for _ in range(100):
             page = retrieve_recordset(store, packet["recordset_ref"], offset=offset, limit=1024)

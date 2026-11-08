@@ -22,7 +22,8 @@ def compact_provenance(value):
             "raw_provenance_digest": digest(value), "file_details_omitted": len(value.get("files", {}))}
 
 
-def reduce(records, *, category="tool_result", max_bytes=None, required=None, cursor=None, view="current", recordset_store=None):
+def reduce(records, *, category="tool_result", max_bytes=None, required=None, cursor=None, view="current", recordset_store=None,
+           compact_reference=False):
     """Reduce without losing late evictions, with version-bound source continuation.
 
     The cursor addresses the ranked projection, never a raw input offset. Full
@@ -56,6 +57,9 @@ def reduce(records, *, category="tool_result", max_bytes=None, required=None, cu
         value = {"schema_version": 1, "project_id": project, "records": records}
         reference = {"project_id": project, "kind": "context_recordset", "id": "recordset-" + digest(value),
                      "generation": 1, "content_digest": digest(value)}
+        if compact_reference:
+            # The content-addressed ID already carries the complete digest.
+            reference.pop("content_digest")
     base = {"schema_version": 2, "category": category, "trust": "untrusted_observations",
             "recordset_digest": recordset, "recordset_ref": reference, "required": required or {}, "items": [], "omitted": 0,
             "omission_pointers": [], "duplicates_grouped": 0, "input_records": len(records),
@@ -202,13 +206,16 @@ def retrieve_recordset(store, reference, *, offset=0, limit=8192):
     from .execution_ledger import safe_private, paginate
     from .strict_yaml import load
     import re
-    if (not isinstance(reference, dict) or set(reference) != {"project_id", "kind", "id", "generation", "content_digest"}
+    keys = {"project_id", "kind", "id", "generation"}
+    if (not isinstance(reference, dict) or set(reference) not in (keys, keys | {"content_digest"})
             or reference["kind"] != "context_recordset" or reference["generation"] != 1
             or not isinstance(reference["id"], str) or not re.fullmatch(r"recordset-[a-f0-9]{64}", reference["id"])):
         raise HarnessError("INVALID_RECORDSET_REFERENCE")
     path = safe_private(Path(store) / (reference["id"] + ".yaml"))
     value = load(path)
-    if value.get("project_id") != reference["project_id"] or digest(value) != reference["content_digest"]:
+    expected = reference["id"][len("recordset-"):]
+    if (value.get("project_id") != reference["project_id"] or digest(value) != expected
+            or reference.get("content_digest", expected) != expected):
         raise HarnessError("STALE_REFERENCE: context recordset identity changed")
     return paginate(value, offset=offset, limit=limit)
 

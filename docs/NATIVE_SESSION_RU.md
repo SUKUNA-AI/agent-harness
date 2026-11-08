@@ -14,6 +14,17 @@ SHA256 evidence, `packet.required.packet_pointer` — к сохранённом�
 stale counters явные. Whole-tree snapshot digest пересчитывается; короткий вывод
 не означает token savings или ускорение чтения source. Память не является приёмкой.
 
+Если длинные пути не помещаются, адаптер сначала убирает повторный digest из
+`recordset_ref`: полный SHA256 уже содержится в `id` после `recordset-`.
+Если этого недостаточно, вывод имеет форму `{"packet": ...}` без повторения
+служебных полей. Маркер `packet.required.path_encoding = "base_relative_v1"`
+означает, что `root`, `raw_pointer` и `packet_pointer` заданы относительно
+единственного абсолютного `packet.required.path_base`. Python helper
+`native_session.packet_path(packet, field)` читает обе формы и запрещает выход
+за базу. Обязательные goal, constraints и identity hashes остаются в пакете;
+реальная нехватка бюджета возвращает `BUDGET_TOO_SMALL`. Старые абсолютные
+адреса, ссылки recordset, checkpoints и operation receipts продолжают читаться.
+
 После существенного результата:
 
 ```sh

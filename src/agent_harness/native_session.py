@@ -78,6 +78,46 @@ def checked_text(value, name, maximum):
     return value
 
 
+def packet_path(packet, field):
+    """Resolve legacy absolute or explicit base-relative native packet addresses.
+
+    Compact addresses never depend on the reader's cwd and cannot escape their
+    base through traversal, absolute paths or private-store links/reparse points.
+    """
+    if field not in {"root", "raw_pointer", "packet_pointer"}:
+        raise HarnessError("Invalid native packet path field")
+    required = packet["required"]
+    value = required[field]
+    if "path_encoding" not in required:
+        if not Path(value).is_absolute():
+            raise HarnessError("Legacy native packet path must be absolute")
+        return safe_private(Path(value))
+    if required["path_encoding"] != "base_relative_v1":
+        raise HarnessError("Unsupported native packet path encoding")
+    base = Path(required["path_base"])
+    relative = Path(value)
+    # Reject both separator spellings even on POSIX; a drive/UNC reference is
+    # not a relative address, including Windows drive-relative C:foo syntax.
+    if (not base.is_absolute() or not value or relative.is_absolute()
+            or re.match(r"^[A-Za-z]:", value) or value.startswith(("/", "\\"))
+            or ".." in value.replace("\\", "/").split("/")):
+        raise HarnessError("Invalid base-relative native packet path")
+    base = safe_private(base)
+    candidate = safe_private(base / relative)
+    if not candidate.resolve().is_relative_to(base.resolve()):
+        raise HarnessError("Native packet path escaped its base")
+    return candidate
+
+
+def packet_envelope(packet):
+    """Keep the legacy wire shape; compact packets carry their envelope once."""
+    required = packet["required"]
+    if required.get("path_encoding") == "base_relative_v1":
+        return {"packet": packet}
+    return {"session": required["session"], "root": required["root"],
+            "evidence": required["packet_pointer"], "packet": packet}
+
+
 def checkpoint_observation(memory, row, path, current):
     source = validity(row["provenance"], current)
     evidence = memory.evidence_status(row) if row.get("evidence_ids") else "unknown"
@@ -143,7 +183,7 @@ def session_packet(state, *, root=None, goal=None, session=None, note=None,
     if evidence is not None:
         path = safe_private(Path(evidence).absolute())
         receipt = {"id": "evidence-" + digest(str(path))[:24], "path": str(path), "sha256": hashlib.sha256(read_regular_file(path)).hexdigest()}
-    state = safe_private(Path(state))
+    state = safe_private(Path(state)).resolve()
     session = session or "native-" + uuid.uuid4().hex
     directory = safe_private(state / "native-sessions" / session)
     metadata_path = directory / "session.json"
@@ -244,8 +284,7 @@ def session_packet(state, *, root=None, goal=None, session=None, note=None,
                     or packet["required"].get("repository_identity") != current["repository_identity"]):
                 raise HarnessError("STALE_OPERATION_REPLAY: source changed; preserve receipt and request a fresh handoff")
             # The Python API has the same complete transport bound as the CLI.
-            json_bytes({"session": session, "root": str(root), "evidence": operation["packet_path"],
-                        "packet": packet}, max_bytes=max_bytes)
+            json_bytes(packet_envelope(packet), max_bytes=max_bytes)
             context = replay_context(memory, ledger, current, session, goal, row, own_checkpoint)
             references = [ref for ref in operation.get("input_refs", []) if ref["kind"] == "context_replay"]
             if (not context["complete"] or len(references) != 1
@@ -298,8 +337,7 @@ def session_packet(state, *, root=None, goal=None, session=None, note=None,
         packet_path = directory / ("packet-" + uuid.uuid4().hex + ".json")
         envelope_bytes = len(canonical({"session": session, "root": str(root),
             "evidence": str(packet_path), "packet": None})) - len(b"null")
-        packet = reduce(records, category="handoff", max_bytes=max_bytes - envelope_bytes,
-                        recordset_store=directory / "recordsets", required={
+        required = {
             "session": session, "root": str(root), "repository_identity": current["repository_identity"],
             "snapshot_id": current["snapshot_id"], "memory": True, "ledger": "inform",
             "no_model_calls": True, "acceptance": "not_performed", "raw_pointer": str(raw_path),
@@ -308,7 +346,37 @@ def session_packet(state, *, root=None, goal=None, session=None, note=None,
             "memory_omitted_records": recall["omitted_records"],
             "ledger_omitted_records": inform["omitted"], "goal_generation": generation,
             "goal": goal, "goal_digest": goal_digest, "constraints": committed_checkpoint["constraints"],
-            "degraded_records": len(diagnostics) + len(recall.get("diagnostics", []))})
+            "degraded_records": len(diagnostics) + len(recall.get("diagnostics", []))}
+        try:
+            packet = reduce(records, category="handoff", max_bytes=max_bytes - envelope_bytes,
+                            recordset_store=directory / "recordsets", required=required)
+        except HarnessError as error:
+            if not str(error).startswith("BUDGET_TOO_SMALL"):
+                raise
+            # First deduplicate the reference's digest, preserving the legacy
+            # absolute-path/envelope shape whenever that alone is sufficient.
+            try:
+                packet = reduce(records, category="handoff", max_bytes=max_bytes - envelope_bytes,
+                                recordset_store=directory / "recordsets", required=required, compact_reference=True)
+            except HarnessError as compact_error:
+                if not str(compact_error).startswith("BUDGET_TOO_SMALL"):
+                    raise
+                packet = None
+            # Store a shared absolute base once instead of repeating escaped
+            # Windows profile/session paths in required fields and the outer
+            # envelope. Constraints, goals and all identity hashes stay inline.
+            if packet is None:
+                try:
+                    base = Path(os.path.commonpath([str(root), str(directory)]))
+                except ValueError:  # Different Windows drives have no shared base.
+                    raise error
+                compact = {**required, "path_encoding": "base_relative_v1", "path_base": str(base)}
+                for field, path in (("root", root), ("raw_pointer", raw_path), ("packet_pointer", packet_path)):
+                    compact[field] = path.relative_to(base).as_posix()
+                overhead = len(canonical({"packet": None})) - len(b"null")
+                packet = reduce(records, category="handoff", max_bytes=max_bytes - overhead,
+                                recordset_store=directory / "recordsets", required=compact, compact_reference=True)
+        json_bytes(packet_envelope(packet), max_bytes=max_bytes)
         persist(packet_path, packet)
         generation_path = directory / ("generation-" + str(metadata["receipt_generation"]) + "-" + digest(metadata) + ".json")
         committed_generation = {"metadata": metadata, "checkpoint": committed_checkpoint}
@@ -393,9 +461,10 @@ def hook_output(value, *, max_bytes):
     if "packet" in value:
         # The already saved reducer packet owns every omitted item and pointer.
         # Required fields are indivisible, including goal/constraints and IDs.
-        minimal = {key: value[key] for key in ("session", "root", "evidence")}
+        minimal = {key: value[key] for key in ("session", "root", "evidence") if key in value}
         minimal["packet"] = {"required": value["packet"]["required"], "complete": False,
-            "optional_context": {"omitted": True, "reason": "hook_wire_budget", "pointer": value["evidence"]}}
+            "optional_context": {"omitted": True, "reason": "hook_wire_budget",
+                                 "pointer": value["packet"]["required"]["packet_pointer"]}}
         try:
             return encode(minimal)
         except HarnessError as error:
@@ -516,8 +585,7 @@ def main(argv=None):
             persist(target, packet)
             packet = {"session": args.session, "root": str(root), "evidence": str(target), "packet": packet}
         else:
-            packet = {"session": packet["required"]["session"], "root": packet["required"]["root"],
-                      "evidence": packet["required"]["packet_pointer"], "packet": packet}
+            packet = packet_envelope(packet)
         if args.action == "hook":
             write_utf8(hook_output(packet, max_bytes=args.max_bytes))
         else:
