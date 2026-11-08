@@ -153,6 +153,7 @@ class SupervisorStore:
         # bytes before reusing a parsed head, even when metadata is unchanged.
         self._journal_content_hash = None
         self._snapshot_depth = 0
+        self._prepared_writes = {}
 
     def path(self, relative):
         relative = Path(relative)
@@ -176,7 +177,14 @@ class SupervisorStore:
 
     def write(self, relative, value, schema=None, exclusive=False):
         path = self.path(relative)
-        strict_yaml.dump(path, value, schema, exclusive=exclusive)
+        prepared = self._prepared_writes.get(str(relative))
+        if prepared is not None:
+            if (prepared[0] is not value or prepared[1] is not schema
+                    or _digest(value) != prepared[3] or _digest(schema) != prepared[4]):
+                raise HarnessError("Prepared publication value/schema mismatch")
+            atomic_write(path, prepared[2], exclusive=exclusive)
+        else:
+            strict_yaml.dump(path, value, schema, exclusive=exclusive)
         return path
 
     @contextmanager
@@ -217,14 +225,12 @@ class SupervisorStore:
         # still serialize journal sequence allocation inside that process.
         with self._mutex:
             if self._lease is not None:
-                with self._snapshot(writing=True):
-                    yield
+                yield
             else:
                 if self._snapshot_depth:
                     raise HarnessError("Cannot upgrade a read snapshot to a supervisor writer lease")
                 with self.lease():
-                    with self._snapshot(writing=True):
-                        yield
+                    yield
 
     @contextmanager
     def _snapshot(self, *, writing=False):
@@ -285,31 +291,40 @@ class SupervisorStore:
                     if (opened.st_dev, opened.st_ino) != (after.st_dev, after.st_ino):
                         raise HarnessError("Journal snapshot anchor changed during publication")
 
+    def _capture_journal(self):
+        """Capture physical bytes only; the caller holds the snapshot guard."""
+        path = self.path("journal/events.jsonl")
+        if not path.exists():
+            if self._journal_head is not None and self._journal_head[1]:
+                raise HarnessError("Validated journal prefix disappeared")
+            return None, b""
+        _parents(path)
+        before = self._journal_stamp(path)
+        raw = read_regular_file(path, max_bytes=MAX_JOURNAL_BYTES)
+        after = self._journal_stamp(path)
+        if before != after:
+            raise HarnessError("Journal changed during capture")
+        return after, raw
+
+    def _validate_journal(self, stamp, raw):
+        """Validate the captured generation, never a later filesystem head."""
+        if stamp is None:
+            self._journal_head = self._journal_content_hash = None
+            return []
+        records = self._decode_events(raw)
+        previous = self._journal_head
+        if previous is not None and previous[1] and (len(records) < previous[1] or records[previous[1]-1]["hash"] != previous[2]):
+            raise HarnessError("Validated journal prefix changed; recovery required")
+        self._journal_head = ((stamp, len(records), records[-1]["hash"] if records else "0" * 64,
+                              sum(r["payload"].get("kind") == "checkpoint" for r in records)) if stamp else None)
+        self._journal_content_hash = hashlib.sha256(raw) if stamp else None
+        return records
+
     def events(self):
-        # A strict read checks the leaf before and after opening. An append by
-        # this store is legitimate only outside that entire read/validation.
-        with self._snapshot():
-            path = self.path("journal/events.jsonl")
-            if not path.exists():
-                if self._journal_head is not None and self._journal_head[1]:
-                    raise HarnessError("Validated journal prefix disappeared")
-                self._journal_head = None
-                self._journal_content_hash = None
-                return []
-            _parents(path)
-            before = self._journal_stamp(path)
-            raw = read_regular_file(path, max_bytes=MAX_JOURNAL_BYTES)
-            records = self._decode_events(raw)
-            after = self._journal_stamp(path)
-            if before != after:
-                raise HarnessError("Journal changed during validation")
-            previous = self._journal_head
-            if previous is not None and previous[1] and (len(records) < previous[1] or records[previous[1]-1]["hash"] != previous[2]):
-                raise HarnessError("Validated journal prefix changed; recovery required")
-            self._journal_head = (after, len(records), records[-1]["hash"] if records else "0" * 64,
-                                  sum(r["payload"].get("kind") == "checkpoint" for r in records))
-            self._journal_content_hash = hashlib.sha256(raw)
-            return records
+        with self._mutex:
+            with self._snapshot():
+                stamp, raw = self._capture_journal()
+            return self._validate_journal(stamp, raw)
 
     @staticmethod
     def _journal_stamp(path):
@@ -335,6 +350,8 @@ class SupervisorStore:
         stamp = self._journal_stamp(path)
         if (self._journal_head is None or self._journal_head[0] != stamp
                 or not self._journal_content_matches(path)):
+            if self._snapshot_depth:
+                raise HarnessError("Journal head changed before publication; refusing replay under snapshot")
             self.events()
         return self._journal_head or (None, 0, "0" * 64, 0)
 
@@ -381,13 +398,15 @@ class SupervisorStore:
         with self._writing():
             path = self.path("journal/events.jsonl")
             _parents(path)
-            raw = read_regular_file(path, max_bytes=MAX_JOURNAL_BYTES)
+            with self._snapshot():
+                captured_stamp, raw = self._capture_journal()
+                marker_exists = self.path("recovery-required.yaml").exists()
             if not raw or raw.endswith(b"\n"):
                 self._decode_events(raw)
                 return {"status": "no_repair_needed", "recovery_required": self.path("recovery-required.yaml").exists()}
             offset = raw.rfind(b"\n") + 1
             prefix, tail = raw[:offset], raw[offset:]
-            records = self._decode_events(prefix)
+            records = self._validate_journal(captured_stamp, prefix)
             try:
                 text = tail.decode("utf-8")
             except UnicodeDecodeError as error:
@@ -404,33 +423,46 @@ class SupervisorStore:
             else:
                 raise HarnessError("Valid JSON without final newline is ambiguous; refusing tail repair")
             archive = "journal/interrupted-" + uuid.uuid4().hex + ".jsonl"
-            atomic_write(self.path(archive), raw, exclusive=True)
             receipt = {"schema_version": 1, "status": "RECOVERY_REQUIRED", "original_sha256": hashlib.sha256(raw).hexdigest(), "prefix_sha256": hashlib.sha256(prefix).hexdigest(), "archive": archive, "discarded_bytes": len(tail), "complete_events": len(records), "timestamp": now()}
-            # A pre-existing marker is immutable evidence. Additional failed
-            # repairs retain another receipt while keeping recovery blocked.
-            if self.path("recovery-required.yaml").exists():
-                self.write("recovery/" + uuid.uuid4().hex + ".yaml", receipt, RECOVERY_SCHEMA, exclusive=True)
-            else:
-                self.write("recovery-required.yaml", receipt, RECOVERY_SCHEMA, exclusive=True)
-            atomic_write(path, prefix)
-            self.append_event({"kind": "tail_repair", "receipt": receipt})
+            name = "recovery/" + uuid.uuid4().hex + ".yaml" if marker_exists else "recovery-required.yaml"
+            writes = [(name, receipt, RECOVERY_SCHEMA, True)]
+            prepared = self._publish_writes(writes)
+            event = self._prepare_event({"kind": "tail_repair", "receipt": receipt}, head=self._journal_head)
+            with self._snapshot(writing=True):
+                if self._journal_stamp(path) != captured_stamp or read_regular_file(path, max_bytes=MAX_JOURNAL_BYTES) != raw:
+                    raise HarnessError("Torn journal changed before repair publication")
+                atomic_write(self.path(archive), raw, exclusive=True)
+                prior, self._prepared_writes = self._prepared_writes, prepared
+                try:
+                    self.write(name, receipt, RECOVERY_SCHEMA, exclusive=True)
+                finally:
+                    self._prepared_writes = prior
+                atomic_write(path, prefix)
+                head = (self._journal_stamp(path), *event[0][1:])
+                self._journal_head, self._journal_content_hash = head, hashlib.sha256(prefix)
+                self._append_prepared(head, *event[1:])
             return {**receipt, "recovery_required": True}
 
-    def append_event(self, event, *, format_version=1):
-        with self._writing():
-            strict_yaml.validate(event, {"type": "object", "additionalProperties": True})
-            _event_version(event, format_version)
-            head = self._head()
-            record = {"schema_version": format_version, "sequence": head[1] + 1, "event_id": uuid.uuid4().hex, "timestamp": now(), "previous_hash": head[2], "payload": event}
-            record["hash"] = _digest(record)
-            strict_yaml.validate(record, JOURNAL_READ_SCHEMA)
+    def _prepare_event(self, event, format_version=1, *, head=None, content=None):
+        strict_yaml.validate(event, {"type": "object", "additionalProperties": True})
+        _event_version(event, format_version)
+        head = self._head() if head is None else head
+        record = {"schema_version": format_version, "sequence": head[1] + 1, "event_id": uuid.uuid4().hex,
+                  "timestamp": now(), "previous_hash": head[2], "payload": event}
+        record["hash"] = _digest(record)
+        strict_yaml.validate(record, JOURNAL_READ_SCHEMA)
+        data = _canonical(record) + b"\n"
+        content = self._journal_content_hash if content is None else content
+        expected = content.copy() if content is not None else hashlib.sha256()
+        expected.update(data)
+        return head, record, data, expected
+
+    def _append_prepared(self, head, record, data, expected_content):
+        with self._snapshot(writing=True):
             path = self.path("journal/events.jsonl")
             _mkdir(path.parent)
             _parents(path)
             _ordinary(path, missing_ok=True)
-            data = _canonical(record) + b"\n"
-            expected_content = self._journal_content_hash.copy() if self._journal_content_hash is not None else hashlib.sha256()
-            expected_content.update(data)
             if len(data) > strict_yaml.MAX_BYTES or path.exists() and path.stat().st_size + len(data) > MAX_JOURNAL_BYTES:
                 raise HarnessError("Journal storage budget exhausted")
             flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
@@ -459,9 +491,19 @@ class SupervisorStore:
                 if not self._journal_content_matches(path, expected_content):
                     raise HarnessError("Journal content changed during append")
                 self._journal_head = (stamp, record["sequence"], record["hash"],
-                                      head[3] + (event.get("kind") == "checkpoint"))
+                                      head[3] + (record["payload"].get("kind") == "checkpoint"))
                 self._journal_content_hash = expected_content
-            return record
+        return record
+
+    def append_event(self, event, *, format_version=1):
+        with self._writing():
+            return self._append_prepared(*self._prepare_event(event, format_version))
+
+    def _publish_writes(self, writes):
+        """Encode/check schemas before taking the physical publication guard."""
+        prepared = {name: (value, schema, strict_yaml.dumps(value, schema).encode("utf-8"), _digest(value), _digest(schema))
+                    for name, value, schema, exclusive in writes}
+        return prepared
 
     def commit(self, state, reason, owner="supervisor", attempt_id=None):
         with self._writing():
@@ -470,23 +512,39 @@ class SupervisorStore:
                 raise HarnessError("Checkpoint reason is required")
             generation = self._head()[3] + 1
             payload = {"kind": "checkpoint", "generation": generation, "state": state, "state_digest": _digest(state), "reason": reason, "owner": owner, "attempt_id": attempt_id}
-            event = self.append_event(payload)
+            prepared_event = self._prepare_event(payload)
+            event = prepared_event[1]
             checkpoint = {"schema_version": 1, "generation": generation, "event_id": event["event_id"], "journal_hash": event["hash"], "state_digest": payload["state_digest"], "state": state, "reason": reason, "owner": owner, "attempt_id": attempt_id, "timestamp": event["timestamp"]}
-            self.write(f"checkpoints/{generation:06d}.yaml", checkpoint, CHECKPOINT_SCHEMA, exclusive=True)
-            self.write("state.yaml", state, self.state_schema)
+            writes = [(f"checkpoints/{generation:06d}.yaml", checkpoint, CHECKPOINT_SCHEMA, True),
+                      ("state.yaml", state, self.state_schema, False)]
+            prepared = self._publish_writes(writes)
+            with self._snapshot(writing=True):
+                self._append_prepared(*prepared_event)
+                prior, self._prepared_writes = self._prepared_writes, prepared
+                try:
+                    for name, value, schema, exclusive in writes:
+                        self.write(name, value, schema, exclusive=exclusive)
+                finally:
+                    self._prepared_writes = prior
             return checkpoint
 
     def recover(self, *, read_only=False):
-        # Read-only status uses the same authoritative head without publishing
-        # missing projections or acquiring a writing lease.
-        with self._snapshot() if read_only else self._writing():
-            records = self.events()
-            marker = self.read("recovery-required.yaml", RECOVERY_SCHEMA) if self.path("recovery-required.yaml").exists() else None
+        # Capture mutable projections with the authoritative journal. Validation
+        # consumes only those bytes after releasing the short process guard.
+        with self._mutex if read_only else self._writing():
+            with self._snapshot():
+                stamp, raw = self._capture_journal()
+                marker_raw = read_regular_file(self.path("recovery-required.yaml"), max_bytes=strict_yaml.MAX_BYTES, missing_ok=True)
+                state_raw = read_regular_file(self.path("state.yaml"), max_bytes=strict_yaml.MAX_BYTES, missing_ok=True)
+            records = self._validate_journal(stamp, raw)
+            marker = strict_yaml.loads(marker_raw, RECOVERY_SCHEMA) if marker_raw is not None else None
+            current = strict_yaml.loads(state_raw, self.state_schema) if state_raw is not None else None
             checkpoints = [r for r in records if r["payload"].get("kind") == "checkpoint"]
             if not checkpoints:
-                if self.path("state.yaml").exists():
+                if state_raw is not None:
                     raise HarnessError("State lacks committed journal provenance")
                 return {"state": None, "generation": 0, "recovered": False, "events": len(records), "recovery_required": marker is not None, "recovery_receipt": marker}
+            writes = []
             for index, event in enumerate(checkpoints, 1):
                 payload = event["payload"]
                 if payload.get("generation") != index or _digest(payload.get("state")) != payload.get("state_digest"):
@@ -494,21 +552,34 @@ class SupervisorStore:
                 strict_yaml.validate(payload["state"], self.state_schema or {"type": "object", "additionalProperties": True})
                 name = f"checkpoints/{index:06d}.yaml"
                 expected = {"schema_version": 1, "generation": index, "event_id": event["event_id"], "journal_hash": event["hash"], "state_digest": payload["state_digest"], "state": payload["state"], "reason": payload["reason"], "owner": payload["owner"], "attempt_id": payload["attempt_id"], "timestamp": event["timestamp"]}
-                if self.path(name).exists():
-                    if self.read(name, CHECKPOINT_SCHEMA) != expected:
+                # Immutable projections can be captured later, but not during a
+                # cooperating exclusive-link publication. Compare to the exact
+                # expected old-generation content, never a newer state.yaml.
+                with self._snapshot():
+                    checkpoint_raw = read_regular_file(self.path(name), max_bytes=strict_yaml.MAX_BYTES, missing_ok=True)
+                if checkpoint_raw is not None:
+                    if strict_yaml.loads(checkpoint_raw, CHECKPOINT_SCHEMA) != expected:
                         raise HarnessError("Immutable checkpoint differs from journal")
                 elif not read_only:
-                    self.write(name, expected, CHECKPOINT_SCHEMA, exclusive=True)
+                    writes.append((name, expected, CHECKPOINT_SCHEMA, True))
             state = checkpoints[-1]["payload"]["state"]
+            recovered = current != state
+            if recovered and not read_only and marker is None:
+                writes.append(("state.yaml", state, self.state_schema, False))
+            if writes:
+                prepared = self._publish_writes(writes)
+                prior, self._prepared_writes = self._prepared_writes, prepared
+                try:
+                    for name, value, schema, exclusive in writes:
+                        with self._snapshot(writing=True):
+                            if (self._journal_stamp(self.path("journal/events.jsonl")) != stamp
+                                    or not self._journal_content_matches(self.path("journal/events.jsonl"))
+                                    or read_regular_file(self.path("state.yaml"), max_bytes=strict_yaml.MAX_BYTES, missing_ok=True) != state_raw
+                                    or read_regular_file(self.path("recovery-required.yaml"), max_bytes=strict_yaml.MAX_BYTES, missing_ok=True) != marker_raw):
+                                raise HarnessError("Recovery publication input changed")
+                            self.write(name, value, schema, exclusive=exclusive)
+                finally:
+                    self._prepared_writes = prior
             if marker is not None:
                 return {"state": state, "generation": len(checkpoints), "recovered": False, "events": len(records), "recovery_required": True, "recovery_receipt": marker}
-            try:
-                current = self.read("state.yaml", self.state_schema)
-            except FileNotFoundError:
-                current = None
-            # A corrupt state is not silently discarded; the intact journal can
-            # be inspected and an explicit recovery action taken by the caller.
-            recovered = current != state
-            if recovered and not read_only:
-                self.write("state.yaml", state, self.state_schema)
             return {"state": state, "generation": len(checkpoints), "recovered": recovered and not read_only, "projection_stale": recovered, "events": len(records), "recovery_required": False, "recovery_receipt": None}

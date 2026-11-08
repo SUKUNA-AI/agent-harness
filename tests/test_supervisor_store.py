@@ -130,12 +130,13 @@ class SupervisorStoreTests(unittest.TestCase):
         guard = self.root / "locks/journal-snapshot.guard"
         guard.unlink()
         reader = SupervisorStore(self.root, SCHEMA, create=False)
-        decode = reader._decode_events
-        def publication(raw):
-            records = decode(raw)
-            guard.write_bytes(b"")
-            return records
-        with patch.object(reader, "_decode_events", side_effect=publication):
+        from agent_harness.file_io import ParentDirectory
+        opening = ParentDirectory.open
+        def publication(parent, *args, **kwargs):
+            if parent.path.name == "state.yaml":
+                guard.write_bytes(b"")
+            return opening(parent, *args, **kwargs)
+        with patch.object(ParentDirectory, "open", new=publication):
             with self.assertRaisesRegex(HarnessError, "anchor appeared during legacy read"):
                 reader.recover(read_only=True)
 
@@ -148,6 +149,18 @@ class SupervisorStoreTests(unittest.TestCase):
                 with self.store.lease():
                     self.fail("reader acquired a lifetime lease")
         self.assertEqual(len(self.store.events()), 1)
+
+    def test_prepared_publication_rejects_mutated_value_without_writing(self):
+        value = {"schema_version": 1, "status": "pending"}
+        writes = [("state.yaml", value, SCHEMA, False)]
+        self.store._prepared_writes = self.store._publish_writes(writes)
+        value["status"] = "accepted"
+        try:
+            with self.assertRaisesRegex(HarnessError, "Prepared publication"):
+                self.store.write("state.yaml", value, SCHEMA)
+        finally:
+            self.store._prepared_writes = {}
+        self.assertFalse((self.root / "state.yaml").exists())
 
     def test_snapshot_rejects_linked_guard_or_lease_before_external_open(self):
         self.store.commit({"schema_version": 1, "status": "pending"}, "start")
