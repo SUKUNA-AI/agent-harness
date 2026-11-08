@@ -400,7 +400,7 @@ class SupervisorStore:
             _parents(path)
             with self._snapshot():
                 captured_stamp, raw = self._capture_journal()
-                marker_exists = self.path("recovery-required.yaml").exists()
+                marker_raw = read_regular_file(self.path("recovery-required.yaml"), max_bytes=strict_yaml.MAX_BYTES, missing_ok=True)
             if not raw or raw.endswith(b"\n"):
                 self._decode_events(raw)
                 return {"status": "no_repair_needed", "recovery_required": self.path("recovery-required.yaml").exists()}
@@ -424,13 +424,15 @@ class SupervisorStore:
                 raise HarnessError("Valid JSON without final newline is ambiguous; refusing tail repair")
             archive = "journal/interrupted-" + uuid.uuid4().hex + ".jsonl"
             receipt = {"schema_version": 1, "status": "RECOVERY_REQUIRED", "original_sha256": hashlib.sha256(raw).hexdigest(), "prefix_sha256": hashlib.sha256(prefix).hexdigest(), "archive": archive, "discarded_bytes": len(tail), "complete_events": len(records), "timestamp": now()}
-            name = "recovery/" + uuid.uuid4().hex + ".yaml" if marker_exists else "recovery-required.yaml"
+            name = "recovery/" + uuid.uuid4().hex + ".yaml" if marker_raw is not None else "recovery-required.yaml"
             writes = [(name, receipt, RECOVERY_SCHEMA, True)]
             prepared = self._publish_writes(writes)
             event = self._prepare_event({"kind": "tail_repair", "receipt": receipt}, head=self._journal_head)
             with self._snapshot(writing=True):
                 if self._journal_stamp(path) != captured_stamp or read_regular_file(path, max_bytes=MAX_JOURNAL_BYTES) != raw:
                     raise HarnessError("Torn journal changed before repair publication")
+                if read_regular_file(self.path("recovery-required.yaml"), max_bytes=strict_yaml.MAX_BYTES, missing_ok=True) != marker_raw:
+                    raise HarnessError("Recovery marker changed before repair publication")
                 atomic_write(self.path(archive), raw, exclusive=True)
                 prior, self._prepared_writes = self._prepared_writes, prepared
                 try:

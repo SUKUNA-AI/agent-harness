@@ -283,6 +283,48 @@ class SupervisorStoreTests(unittest.TestCase):
         self.assertEqual(resumed["state"]["status"], "pending")
         self.assertEqual(self.store.repair_torn_tail()["status"], "no_repair_needed")
 
+    def test_tail_repair_rejects_once_deleted_marker_before_any_publication(self):
+        self.check_tail_marker_change(replace=False)
+
+    def test_tail_repair_rejects_once_replaced_marker_before_any_publication(self):
+        self.check_tail_marker_change(replace=True)
+
+    def check_tail_marker_change(self, *, replace):
+        self.store.commit({"schema_version": 1, "status": "accepted"}, "fixture checkpoint")
+        journal = self.root / "journal/events.jsonl"
+        journal.write_bytes(journal.read_bytes() + b'{"first":')
+        receipt = self.store.repair_torn_tail()
+        old_archive = (self.root / receipt["archive"]).read_bytes()
+        journal.write_bytes(journal.read_bytes() + b'{"second":')
+        torn = journal.read_bytes()
+        marker = self.root / "recovery-required.yaml"
+        decode = self.store._decode_events
+        observed, calls = {}, []
+        def files():
+            return {str(path.relative_to(self.root)): path.read_bytes() for path in self.root.rglob("*")
+                    if path.is_file() and "locks" not in path.relative_to(self.root).parts}
+        def once(raw):
+            records = decode(raw)  # Real prefix validation, no schema/read mocking.
+            calls.append(True)
+            self.assertEqual(len(calls), 1)
+            if replace:
+                alternate = marker.with_name("marker-replacement")
+                alternate.write_bytes(marker.read_bytes() + b"# external replacement\n")
+                os.replace(alternate, marker)
+            else:
+                marker.unlink()
+            observed.update(files())
+            return records
+        with patch.object(self.store, "_decode_events", side_effect=once):
+            with self.assertRaisesRegex(HarnessError, "Recovery marker changed before repair publication"):
+                self.store.repair_torn_tail()
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(files(), observed)
+        self.assertEqual(journal.read_bytes(), torn)
+        self.assertEqual((self.root / receipt["archive"]).read_bytes(), old_archive)
+        with self.assertRaisesRegex(HarnessError, "Torn journal tail"):
+            SupervisorStore(self.root, SCHEMA, create=False).recover(read_only=True)
+
     def test_tail_repair_refuses_complete_corruption_and_missing_newline(self):
         self.store.commit({"schema_version": 1, "status": "pending"}, "start")
         path = self.root / "journal/events.jsonl"
