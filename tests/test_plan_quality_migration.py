@@ -44,7 +44,7 @@ class PlanQualityMigrationTests(unittest.TestCase):
     def setUpClass(cls):
         cls.old = tempfile.TemporaryDirectory(prefix='quality-old-writer-')
         cls.addClassCleanup(cls.old.cleanup)
-        cls.old_root = Path(cls.old.name)
+        cls.old_root = Path(cls.old.name).resolve()
         archived = subprocess.run(['git', '-C', str(ROOT), 'archive', PUBLIC_BASELINE_TREE, 'src', 'schemas'],
             capture_output=True, timeout=20)
         if archived.returncode:

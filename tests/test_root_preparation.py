@@ -784,7 +784,7 @@ raise AssertionError('Named hard exit boundary was not reached')
             self.committed(owner)
             with patch.object(owner,'_new_core_attempt',side_effect=HarnessError('specific causal preparation error')):
                 self.assertEqual(owner._loop()['status'],'UNKNOWN_OUTCOME')
-        old=self.root/'public-old';old.mkdir()
+        old=(self.root/'public-old').resolve();old.mkdir()
         raw=subprocess.check_output(['git','archive',PUBLIC_BASELINE_TREE,'src','schemas'])
         with tarfile.open(fileobj=io.BytesIO(raw)) as archive:
             for item in archive.getmembers():

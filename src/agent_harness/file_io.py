@@ -6,6 +6,7 @@ checks are not a filesystem sandbox or a lock against an external file writer.
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 from pathlib import Path
 import stat
 
@@ -208,6 +209,53 @@ def parent_binding(path):
         path = path.parent
     with ParentDirectory(path) as parent:
         return parent.binding
+
+
+@contextmanager
+def _directory_address(path):
+    """Pin the existing directory chain, retaining any not-yet-created suffix."""
+    path = Path(os.path.abspath(path))
+    suffix = []
+    while True:
+        try:
+            path.lstat()
+            break
+        except FileNotFoundError:
+            suffix.insert(0, path.name)
+            if path == path.parent:
+                raise
+            path = path.parent
+    # The sentinel is never opened. ParentDirectory inspects and pins path
+    # itself as well as every ancestor, before any resolution can hide a link.
+    with ParentDirectory(path / '.directory-address') as parent:
+        yield parent, tuple(suffix)
+
+
+def canonical_directory(path):
+    """Expand Windows aliases only after refusing links/reparse ancestors.
+
+    Missing directory suffixes are supported for private runs not yet created.
+    This is an address representation, not a replacement for stored identities.
+    """
+    with _directory_address(path) as (parent, suffix):
+        resolved = parent.path.parent.resolve(strict=True)
+        with ParentDirectory(resolved / '.directory-address') as physical:
+            if parent.physical_identity() != physical.physical_identity():
+                raise FileReadError('Directory changed during path canonicalization: ' + str(path))
+        parent.check()
+        return resolved.joinpath(*suffix)
+
+
+def same_directory(left, right):
+    """Compare pinned physical identities, including historical 8.3 spellings."""
+    with _directory_address(left) as (first, left_suffix), _directory_address(right) as (second, right_suffix):
+        # Uncreated names have no physical identity yet. Keep their exact
+        # spelling: Windows also supports directories with case sensitivity.
+        equal = (first.physical_identity() == second.physical_identity()
+                 and left_suffix == right_suffix)
+        first.check()
+        second.check()
+        return equal
 
 
 def verify_parent_binding(path, binding):

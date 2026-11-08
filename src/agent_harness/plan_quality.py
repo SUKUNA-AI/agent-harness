@@ -162,11 +162,11 @@ def _publish(supervisor, value):
     from .task_packets import _publish as publish
     raw = _bytes(value)
     artifact = publish(supervisor, raw, '.json')
-    return {'path': str(Path(artifact['path']).relative_to(supervisor.path)), 'sha256': artifact['sha256']}
+    return {'path': Path(artifact['path']).relative_to(supervisor.path).as_posix(), 'sha256': artifact['sha256']}
 
 
 def _read(supervisor, ref):
-    if ref['path'] != 'context/required-' + ref['sha256'] + '.json':
+    if ref['path'].replace('\\', '/') != 'context/required-' + ref['sha256'] + '.json':
         raise HarnessError('Plan-quality artifact is outside its addressed owned path')
     raw = read_regular_file(supervisor.store.path(ref['path']))
     if _hash(raw) != ref['sha256']:
@@ -496,6 +496,7 @@ def recover_creation(supervisor, contract, cwd, *, max_rounds=None):
     """Only explicit same-create retry recovers a prepared headless creation."""
     from .core import snapshot
     from .work_contract import legacy_contract, source_revision
+    from .file_io import same_directory
     events = [event['payload'] for event in supervisor.store.events()]
     prepared = [event for event in events if event.get('kind') == 'plan_quality_creation_prepared']
     if not prepared or any(event.get('kind') == 'checkpoint' for event in events):
@@ -508,8 +509,8 @@ def recover_creation(supervisor, contract, cwd, *, max_rounds=None):
     if (document['schema_version'] != 1 or document['contract'] != contract
             or prepared[0]['contract_digest'] != digest(contract) or prepared[0]['state_digest'] != digest(state)
             or state['status'] != 'NEW' or state['attempts_used'] != 0 or state['agents'] or state['plan_path'] is not None
-            or state['cwd'] != str(cwd) or state['source_cwd'] != str(cwd)
-            or state['state_dir'] != str(supervisor.state_dir.resolve())
+            or not same_directory(state['cwd'], cwd) or not same_directory(state['source_cwd'], cwd)
+            or not same_directory(state['state_dir'], supervisor.state_dir)
             or max_rounds is not None and (type(max_rounds) is not int or max_rounds != state['plan_quality']['max_rounds'])):
         raise HarnessError('Explicit creation recovery input binding conflict')
     source = legacy_contract(contract, cwd=cwd, run_id=state['run_id'], attempt=1, deadline=state['deadline'])
@@ -563,7 +564,7 @@ def _reserve_round(supervisor, *, feedback=(), retained_plan_path=None, same_rev
     if explicit:
         raw = read_regular_file(explicit, max_bytes=2 * 1024 * 1024)
         artifact = publish(supervisor, raw, '.plan.yaml')
-        explicit_ref = {'path': str(Path(artifact['path']).relative_to(supervisor.path)), 'sha256': artifact['sha256']}
+        explicit_ref = {'path': Path(artifact['path']).relative_to(supervisor.path).as_posix(), 'sha256': artifact['sha256']}
     request = {'schema_version': 1, 'round': len(events) + 1,
         'plan_revision': quality['plan_revision'] if same_revision else quality['plan_revision'] + 1,
         'contract_digest': supervisor.state['contract_digest'], 'mission_digest': digest(supervisor.contract['mission']),
@@ -654,7 +655,7 @@ def _proposal(supervisor, capabilities, request):
         return plan
     explicit = request['explicit_ref']
     if explicit:
-        if explicit['path'] != 'context/required-' + explicit['sha256'] + '.plan.yaml':
+        if explicit['path'].replace('\\', '/') != 'context/required-' + explicit['sha256'] + '.plan.yaml':
             raise HarnessError('Explicit plan escaped immutable input ownership')
         raw = read_regular_file(supervisor.store.path(explicit['path']), max_bytes=2 * 1024 * 1024)
         if _hash(raw) != explicit['sha256']:

@@ -18,7 +18,7 @@ import uuid
 from .core import HarnessError, Run, canonical, digest, now, snapshot, file_hash
 from .execution_ledger import object_schema, sanitized
 from .failure_policy import PreparationFailure, PREPARATION_TARGETS, PREPARATION_CONTEXTS
-from .file_io import ParentDirectory, read_regular_file
+from .file_io import ParentDirectory, read_regular_file, same_directory
 from .strict_yaml import validate, MAX_BYTES
 from .supervisor_store import atomic_write
 from .agent_lifecycle import LEASE_SCHEMA
@@ -677,7 +677,7 @@ def prepare_core(run, authority):
         fail('INTEGRITY', 'core_prepare', 'Core preparation requires exact Supervisor authority')
     material = authority.validate(); subject = material['binding']; contract = material['contract']
     validate_contract(contract); verify_snapshot(material['baseline'])
-    if (run.path != Path(subject['core_path']) or digest(contract) != material['expected_state']['contract_digest']
+    if (not same_directory(run.path, subject['core_path']) or digest(contract) != material['expected_state']['contract_digest']
             or contract['attempt_id'] != 'attempt-' + str(subject['core_generation'])
             or contract['run_id'] != subject['run_id'] or contract['task_id'] != subject['task_id']
             or contract['budget']['deadline'] != subject['deadline'] or contract['budget']['max_attempts'] != subject['max_attempts']):
@@ -778,7 +778,7 @@ class ManagedInputProof:
         staging=supervisor.store.read('integration.yaml')
         trees=Worktrees(supervisor.state['source_cwd'],supervisor.path/'worktrees',create=False)
         checkout=trees.validate(staging,expected_id='integration',expected_role='integrator',integrated=True)
-        if str(checkout)!=supervisor.state['cwd'] or str(checkout)!=supervisor.state['integration_worktree']:
+        if not same_directory(checkout,supervisor.state['cwd']) or not same_directory(checkout,supervisor.state['integration_worktree']):
             fail('INTEGRITY','invocation_boundary','Root candidate differs from owned integration checkout')
         latest=integrations[-1]['payload']
         if trees.tree(staging)!=latest['result_tree'] or git(checkout,'rev-parse','HEAD').decode().strip()!=latest['result_head']:
@@ -854,9 +854,11 @@ def prepare(supervisor, purpose, *, current_input=None):
     actual = run.prepare_supervisor_attempt(authority)
     _check_prepared_files(authority)
     publish(supervisor, 'root_core_preparation_commit', operation_id=material['operation_id'],
-        intent_digest=digest(intent), core_path=str(run.path), core_generation=material['binding']['core_generation'],
+        intent_digest=digest(intent), core_path=material['binding']['core_path'], core_generation=material['binding']['core_generation'],
         state_digest=digest(actual))
-    supervisor.state['core_run'] = str(run.path)
+    # Preserve the frozen spelling in historical intents and their commit facts.
+    # Physical comparison above admits aliases without rewriting signed inputs.
+    supervisor.state['core_run'] = material['binding']['core_path']
     for criterion in supervisor.state['acceptance']:
         criterion.update(status='pending', evidence_id=None)
     supervisor._save('exact Supervisor core preparation committed: ' + material['operation_id'])

@@ -18,13 +18,12 @@ Cohort фиксирует полный **выбранный pinned index** и ч
 
 `capture_local_git_checkout(...)` использует только read-only local Git, проверяет HEAD и каждый blob перед pinned export. Source file descriptors сохраняют modes `100644/100755`; symlinks/submodules явно не поддержаны. Prepared solve получает новый Git root без ambient Git config/hooks/templates. Для SWE его initial tree обязан совпасть с captured original tree; новый preparation commit **не выдаётся** за оригинальный base commit. Project-local AGENTS сохраняются. Actual Codex instruction discovery boundary всё равно требует qualification.
 
-Baseline capture требует raw-byte равенства worktree каждому immutable Git blob.
-Git-clean checkout с CRLF, clean/smudge, ident или encoding transformations не
-является таким baseline. CRLF при LF blob явно отклоняется с
-`BENCH_BASE_CHECKOUT_FILTERED_BYTES_UNSUPPORTED`; другие несовпадения сохраняют
-`BENCH_DIRTY_BASE_CHECKOUT`. Capture не запускает filters и не нормализует bytes.
-Подготовьте отдельный checkout с отключёнными EOL/filter transformations и
-проверьте raw bytes перед capture. Fixtures задают собственные Git config и
+Baseline capture сверяет worktree с каждым immutable Git blob. Допускается
+точное равномерное LF→CRLF преобразование текстового файла: в baseline сохраняются
+исходные bytes Git blob. Содержательное изменение, mixed EOL, binary/`-text`,
+clean/smudge, ident и encoding transformations отклоняются; filters не запускаются.
+Для остальных несовпадений сохраняется `BENCH_DIRTY_BASE_CHECKOUT`.
+Fixtures задают собственные Git config и
 attributes settings, не наследуя autocrlf оператора. SWE text patch делит строки
 только по LF; CR, U+2028, U+0085, VT и FF остаются содержимым строки, отсутствие
 final LF передаётся Git marker. Binary/NUL patch отклоняется. Serialized relative

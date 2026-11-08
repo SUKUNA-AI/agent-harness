@@ -19,6 +19,7 @@ from .work_contract import load_contract, legacy_contract, deadline_for, source_
 from . import telemetry
 from .failure_policy import classify, repair_decision
 from .task_packets import compile_packet, preflight, invoke, NotDispatched
+from .file_io import canonical_directory, same_directory
 
 TERMINAL = {"ACCEPTED", "CANCELLED", "TIMED_OUT", "NO_PROGRESS", "FAILED_TERMINAL"}
 BLOCKED = {"BLOCKED_APPROVAL", "BLOCKED_AMBIGUOUS", "BLOCKED_ENVIRONMENT"}
@@ -42,11 +43,11 @@ INTERRUPTS = BLOCKED | {"CANCEL_REQUESTED", "CANCELLED", "TIMED_OUT", "UNKNOWN_O
 
 class Supervisor:
     def __init__(self, run_dir, *, adapter=None, state_dir=None):
-        self.path = Path(run_dir).absolute()
+        self.path = canonical_directory(run_dir)
         from .plan_quality import STATE_SCHEMA
         self.store = SupervisorStore(self.path, STATE_SCHEMA)
         self.adapter = adapter
-        self.state_dir = Path(state_dir).absolute() if state_dir else self.path.parent.parent
+        self.state_dir = canonical_directory(state_dir) if state_dir else self.path.parent.parent
         self._state_dir_explicit = state_dir is not None
         self.mutex = threading.RLock()
         self.state = None
@@ -86,10 +87,10 @@ class Supervisor:
         contract = load_contract(contract_path)
         if max_planning_rounds is not None and (contract["schema_version"] != 2 or contract["mode"] != "managed"):
             raise HarnessError("Planning round policy requires a new managed contract v2 run")
-        cwd = Path(cwd).absolute()
+        cwd = canonical_directory(cwd)
         if not cwd.is_dir() or cwd.is_symlink():
             raise HarnessError("Work cwd must be an existing ordinary directory")
-        path = Path(run_dir).absolute()
+        path = canonical_directory(run_dir)
         if path == cwd or cwd in path.parents:
             raise HarnessError("Private run must be outside the source workspace")
         supervisor = cls(path, adapter=adapter, state_dir=state_dir)
@@ -153,7 +154,7 @@ class Supervisor:
         recorded_state_dir = Path(self.state["state_dir"])
         if not recorded_state_dir.is_absolute():
             raise HarnessError("Persisted global model registry path must be absolute")
-        if self._state_dir_explicit and self.state_dir.resolve() != recorded_state_dir.resolve():
+        if self._state_dir_explicit and not same_directory(self.state_dir, recorded_state_dir):
             raise HarnessError("state-dir override conflicts with persisted global model registry")
         self.state_dir = recorded_state_dir
         return self.state
@@ -338,11 +339,11 @@ class Supervisor:
         A legacy interrupted run may already have a core bound to the source
         checkout. Never silently reuse or rebaseline that core's evidence.
         """
-        cwd = Path(self.state["cwd"]).resolve(strict=True)
-        if Path(run.contract()["cwd"]).resolve(strict=True) != cwd:
+        cwd = canonical_directory(self.state["cwd"])
+        if not same_directory(run.contract()["cwd"], cwd):
             raise HarnessError("Acceptance core is bound to a different candidate checkout; explicit reconciliation required")
         if self.contract["mode"] == "managed":
-            if not self.state["integration_worktree"] or Path(self.state["integration_worktree"]).resolve(strict=True) != cwd:
+            if not self.state["integration_worktree"] or not same_directory(self.state["integration_worktree"], cwd):
                 raise HarnessError("Managed acceptance candidate does not match the integration worktree")
             from .agent_lifecycle import Worktrees
             staging = self.store.read("integration.yaml")

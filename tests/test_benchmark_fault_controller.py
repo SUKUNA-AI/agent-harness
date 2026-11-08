@@ -47,6 +47,39 @@ result=runner.advance()
 
 
 class FaultControllerTests(unittest.TestCase):
+    def test_configuration_reader_waits_for_exclusive_publication_cleanup(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from agent_harness.benchmark_fault_controller import CONFIG, _store_lease
+        from agent_harness.file_io import ParentDirectory
+        from agent_harness.supervisor_store import SupervisorStore
+        owner, original, _ = self.launch()
+        target = SupervisorStore(self.root / 'config-publication')
+        staged, release, reading = threading.Event(), threading.Event(), threading.Event()
+        unlink = ParentDirectory.unlink
+        def held_unlink(parent, name=None, **kwargs):
+            if parent.path == target.path('config.yaml') and name and name.startswith('.yaml-stage-'):
+                staged.set()
+                if not release.wait(10): raise AssertionError('publication cleanup was not released')
+            return unlink(parent, name, **kwargs)
+        def publish():
+            with _store_lease(target, 'publish test configuration'):
+                target.write('config.yaml', original.config, CONFIG, exclusive=True)
+        def reopen():
+            reading.set()
+            return SolveFaultHook(target.root)
+        with ThreadPoolExecutor(max_workers=2) as pool, patch.object(ParentDirectory, 'unlink', held_unlink):
+            writer = pool.submit(publish)
+            try:
+                self.assertTrue(staged.wait(10))
+                reader = pool.submit(reopen)
+                self.assertTrue(reading.wait(10))
+                time.sleep(.05)
+                self.assertFalse(reader.done(), 'reader observed an unfinished hard-link publication')
+            finally:
+                release.set()
+            writer.result(timeout=10)
+            self.assertEqual(reader.result(timeout=10).config, original.config)
+
     def setUp(self):
         # Reuse the versioned custom task corpus; this fixture's external suite
         # slots are synthetic controls, never official benchmark qualification.

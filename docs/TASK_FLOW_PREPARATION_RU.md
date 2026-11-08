@@ -61,7 +61,8 @@ nodes, dependencies, отсутствие циклов и покрытие manda
 Hidden evaluator (`task_flow_hidden_evaluator`) связывает `task_id`, immutable
 `revision`, отдельный `producer_id`, точное множество original requirement IDs
 и `files` refs. Source SHA/tree и каждый raw worktree blob проверяет существующий
-`capture_local_git_checkout`. Git-clean CRLF transformation, source drift,
+`capture_local_git_checkout`. Точное равномерное LF→CRLF преобразование текста
+допускается с сохранением исходных Git blob bytes. Source drift, mixed EOL,
 изменение executable mode и объявленные clean/smudge, ident или encoding filters
 отклоняются; filters не исполняются. Сохраняются ограничения portable paths
 существующего benchmark capture, включая неподдержанные symlinks/submodules.

@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 
 from .core import HarnessError, Run, digest, snapshot, matches
-from .file_io import read_regular_file
+from .file_io import read_regular_file, canonical_directory
 from .runner import run_check, gate
 from .work_contract import legacy_contract
 
@@ -30,8 +30,8 @@ def check_errors(supervisor, record):
     """Check immutable raw core evidence; a YAML verdict alone proves nothing."""
     value = record["payload"]
     try:
-        path = Path(value["verification_run"])
-        if not path.is_relative_to(supervisor.path / "nodes"):
+        path = canonical_directory(value["verification_run"])
+        if not path.is_relative_to(canonical_directory(supervisor.path / "nodes")):
             return ["node verification escaped owned run"]
         run = Run(path)
         if digest(run.contract()) != value["verification_definition_digest"]:

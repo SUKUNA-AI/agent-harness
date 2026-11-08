@@ -134,8 +134,12 @@ class SolveFaultHook:
                         raise HarnessError("BENCH_FAULT_CONFIG_CONFLICT")
                 else:
                     self.store.write("config.yaml", config, CONFIG, exclusive=True)
-        self.config = self.store.read("config.yaml", CONFIG)
-        self._verify_config()
+        # Exclusive publication briefly has two hard links until its stage is
+        # removed. Readers must share the publisher's guard so that strict
+        # file identity checks never observe that unfinished transaction.
+        with self._lease("read frozen fault configuration"):
+            self.config = self.store.read("config.yaml", CONFIG)
+            self._verify_config()
 
     def _verify_config(self):
         _check_ref(self.config["materialized"])
