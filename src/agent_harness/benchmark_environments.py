@@ -214,6 +214,8 @@ class ArmHomeBuilder:
             return {'workspace':None,'git_root_observed':False,'ancestor_documents':[],
                 'client_document_boundary':'unavailable','qualification':'unavailable'}
         workspace=Path(workspace).absolute()
+        with ParentDirectory(workspace/'.binding'):
+            pass
         _check(deadline)
         git_root=False
         if _present(workspace/'.git') and (workspace/'.git').is_dir():
@@ -235,9 +237,6 @@ class ArmHomeBuilder:
                     if top.is_absolute():
                         with ParentDirectory(top/'.binding') as top_parent:
                             git_root=workspace_parent.physical_identity()==top_parent.physical_identity()
-        else:
-            with ParentDirectory(workspace/'.binding'):
-                pass
         _check(deadline)
         documents=[]
         for parent in workspace.parents:

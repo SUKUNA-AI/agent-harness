@@ -44,6 +44,15 @@ class BenchmarkCheckoutIdentityTests(unittest.TestCase):
     def capture(self):
         return capture_local_git_checkout(self.repo,self.revision,self.assets)
 
+    def directory_alias(self,name):
+        alias=self.root/name
+        if os.name=='nt':
+            result=subprocess.run(['cmd','/c','mklink','/J',str(alias),str(self.repo)],capture_output=True)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.addCleanup(alias.rmdir)
+        else:alias.symlink_to(self.repo,target_is_directory=True)
+        return alias
+
     def test_crlf_exports_blob_bytes_and_recreates_exact_git_tree(self):
         self.git('config','core.autocrlf','true')
         (self.repo/'file').unlink();self.git('checkout','--','file')
@@ -121,15 +130,15 @@ class BenchmarkCheckoutIdentityTests(unittest.TestCase):
             self.assertFalse(self.builder._ancestry(self.repo)['git_root_observed'])
 
     def test_git_root_link_spelling_is_rejected_before_resolution(self):
-        alias=self.root/'alias'
-        if os.name=='nt':
-            result=subprocess.run(['cmd','/c','mklink','/J',str(alias),str(self.repo)],capture_output=True)
-            self.assertEqual(result.returncode,0,result.stderr)
-            self.addCleanup(alias.rmdir)
-        else:alias.symlink_to(self.repo,target_is_directory=True)
+        alias=self.directory_alias('alias')
         result=subprocess.CompletedProcess([],0,os.fsencode(alias)+b'\n')
         with patch('agent_harness.benchmark_environments._contained_capture',return_value=result):
             with self.assertRaises(FileReadError):self.builder._ancestry(self.repo)
+
+    def test_workspace_link_is_rejected_before_git_probe(self):
+        alias=self.directory_alias('workspace-alias')
+        with patch('agent_harness.benchmark_environments._present',side_effect=AssertionError('probe before guard')):
+            with self.assertRaises(FileReadError):self.builder._ancestry(alias)
 
     def test_checkout_file_symlink_is_rejected_before_eol_conversion(self):
         target=self.root/'substitute';target.write_bytes(self.original.replace(b'\n',b'\r\n'))
