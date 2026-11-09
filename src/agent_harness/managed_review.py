@@ -281,7 +281,8 @@ def review_candidate(supervisor, run, candidate):
         payload = last["payload"]
         if payload["outcome"] != "completed":
             if payload["dispatch_state"] == "not_dispatched_proven":
-                supervisor.transition("BLOCKED_AMBIGUOUS", "NOT_DISPATCHED: reviewer refused locally")
+                target = "TIMED_OUT" if payload["outcome"] == "timed_out" else "BLOCKED_AMBIGUOUS"
+                supervisor.transition(target, "NOT_DISPATCHED: reviewer refused locally")
                 return None
             if payload["outcome"] == "unknown" or payload["process_tree_stopped"] is not True:
                 supervisor.transition("UNKNOWN_OUTCOME", "Final reviewer outcome/cleanup uncertain")
@@ -369,7 +370,8 @@ def review_candidate(supervisor, run, candidate):
     if not supervisor._model_budget_ok():
         return None
     if completion["payload"]["dispatch_state"] == "not_dispatched_proven":
-        supervisor.transition("BLOCKED_AMBIGUOUS", "NOT_DISPATCHED: reviewer refused before process creation")
+        target = "TIMED_OUT" if completion["payload"]["outcome"] == "timed_out" else "BLOCKED_AMBIGUOUS"
+        supervisor.transition(target, "NOT_DISPATCHED: reviewer refused before process creation")
         return None
     if (completion["payload"]["outcome"] != "completed" or completion["payload"]["process_tree_stopped"] is False
             or supervisor.contract["schema_version"] == 2 and completion["payload"]["process_tree_stopped"] is not True):

@@ -19,7 +19,7 @@ import urllib.parse
 import uuid
 
 from .validation import json_equal
-from .core import HarnessError, Run, _tool_version_probes, atomic_json, canonical, changed_paths, digest, file_hash, identity_alive, lock, now, process_identity, read_json, remaining_budget_seconds, scope_errors, snapshot
+from .core import AcceptanceDeadlineExhausted, HarnessError, Run, _tool_version_probes, atomic_json, canonical, changed_paths, digest, file_hash, identity_alive, lock, now, process_identity, read_json, remaining_budget_seconds, scope_errors, snapshot
 
 
 class WindowsJob:
@@ -411,7 +411,7 @@ def run_check(run: Run, check_id, *, cancel_file=None):
         raise HarnessError("Use evidence for non-command checks")
     remaining = remaining_budget_seconds(contract)
     if remaining is not None and remaining <= 0:
-        raise HarnessError("Run deadline exhausted: check not_run, no process started")
+        raise AcceptanceDeadlineExhausted("Run deadline exhausted: check not_run, no process started")
     with ExitStack() as stack:
         stack.enter_context(run.workspace_lock(contract))
         state = run.state()
@@ -854,7 +854,7 @@ def gate(run: Run, *, actor="orchestrator"):
     deadline = time.monotonic() + (max(0, remaining) if remaining is not None else 30)
     for attempt in range(3):
         if time.monotonic() >= deadline:
-            raise HarnessError("GATE_DEADLINE_EXHAUSTED: original acceptance deadline reached")
+            raise AcceptanceDeadlineExhausted("GATE_DEADLINE_EXHAUSTED: original acceptance deadline reached")
         try:
             return _gate_once(run, actor=actor, commit_deadline=deadline)
         except DependencyChanged as error:
@@ -894,7 +894,7 @@ def _gate_once(run: Run, *, actor, commit_deadline):
         errors.append("candidate changed during gate")
     remaining = commit_deadline - time.monotonic()
     if remaining <= 0:
-        raise HarnessError("GATE_DEADLINE_EXHAUSTED: original deadline reached during acceptance preparation")
+        raise AcceptanceDeadlineExhausted("GATE_DEADLINE_EXHAUSTED: original deadline reached during acceptance preparation")
     with commit_guard(run, observed, timeout=min(30, remaining), allow_root_change=True) as committed:
         current = run.state()
         if not json_equal(current, state):

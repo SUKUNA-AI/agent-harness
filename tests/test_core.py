@@ -15,7 +15,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from agent_harness.core import HarnessError, Run, atomic_json, digest, file_hash, identity_alive, lock, process_identity, read_json, snapshot, validate_contract
+from agent_harness.core import AcceptanceDeadlineExhausted, HarnessError, Run, atomic_json, digest, file_hash, identity_alive, lock, process_identity, read_json, snapshot, validate_contract
 from agent_harness.runner import gate, record_evidence, run_check
 
 
@@ -762,8 +762,10 @@ class CoreIntegrationTests(unittest.TestCase):
     def test_expired_deadline_does_not_start_checks_or_new_owner(self):
         self.contract["budget"]["deadline"] = "2000-01-01T00:00:00Z"
         run = self.run_fixture()
-        with self.assertRaisesRegex(HarnessError, "deadline exhausted"):
+        with self.assertRaisesRegex(AcceptanceDeadlineExhausted, "deadline exhausted"):
             run.freeze()
+        with self.assertRaisesRegex(AcceptanceDeadlineExhausted, "check not_run"):
+            run_check(run, "unit")
         with self.assertRaisesRegex(HarnessError, "deadline exhausted"):
             run.record_owner(self.owner())
 

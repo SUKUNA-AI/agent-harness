@@ -32,6 +32,10 @@ class HarnessError(RuntimeError):
     pass
 
 
+class AcceptanceDeadlineExhausted(HarnessError):
+    """The acceptance deadline expired before publishing a verdict."""
+
+
 def now():
     return datetime.now(timezone.utc).isoformat()
 
@@ -872,7 +876,7 @@ class Run:
                 contract = self.contract(state)
                 remaining = remaining_budget_seconds(contract)
                 if remaining is not None and remaining <= 0:
-                    raise HarnessError("Run deadline exhausted; inspect/checkpoint instead of starting checks")
+                    raise AcceptanceDeadlineExhausted("Run deadline exhausted; inspect/checkpoint instead of starting checks")
                 candidate = snapshot(contract)
                 baseline = read_json(self.path / "origin-baseline.json")
                 errors = scope_errors(contract, baseline, candidate)

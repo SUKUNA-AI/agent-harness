@@ -10,7 +10,7 @@ import shutil
 
 import test_core as fixtures
 from agent_harness import dependency_commit, runner
-from agent_harness.core import HarnessError, Run
+from agent_harness.core import AcceptanceDeadlineExhausted, HarnessError, Run
 
 
 class DependencyCommitTests(unittest.TestCase):
@@ -86,7 +86,7 @@ class DependencyCommitTests(unittest.TestCase):
             with original(run, observed, **options) as locked:
                 yield locked
         with patch.object(runner, "remaining_budget_seconds", return_value=1), patch.object(runner.time, "monotonic", side_effect=lambda: clock[0]), patch.object(dependency_commit, "commit_guard", expire):
-            with self.assertRaisesRegex(HarnessError, "GATE_DEADLINE_EXHAUSTED"):
+            with self.assertRaisesRegex(AcceptanceDeadlineExhausted, "GATE_DEADLINE_EXHAUSTED"):
                 runner.gate(child)
         self.assertEqual(len(attempts), 1)
         self.assertIsNone(child.state()["accepted"])
