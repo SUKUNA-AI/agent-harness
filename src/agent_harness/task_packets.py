@@ -103,7 +103,7 @@ def preflight(adapter, prompt, **options):
         validator = getattr(adapter, "argv", None)
     if callable(validator):
         allowed = {k: v for k, v in options.items() if k in {
-            "session_id", "output_schema", "native_children", "read_only", "write_authorized", "allow_non_git"}}
+            "session_id", "output_schema", "native_children", "read_only", "write_authorized", "allow_non_git", "reasoning_effort"}}
         try:
             validator(prompt, **allowed)
         except (HarnessError, OSError, ValueError) as error:

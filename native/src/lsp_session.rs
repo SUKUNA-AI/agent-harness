@@ -1,7 +1,7 @@
-//! Linux-only, per-Session Tokio byte transport. Python owns LSP semantics.
-//! The helper is an already registered, unreaped SID/PGID leader. The language
-//! server inherits that group. On parent EOF/failure we terminate the entire
-//! owned group, including this helper; runtime Drop cannot hang on stdio workers.
+//! Per-Session Tokio byte transport. Python owns LSP semantics and containment.
+//! Linux retains an unreaped SID/PGID anchor; Windows inherits the parent's
+//! private kill-on-close Job. Failure terminates the owned tree. Runtime Drop
+//! cannot hang on stdio workers because the helper exits without unwinding.
 use serde_json::{json,Value};
 
 pub const MAX_FRAME_BYTES: usize = 16*1024*1024;
@@ -14,7 +14,7 @@ pub const MAX_RPC_NODES: usize = 1_000_000;
 const MAX_HEADERS: usize = 8192;
 
 pub fn capability() -> Value {
-    if cfg!(target_os="linux") {json!({"mode":"lsp-session","protocol_version":1,"platform":"linux"})}
+    if cfg!(any(target_os="linux", windows)) {json!({"mode":"lsp-session","protocol_version":1,"platform":std::env::consts::OS})}
     else {Value::Null}
 }
 pub fn limits() -> Value {
@@ -56,16 +56,16 @@ fn rpc(raw:&[u8]) -> Result<(),&'static str> {
     Ok(())
 }
 
-#[cfg(not(target_os="linux"))]
+#[cfg(not(any(target_os="linux", windows)))]
 pub fn run_cli(_session:&str) -> ! {
     eprintln!("LSP native transport is not qualified on this platform");std::process::exit(2)
 }
 
-#[cfg(target_os="linux")]
-pub fn run_cli(session:&str) -> ! { linux::run(session) }
+#[cfg(any(target_os="linux", windows))]
+pub fn run_cli(session:&str) -> ! { transport::run(session) }
 
-#[cfg(target_os="linux")]
-mod linux {
+#[cfg(any(target_os="linux", windows))]
+mod transport {
     use super::*;
     use std::process::Stdio;
     use std::sync::Arc;
@@ -74,27 +74,46 @@ mod linux {
     use tokio::sync::{mpsc,oneshot,OwnedSemaphorePermit,Semaphore};
     use tokio::time::{Instant,timeout};
 
+    #[cfg(target_os="linux")]
     fn owned_group() -> Result<i32,&'static str> {
         // SAFETY: these are scalar, side-effect-free identity queries.
         let pid=unsafe {libc::getpid()};
         if pid<=1 || unsafe {libc::getpgrp()}!=pid || unsafe {libc::getsid(0)}!=pid {return Err("unowned_process_group");}
         Ok(pid)
     }
+    #[cfg(windows)]
+    fn owned_group() -> Result<i32,&'static str> {
+        use windows_sys::Win32::System::{JobObjects::IsProcessInJob,Threading::GetCurrentProcess};
+        let mut contained=0;
+        // The Python parent assigned this suspended helper to a private
+        // kill-on-close Job before allowing any user code to execute.
+        if unsafe {IsProcessInJob(GetCurrentProcess(),std::ptr::null_mut(),&mut contained)}==0 || contained==0 {
+            return Err("unowned_process_job");
+        }
+        i32::try_from(std::process::id()).map_err(|_|"invalid_helper_pid")
+    }
     fn terminate_group(pgid:i32) -> ! {
+        #[cfg(target_os="linux")]
         if owned_group()==Ok(pgid) {
             // SAFETY: this helper is the live group leader. Its PID cannot be
             // reused while executing, and this signal only targets its group.
             unsafe {libc::kill(-pgid,libc::SIGKILL);}
         }
+        #[cfg(windows)]
+        let _=pgid; // Parent retains the Job handle and terminates the whole tree.
         // Never unwind/drop a runtime containing blocking stdin/stdout workers.
         std::process::exit(74)
     }
+    #[cfg(target_os="linux")]
     fn parent_closed() -> bool {
         let mut descriptor=libc::pollfd {fd:0,events:0,revents:0};
         // POLLHUP is visible even when unread control data remains in the pipe.
         // This check stays independent of all data queues/backpressure.
         (unsafe {libc::poll(&mut descriptor,1,0)})<0 || descriptor.revents&(libc::POLLHUP|libc::POLLERR|libc::POLLNVAL)!=0
     }
+    #[cfg(windows)]
+    fn parent_closed() -> bool { false } // Control reader observes broken-pipe EOF without queue waits.
+    #[cfg(target_os="linux")]
     fn birth() -> Result<String,&'static str> {
         use std::io::Read;
         let mut bytes=String::new();std::fs::File::open("/proc/self/stat").map_err(|_|"helper_identity_unavailable")?
@@ -252,8 +271,12 @@ mod linux {
     }
     async fn session(session:&str,pgid:i32)->Result<(),&'static str> {
         let mut out=tokio::io::stdout();let mut out_count=Counter::default();
+        #[cfg(target_os="linux")]
+        let (group,sid,created)=(json!(pgid),json!(pgid),birth()?);
+        #[cfg(windows)]
+        let (group,sid,created)=(Value::Null,Value::Null,session.to_owned());
         let ready=json!({"protocol_version":1,"session_id":session,"sequence":1,"kind":"ready",
-            "helper_pid":pgid,"pgid":pgid,"sid":pgid,"created":birth()?,"version":env!("CARGO_PKG_VERSION"),"platform":"linux",
+            "helper_pid":pgid,"pgid":group,"sid":sid,"created":created,"version":env!("CARGO_PKG_VERSION"),"platform":std::env::consts::OS,
             "limits":limits()});
         timeout(Duration::from_secs(2),write_wire(&mut out,&ready,&mut out_count)).await.map_err(|_|"ready_timeout")??;
         let mut reader=tokio::io::stdin();let mut in_count=Counter::default();
@@ -270,7 +293,7 @@ mod linux {
         let child_stderr=child.stderr.take().ok_or("server_stderr_unavailable")?;
         let (events_tx,events_rx)=mpsc::channel(4);let output_budget=Arc::new(Semaphore::new(MAX_FRAME_BYTES));
         let mut writer_task=tokio::spawn(output(events_rx,session.to_owned(),out_count));
-        post(&events_tx,&output_budget,json!({"kind":"process_started","child_pid":child_pid,"pgid":pgid}),1).await?;
+        post(&events_tx,&output_budget,json!({"kind":"process_started","child_pid":child_pid,"pgid":group}),1).await?;
         let (server_tx,server_rx)=mpsc::channel(4);
         let mut input_task=tokio::spawn(input(reader,session.to_owned(),in_count,server_tx,Arc::new(Semaphore::new(MAX_FRAME_BYTES+4096))));
         let mut server_write_task=tokio::spawn(to_server(stdin,server_rx));
@@ -308,15 +331,19 @@ mod linux {
         if timeout(Duration::from_millis(200),events_tx.send(event)).await.is_ok() {
             let _=timeout(Duration::from_millis(200),ack_rx).await;
         }
-        // Parent also kills this exact, unreaped group before reaping the helper.
+        // Parent also terminates the anchored group or retained Windows Job.
         // This is termination, not a claimed terminal receipt for managed work.
         terminate_group(pgid)
     }
     pub(super) fn run(session_id:&str)->! {
         if !valid_session(session_id) {eprintln!("invalid LSP transport session ID");std::process::exit(2);}
-        let pgid=match owned_group() {Ok(value)=>value,Err(_)=>{eprintln!("LSP helper requires its own session/process group");std::process::exit(2);}};
+        let pgid=match owned_group() {Ok(value)=>value,Err(_)=>{eprintln!("LSP helper requires owned process containment");std::process::exit(2);}};
         std::panic::set_hook(Box::new(move |_|terminate_group(pgid)));
-        let runtime=match tokio::runtime::Builder::new_multi_thread().worker_threads(2).max_blocking_threads(4).enable_all().build() {
+        // Windows anonymous child pipes use Tokio's blocking adapter. Reserve
+        // capacity for parent input/output and all three server streams, so a
+        // blocked server stdin cannot starve the control EOF reader.
+        let blocking_threads=if cfg!(windows) {8} else {4};
+        let runtime=match tokio::runtime::Builder::new_multi_thread().worker_threads(2).max_blocking_threads(blocking_threads).enable_all().build() {
             Ok(value)=>value,Err(_)=>{eprintln!("LSP async runtime unavailable");std::process::exit(2);}
         };
         let _=runtime.block_on(session(session_id,pgid));

@@ -10,7 +10,6 @@ recovery marker блокирует актуальную приёмку до яв
 Универсальный пакет, его подключение к клиенту и результат конкретной задачи
 принимаются отдельно. Этот документ задаёт критерии; фактические результаты
 связываются с текущим commit и разрешённым private evidence.
-[RELEASE_REVIEW](RELEASE_REVIEW.md) — исторический отчёт 1.1.0;
 [release notes 1.6.0](RELEASE_NOTES_1.6.0.md) описывают текущий интерфейс и границы поставки.
 `not_run`, `unknown`, `unavailable`, `skipped` и `unverified` не означают passed.
 Полный работающий fixture с JSON contract/evidence —
@@ -43,7 +42,7 @@ Freeze записывает candidate и command toolchains. Executable fingerpr
 version probes и declared implementation files проверяются до/после check.
 Изменившийся toolchain или source требует новой попытки и applicable checks;
 нельзя заменить candidate.json вручную или ослабить required в worker result.
-Python и native snapshots должны совпадать по manifest/digest; adaptive выбор
+Python и native snapshots должны совпадать по manifest/digest; автоматический выбор
 backend не освобождает от повторного хеширования файлов.
 
 Snapshot scheme v2 (`snapshot_scheme_version=2`,

@@ -25,8 +25,6 @@ PROTOCOL_VERSION = 1
 MAX_REQUEST_BYTES = 16 * 1024 * 1024
 MAX_RESPONSE_BYTES = 100 * 1024 * 1024 + 2
 _verified_bundles = {}
-_routing_hints = {}
-AUTO_NATIVE_FILE_THRESHOLD = 512
 
 
 def _mode():
@@ -131,61 +129,14 @@ def find_binary(required=False):
 def backend_info():
     requested = _mode()
     path = find_binary(required=requested == "native")
-    selected = "adaptive" if path and requested == "auto" else "native" if path and requested == "native" else "python"
+    selected = "native" if path and requested != "python" else "python"
     info = {"requested": requested, "selected": selected,
             "available": path is not None, "platform": platform_key(), "path": str(path) if path else None,
             "protocol_version": PROTOCOL_VERSION, "build_info": None}
-    if selected == "adaptive":
-        info["snapshot_policy"] = {"python_below_observed_files": AUTO_NATIVE_FILE_THRESHOLD,
-                                   "native_for_large_or_unknown_tree": True,
-                                   "hint_cache": "process-local routing only; never file hashes"}
     if path is not None and os.environ.get("AGENT_HARNESS_NATIVE") is None:
         metadata = _verify_bundle(path)
         info["build_info"] = {key: metadata[key] for key in ("version", "protocol_version", "binary_sha256", "source_digest", "target", "rustc") if key in metadata}
     return info
-
-
-def _prefer_python(contract):
-    """A cheap performance hint, never an input inventory or acceptance cache.
-
-    Counting stops early. Ignored Git files may overestimate a tree, which merely
-    selects native. A changed tree can keep its hint until this CLI process exits;
-    both implementations still hash and validate the actual inputs each time.
-    """
-    cwd = contract.get("cwd")
-    if not cwd:
-        return True
-    from .core import matches
-    root = Path(cwd).resolve()
-    excludes = (".git", ".git/**", *contract.get("scope", {}).get("exclude", []))
-    key = (str(root), excludes)
-    if key in _routing_hints:
-        return _routing_hints[key]
-    deadline = time.monotonic() + 0.02
-    pending, files, directories = [root], 0, 0
-    try:
-        while pending and files < AUTO_NATIVE_FILE_THRESHOLD and directories < 64 and time.monotonic() < deadline:
-            directory = pending.pop()
-            directories += 1
-            with os.scandir(directory) as entries:
-                for entry in entries:
-                    name = Path(entry.path).relative_to(root).as_posix()
-                    if matches(name, excludes):
-                        continue
-                    if entry.is_dir(follow_symlinks=False):
-                        pending.append(Path(entry.path))
-                    else:
-                        files += 1
-                    if files >= AUTO_NATIVE_FILE_THRESHOLD or time.monotonic() >= deadline:
-                        _routing_hints[key] = False
-                        return False
-        small = not pending and files < AUTO_NATIVE_FILE_THRESHOLD
-    except OSError:
-        small = False
-    if len(_routing_hints) >= 128:
-        _routing_hints.clear()
-    _routing_hints[key] = small
-    return small
 
 
 def invoke(request, timeout=120.0):
@@ -272,8 +223,6 @@ def snapshot(contract):
     if mode == "python":
         return None
     if find_binary(required=mode == "native") is None:
-        return None
-    if mode == "auto" and _prefer_python(contract):
         return None
     value = invoke({"operation": "snapshot", "contract": contract})
     if value.get("schema_version") != 1 or value.get("kind") not in {"non_file", "directory", "git"} or not isinstance(value.get("files"), dict) or not isinstance(value.get("external_inputs"), dict):

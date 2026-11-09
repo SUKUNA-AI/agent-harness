@@ -151,9 +151,10 @@ class CompletionEligibilityTests(unittest.TestCase):
 
     def test_refined_optional_deferral_survives_fresh_cached_and_strict_status(self):
         detail = "; no additional output was promised."
-        supervisor, fake = self.fixture(contract_edit=self.optional,
+        supervisor, fake = self.fixture(contract_edit=self.optional, wall_seconds=fixtures.TWO_PHASE_WALL_SECONDS,
             script_edit=lambda s: s.replace("'reason':r['reason']",
                 "'reason':r['reason']+(" + repr(detail) + " if r['status']=='deferred' else '')"))
+        deadline = supervisor.state["deadline"]
         result = supervisor.start()
         self.assertEqual(result["status"], "ACCEPTED", result)
         records = supervisor.receipts().records()
@@ -169,6 +170,7 @@ class CompletionEligibilityTests(unittest.TestCase):
         self.assertEqual(review["verdict"], "approved")
         recovered = Supervisor(supervisor.path, adapter=supervisor.adapter)
         self.assertEqual(recovered.resume()["status"], "ACCEPTED")
+        self.assertEqual(recovered.state["deadline"], deadline)
         self.assertTrue(recovered.status(verify=True)["evidence_current"])
         self.assertEqual(fake.with_suffix(".calls").read_bytes(), calls)
         self.assertEqual(recovered.receipts().records(), records)

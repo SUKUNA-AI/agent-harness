@@ -54,8 +54,8 @@ review фиксируются отдельно. Runtime редактора и re
 
 ## Наши проверки
 
-[BASELINE_1_5_0](BASELINE_1_5_0.md) фиксирует исходный Git SHA, installer,
-Python/Rust/native checks и фактически наблюдённую платформу. Тесты
+Проверки связываются с текущим Git SHA, native binary и фактически
+наблюдённой платформой в CI и локальных receipts. Тесты
 `test_knowledge.py`, `test_supervisor_store.py` и supervisor/managed suites
 проверяют local functionality и отрицательные сценарии. Fake adapter
 используется для deterministic regression; он не подтверждает model quality.

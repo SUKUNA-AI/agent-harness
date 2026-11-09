@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from .agent_lifecycle import GlobalSlots, Worktrees, git, guard_invocations, invocation_timeout, InvocationUnresolved
 from .core import HarnessError, digest, now, snapshot
 from .work_contract import legacy_contract
-from .scheduling import Scheduler, validate_plan
+from .scheduling import Scheduler, validate_plan, worker_effort
 from .strict_yaml import load, validate
 from . import telemetry
 from .task_packets import compile_packet, preflight, invoke, NotDispatched, schema_file
@@ -115,7 +115,8 @@ def _plan(supervisor, capabilities):
                   json.dumps(supervisor.contract, ensure_ascii=False))
         prompt = compile_packet(supervisor, "Return a complete map of coherent bounded outcomes. Do not edit files. For contract v2 return plan schema_version2, the current mission generation, full requirement_ids coverage and checks.local/checks.integration IDs from node_checks. Do not create one giant item merely because concurrency is1. Keep each item independently verifiable without requiring later features.", {"contract": supervisor.contract, "mission_digest": digest(supervisor.contract["mission"]) if verified_flow.enabled(supervisor) else None,
             "planning_request": getattr(supervisor, "plan_quality_request", None)})
-        preflight(supervisor._adapter(), prompt, read_only=True, native_children=False, output_schema=str(schema_path))
+        preflight(supervisor._adapter(), prompt, read_only=True, native_children=False,
+            output_schema=str(schema_path), reasoning_effort="high")
         with GlobalSlots(supervisor.state_dir).acquire(supervisor.state["run_id"], "planner", "architect",
                 cancel_file=supervisor.path / "cancel.yaml", timeout=min(60, supervisor.remaining())) as slot:
             def planner_process(value):
@@ -130,7 +131,7 @@ def _plan(supervisor, capabilities):
             started = time.monotonic()
             result = invoke(supervisor._adapter(), prompt, slot=slot, cwd=supervisor.state["cwd"],
                 timeout=invocation_timeout(supervisor, "planner"), deadline=supervisor.state["deadline"], read_only=True, native_children=False,
-                output_schema=str(schema_path), log_dir=supervisor.path / "planner", on_process=planner_process,
+                output_schema=str(schema_path), reasoning_effort="high", log_dir=supervisor.path / "planner", on_process=planner_process,
                 cancel_file=supervisor.path / "cancel.yaml")
             result["slot_wait_ms"] = slot.wait_seconds * 1000
             try:
@@ -481,8 +482,10 @@ def execute_managed(supervisor, *, recovering=False):
                 if current_deps != agent["dependency_vector"]:
                     raise NotDispatched("Verified dependency vector changed before dispatch")
         review_schema = schema_file(supervisor, "managed-review.schema.json", 1) if verified_flow.enabled(supervisor) and node["role"] == "reviewer" else None
+        effort = worker_effort(node)
         preflight(supervisor._adapter(), prompt, read_only=node["read_only"], native_children=False, output_schema=review_schema,
-            write_authorized=not node["read_only"], session_id=agent["thread_id"] if agent["attempts_used"] else None)
+            write_authorized=not node["read_only"], session_id=agent["thread_id"] if agent["attempts_used"] else None,
+            reasoning_effort=effort)
         attempt = agent["attempts_used"] + 1
         agent.update(attempts_used=agent["attempts_used"] + 1, status="spawned",
             attempt_id=name + "-" + str(agent["attempts_used"] + 1))
@@ -522,7 +525,7 @@ def execute_managed(supervisor, *, recovering=False):
                             raise NotDispatched("Verified predecessor changed while waiting")
                 preflight(supervisor._adapter(), prompt, read_only=node["read_only"], native_children=False,
                     write_authorized=not node["read_only"], output_schema=review_schema,
-                    session_id=agent["thread_id"] if attempt > 1 else None)
+                    session_id=agent["thread_id"] if attempt > 1 else None, reasoning_effort=effort)
                 if plan_quality.enabled(supervisor):
                     errors = plan_quality.evidence_errors(supervisor, plan)
                     if errors:
@@ -539,6 +542,7 @@ def execute_managed(supervisor, *, recovering=False):
                 session_id=agent["thread_id"] if attempt > 1 else None, output_schema=review_schema,
                 cancel_file=supervisor.path / "cancel.yaml", on_process=process, on_event=event,
                 read_only=node["read_only"], native_children=False, write_authorized=not node["read_only"],
+                reasoning_effort=effort,
                 log_dir=supervisor.path / "codex" / name)
             result["slot_wait_ms"] = slot.wait_seconds * 1000
             completion = receipts.completion(intent, result, duration_ms=(time.monotonic() - model_start) * 1000)

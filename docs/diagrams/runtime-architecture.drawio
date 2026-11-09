@@ -1,6 +1,6 @@
 <?xml version='1.0' encoding='utf-8'?>
 <mxfile host="app.diagrams.net" agent="Native Agent Harness documentation" version="32.6.1" modified="2026-11-09T09:01:17Z">
-  <diagram id="runtime-architecture" name="Слои исполнения 1.5.0">
+  <diagram id="runtime-architecture" name="Слои исполнения 1.6.0">
     <mxGraphModel dx="1400" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1445" pageHeight="1664" math="0" shadow="0" background="#FFFFFF">
       <root>
         <mxCell id="0" />
@@ -41,7 +41,7 @@
         <mxCell id="State" value="Private state: journal, typed&#10;receipts, checkpoints и backups" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="130" y="1136" width="280" height="86" as="geometry" />
         </mxCell>
-        <mxCell id="Rust" value="Rust process: scanner, snapshot,&#10;RepoMap" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+        <mxCell id="Rust" value="Rust: scanner, snapshot,&#10;RepoMap и LSP transport" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="800" y="1136" width="280" height="86" as="geometry" />
         </mxCell>
         <mxCell id="LSP" value="Локальный language server на время&#10;команды" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">

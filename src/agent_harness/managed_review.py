@@ -14,6 +14,7 @@ from .file_io import read_regular_file
 from .strict_yaml import loads, validate
 from .supervisor_store import atomic_write
 from .task_packets import compile_packet, preflight, invoke, schema_file
+from .scheduling import plan_reviewer_effort
 
 
 class ReceiptRecord(TypedDict):
@@ -281,7 +282,8 @@ def review_candidate(supervisor, run, candidate):
         payload = last["payload"]
         if payload["outcome"] != "completed":
             if payload["dispatch_state"] == "not_dispatched_proven":
-                supervisor.transition("BLOCKED_AMBIGUOUS", "NOT_DISPATCHED: reviewer refused locally")
+                target = "TIMED_OUT" if payload["outcome"] == "timed_out" else "BLOCKED_AMBIGUOUS"
+                supervisor.transition(target, "NOT_DISPATCHED: reviewer refused locally")
                 return None
             if payload["outcome"] == "unknown" or payload["process_tree_stopped"] is not True:
                 supervisor.transition("UNKNOWN_OUTCOME", "Final reviewer outcome/cleanup uncertain")
@@ -336,15 +338,16 @@ def review_candidate(supervisor, run, candidate):
                 "prior_reviewer_failure": prior_failure,
                 "completion_policy": binding,
                 "required_verdict_version": 3 if binding else 2 if supervisor.contract["schema_version"] == 2 else 1})
+        effort = plan_reviewer_effort(supervisor.store.read(supervisor.state["plan_path"], "agent-plan.schema.json"))
         preflight(supervisor._adapter(), prompt, read_only=True, write_authorized=False,
-            native_children=False, output_schema=str(schema))
+            native_children=False, output_schema=str(schema), reasoning_effort=effort)
         with GlobalSlots(supervisor.state_dir).acquire(supervisor.state["run_id"], "@review", "reviewer",
                 cancel_file=supervisor.path / "cancel.yaml", timeout=min(60, supervisor.remaining())) as slot:
             intent = receipts.intent("@review", "review-" + str(len(all_intents) + 1), checkout=supervisor.state["cwd"],
                 owner=slot.value["lease_id"], candidate_digest=candidate["digest"], review_binding=binding)
             start = time.monotonic()
             result = invoke(supervisor._adapter(), prompt, slot=slot, cwd=supervisor.state["cwd"], read_only=True,
-                write_authorized=False, native_children=False, output_schema=str(schema),
+                write_authorized=False, native_children=False, output_schema=str(schema), reasoning_effort=effort,
                 timeout=invocation_timeout(supervisor, "reviewer"),
                 deadline=supervisor.state["deadline"], cancel_file=supervisor.path / "cancel.yaml",
                 on_process=lambda value: (slot.bind(value), supervisor._on_process(value)),
@@ -369,7 +372,8 @@ def review_candidate(supervisor, run, candidate):
     if not supervisor._model_budget_ok():
         return None
     if completion["payload"]["dispatch_state"] == "not_dispatched_proven":
-        supervisor.transition("BLOCKED_AMBIGUOUS", "NOT_DISPATCHED: reviewer refused before process creation")
+        target = "TIMED_OUT" if completion["payload"]["outcome"] == "timed_out" else "BLOCKED_AMBIGUOUS"
+        supervisor.transition(target, "NOT_DISPATCHED: reviewer refused before process creation")
         return None
     if (completion["payload"]["outcome"] != "completed" or completion["payload"]["process_tree_stopped"] is False
             or supervisor.contract["schema_version"] == 2 and completion["payload"]["process_tree_stopped"] is not True):

@@ -141,8 +141,8 @@
           </g>
           <g>
             <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);">
-              <text x="946" y="1188.5">Rust process: scanner, snapshot,</text>
-              <text x="946" y="1206.5">RepoMap</text>
+              <text x="946" y="1188.50">Rust: scanner, snapshot,</text>
+              <text x="946" y="1206.50">RepoMap и LSP transport</text>
             </g>
           </g>
         </g>

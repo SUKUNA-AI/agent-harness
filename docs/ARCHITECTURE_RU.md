@@ -40,7 +40,7 @@ flowchart TD
     Exec --> Managed["Owned worktrees → node gates → staging candidate"]
     Managed --> Candidate
     CLI --> State["Private state: journal, typed receipts, checkpoints и backups"]
-    CLI --> Rust["Rust process: scanner, snapshot, RepoMap"]
+    CLI --> Rust["Rust: scanner, snapshot, RepoMap и LSP transport"]
     CLI --> LSP["Локальный language server на время команды"]
     Rust --> Source["Выбранные файлы проекта"]
     LSP --> Source
@@ -159,20 +159,28 @@ Source packet — файл с выбранными исходниками и man
 
 ```mermaid
 flowchart TD
-    Call["Запрос snapshot"] --> Mode{"AGENT_HARNESS_BACKEND"}
-    Mode -->|"python"| Python["Python snapshot"]
-    Mode -->|"native"| Required["Обязательный native helper"]
-    Mode -->|"auto"| Available{"Helper доступен?"}
+    Call["Запрос snapshot"]
+    Mode{"AGENT_HARNESS_BACKEND"}
+    Python["Python snapshot"]
+    Required["Обязательный native helper"]
+    Available{"Helper доступен и проверен?"}
+    Native["Rust snapshot: любой размер"]
+    Manifest["Полный content rehash и canonical manifest"]
+    Binding["Digest inputs для checks, evidence и gate"]
+    Error["Явная ошибка; без повторного запуска через Python"]
+    Call --> Mode
+    Mode -->|"python"| Python
+    Mode -->|"native"| Required
+    Mode -->|"auto"| Available
+    Available -->|"Да"| Native
     Available -->|"Нет"| Python
-    Available -->|"Да"| Size{"Дерево меньше 512 наблюдаемых файлов?"}
-    Size -->|"Да"| Python
-    Size -->|"Нет или неизвестно"| Native["Rust snapshot"]
-    Required --> Native
-    Python --> Manifest["Полный content rehash и canonical manifest"]
+    Available -->|"Invalid bundle"| Error
+    Required -->|"Проверен"| Native
+    Required -->|"Нет / ошибка"| Error
+    Native -->|"Ошибка"| Error
     Native --> Manifest
-    Manifest --> Binding["Digest входов для checks, evidence и gate"]
-    Required -->|"Ошибка helper"| Error["Явная ошибка"]
-    Native -->|"Ошибка выполнения или протокола"| Error
+    Python --> Manifest
+    Manifest --> Binding
 ```
 
 </details>
@@ -180,17 +188,16 @@ flowchart TD
 Наличие bundle проверяется по metadata/версии/протоколу и hash бинарника.
 Повреждённый найденный helper не считается отсутствующим. Native timeouts и
 protocol errors не превращаются в успешный Python fallback. `context map`
-вызывает Rust отдельно от адаптивного выбора snapshot и требует helper.
+вызывает Rust независимо от выбора snapshot и требует helper.
 
-Процессный cache хранит лишь подсказку выбора backend и проверку неизменного
-установленного бинарника. Snapshot исходников каждый раз проверяет содержимое.
+Процессный cache хранит проверку неизменного установленного бинарника. Snapshot исходников каждый раз проверяет содержимое.
 Оба backend должны возвращать одинаковый canonical manifest: это проверяет
 `tools/check_native.py`, включая scope/ignore semantics и нестандартные paths.
 
 Python сохранён там, где важнее явные state transitions и переносимая stdlib:
 installer, contracts, subprocess runner, evidence/gate, bounded summaries,
-LSP transport и recovery. Переход scanner в Rust не переносит reasoning модели
-на локальный процессор. Исторические измерения [1.4.0](REVIEW_1_4_0.md) описывают
+LSP semantic adapter, Python fallback transport и recovery. Переход scanner в Rust не переносит reasoning модели
+на локальный процессор. Методика [Performance/eval](PERFORMANCE_EVAL_RU.md) описывает
 именно локальную часть; новых универсальных обещаний latency здесь нет.
 
 ## 4. Долгая задача и восстановление после compaction

@@ -44,18 +44,12 @@ receipts конкретного commit, среды и candidate. Дата акт
 конечный input/runtime closure; arbitrary tests и ordinary Python runtimes
 выполняются заново. Final required runner/gate не принимает старый cache PASS.
 
-## Сохраняемые исторические документы
+## Версия и история
 
-| Документы | Как читать |
-| --- | --- |
-| [Baseline 1.5.0](BASELINE_1_5_0.md) | Проверки исходной main 1.4.2 перед реализацией |
-| [Release 1.4.2](RELEASE_1_4_2.md) | Состав и применение прежней поставки |
-| [Review 1.4.1](REVIEW_1_4_1.md), [1.4.0](REVIEW_1_4_0.md), [1.3.0](REVIEW_1_3_0.md), [1.2.0](REVIEW_1_2_0.md) | Findings и измерения соответствующих snapshots |
-| [Review 1.1.1](REVIEW_2026-11-01.md), [1.1.0](RELEASE_REVIEW.md) | Результаты ранней установки/поставки, не текущий runtime verdict |
-| [Ecosystem](ECOSYSTEM_RU.md), [Memory/TokenEconomizer](MEMORY_TOKENS_RU.md) | Датированный screening upstream; не install list и не обязательные dependencies |
-
-Исторические числа, pins, даты и failed/skipped outcomes не пересчитываются
-после обновления навигации. Новый passed test не изменяет прошлый receipt.
+Руководства описывают текущий `main`. [Релиз 1.6.0](RELEASE_NOTES_1.6.0.md)
+фиксирует опубликованный архив. Старые отдельные release/review snapshots
+удалены; история изменений сохранена в [CHANGELOG](../CHANGELOG.md), Git
+и [GitHub Releases](https://github.com/SUKUNA-AI/agent-harness/releases).
 
 ## Короткие устанавливаемые инструкции и сопутствующие assets
 

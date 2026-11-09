@@ -151,11 +151,12 @@ RepoMap требует native binary даже при `AGENT_HARNESS_BACKEND=pyth
 
 ## Native backend и маршрутизация
 
-Следующая policy управляет snapshot. Для LSP отдельно доступен явный
-`AGENT_HARNESS_LSP_BACKEND=native` на Linux x86_64/glibc; default — Python.
-Tokio helper обслуживает одну полную Session без нового сервиса, а Python
-сохраняет semantic policy. Limits, cleanup и rollback backend — в
-[LSP reference](LSP_RU.md). Это не перенос runner, Codex transport или installer.
+Следующая policy управляет snapshot. LSP использует независимый
+`AGENT_HARNESS_LSP_BACKEND=auto|python|native`, default `auto` предпочитает
+проверенный Rust/Tokio helper на Linux/Windows. Без helper выбирается Python;
+явный `native` и ошибки helper не дают повторного запуска через Python.
+Python сохраняет semantic policy. Platform prerequisites и cleanup описаны
+в [LSP reference](LSP_RU.md). Runner, Codex transport и installer остаются Python.
 
 ```text
 agent-harness native status
@@ -170,16 +171,13 @@ C toolchain и уже заполненный Cargo cache. Без `--offline` Car
 
 | Режим | Snapshot policy |
 | --- | --- |
-| `AGENT_HARNESS_BACKEND=auto` (default) | Если binary отсутствует — Python. Если присутствует — adaptive routing |
+| `AGENT_HARNESS_BACKEND=auto` (default) | Проверенный helper — Rust для любого размера дерева; без helper — Python |
 | `...=python` | Python snapshot; существование optional bundled binary не требуется |
 | `...=native` | Native обязателен; отсутствие/ошибка — явный отказ |
 | `AGENT_HARNESS_NATIVE=<absolute executable>` | Явный developer-owned override; не означает проверенный packaged build-info |
 
-Adaptive hint считает наблюдённые файлы до порога **512**: `<512` выбирает Python,
-большой или неизвестный tree — native. Обход прекращается по лимиту 20 ms/64
-каталога, использует excludes; Git ignored files могут завысить оценку и лишь
-переключить backend. Process-local hint ограничен 128 entries, живёт до завершения
-CLI process и **не содержит file hashes**. Малое дерево не получает scan «из cache».
+Размер дерева больше не переключает `auto` на Python. Выбор Rust относится
+к локальному snapshot/transport и не доказывает ускорение полного model run.
 
 Каждый snapshot заново обходит/хеширует фактические inputs. Оба backend возвращают
 совместимый manifest/digest для raw bytes, dirty/untracked files, tracked deletion,

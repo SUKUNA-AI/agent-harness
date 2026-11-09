@@ -1,272 +1,106 @@
 <?xml version='1.0' encoding='utf-8'?>
-<svg xmlns="http://www.w3.org/2000/svg" style="background: #FFFFFF; background-color: #FFFFFF; color-scheme: light;" version="1.1" width="1046px" height="1832px" viewBox="0 0 1046 1832">
-  <defs />
-  <rect fill="#FFFFFF" width="100%" height="100%" x="0" y="0" style="fill: rgb(255, 255, 255);" />
-  <g>
-    <g data-cell-id="0">
-      <g data-cell-id="1">
-        <g data-cell-id="title">
-          <g>
-            <rect x="24" y="24" width="971.33" height="50" fill="none" stroke="none" pointer-events="all" />
-          </g>
-          <g>
-            <g fill="#18324F" font-family="Arial" font-weight="bold" text-anchor="start" font-size="24px" style="fill: rgb(24, 50, 79);">
-              <text x="26" y="60">Выбор snapshot backend</text>
-            </g>
-          </g>
-        </g>
-        <g data-cell-id="Call">
-          <g>
-            <rect x="625.33" y="122" width="280" height="86" rx="10.32" ry="10.32" fill="#edf3fa" stroke="#54718e" stroke-width="1.5" pointer-events="all" style="fill: rgb(237, 243, 250); stroke: rgb(84, 113, 142);" />
-          </g>
-          <g>
-            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);">
-              <text x="765.33" y="171.5">Запрос snapshot</text>
-            </g>
-          </g>
-        </g>
-        <g data-cell-id="Mode">
-          <g>
-            <path d="M 765.33 293 L 915.33 349 L 765.33 405 L 615.33 349 Z" fill="#fff2cc" stroke="#54718e" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(255, 242, 204); stroke: rgb(84, 113, 142);" />
-          </g>
-          <g>
-            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);">
-              <text x="765.33" y="355.5">AGENT_HARNESS_BACKEND</text>
-            </g>
-          </g>
-        </g>
-        <g data-cell-id="Python">
-          <g>
-            <rect x="715.33" y="1265" width="280" height="86" rx="10.32" ry="10.32" fill="#edf3fa" stroke="#54718e" stroke-width="1.5" pointer-events="all" style="fill: rgb(237, 243, 250); stroke: rgb(84, 113, 142);" />
-          </g>
-          <g>
-            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);">
-              <text x="855.33" y="1314.5">Python snapshot</text>
-            </g>
-          </g>
-        </g>
-        <g data-cell-id="Required">
-          <g>
-            <rect x="24" y="1094" width="280" height="86" rx="10.32" ry="10.32" fill="#edf3fa" stroke="#54718e" stroke-width="1.5" pointer-events="all" style="fill: rgb(237, 243, 250); stroke: rgb(84, 113, 142);" />
-          </g>
-          <g>
-            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);">
-              <text x="164" y="1143.5">Обязательный native helper</text>
-            </g>
-          </g>
-        </g>
-        <g data-cell-id="Available">
-          <g>
-            <path d="M 765.33 595 L 915.33 651 L 765.33 707 L 615.33 651 Z" fill="#fff2cc" stroke="#54718e" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(255, 242, 204); stroke: rgb(84, 113, 142);" />
-          </g>
-          <g>
-            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);">
-              <text x="765.33" y="657.5">Helper доступен?</text>
-            </g>
-          </g>
-        </g>
-        <g data-cell-id="Size">
-          <g>
-            <path d="M 548.33 897 L 698.33 953 L 548.33 1009 L 398.33 953 Z" fill="#fff2cc" stroke="#54718e" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(255, 242, 204); stroke: rgb(84, 113, 142);" />
-          </g>
-          <g>
-            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);">
-              <text x="548.33" y="950.5">Дерево меньше 512 наблюдаемых</text>
-              <text x="548.33" y="968.5">файлов?</text>
-            </g>
-          </g>
-        </g>
-        <g data-cell-id="Native">
-          <g>
-            <rect x="300.33" y="1265" width="280" height="86" rx="10.32" ry="10.32" fill="#edf3fa" stroke="#54718e" stroke-width="1.5" pointer-events="all" style="fill: rgb(237, 243, 250); stroke: rgb(84, 113, 142);" />
-          </g>
-          <g>
-            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);">
-              <text x="440.33" y="1314.5">Rust snapshot</text>
-            </g>
-          </g>
-        </g>
-        <g data-cell-id="Manifest">
-          <g>
-            <rect x="668.67" y="1436" width="280" height="86" rx="10.32" ry="10.32" fill="#edf3fa" stroke="#54718e" stroke-width="1.5" pointer-events="all" style="fill: rgb(237, 243, 250); stroke: rgb(84, 113, 142);" />
-          </g>
-          <g>
-            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);">
-              <text x="808.67" y="1476.5">Полный content rehash и canonical</text>
-              <text x="808.67" y="1494.5">manifest</text>
-            </g>
-          </g>
-        </g>
-        <g data-cell-id="Binding">
-          <g>
-            <rect x="668.67" y="1607" width="280" height="86" rx="10.32" ry="10.32" fill="#edf3fa" stroke="#54718e" stroke-width="1.5" pointer-events="all" style="fill: rgb(237, 243, 250); stroke: rgb(84, 113, 142);" />
-          </g>
-          <g>
-            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);">
-              <text x="808.67" y="1647.5">Digest входов для checks, evidence</text>
-              <text x="808.67" y="1665.5">и gate</text>
-            </g>
-          </g>
-        </g>
-        <g data-cell-id="Error">
-          <g>
-            <rect x="207" y="1607" width="280" height="86" rx="10.32" ry="10.32" fill="#edf3fa" stroke="#54718e" stroke-width="1.5" pointer-events="all" style="fill: rgb(237, 243, 250); stroke: rgb(84, 113, 142);" />
-          </g>
-          <g>
-            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);">
-              <text x="347" y="1656.5">Явная ошибка</text>
-            </g>
-          </g>
-        </g>
-        <g data-cell-id="e0">
-          <g>
-            <path d="M 765.33 208 L 765.33 283.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);" />
-            <path d="M 765.33 291.32 L 761.58 283.82 L 769.08 283.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);" />
-          </g>
-        </g>
-        <g data-cell-id="e1">
-          <g>
-            <path d="M 815.33 386.33 L 840.3 386.3 L 840.3 415 L 925.3 415 L 925.33 1255.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);" />
-            <path d="M 925.33 1263.32 L 921.58 1255.82 L 929.08 1255.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);" />
-          </g>
-          <g>
-            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="13px" style="fill: rgb(24, 50, 79);">
-              <rect fill="#FFFFFF" stroke="none" x="905" y="763" width="41" height="17" stroke-width="0" style="fill: rgb(255, 255, 255);" />
-              <text x="925.31" y="775.83">python</text>
-            </g>
-          </g>
-        </g>
-        <g data-cell-id="e2">
-          <g>
-            <path d="M 715.33 386.33 L 690.3 386.3 L 690.3 415 L 164 415 L 164 1084.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);" />
-            <path d="M 164 1092.32 L 160.25 1084.82 L 167.75 1084.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);" />
-          </g>
-          <g>
-            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="13px" style="fill: rgb(24, 50, 79);">
-              <rect fill="#FFFFFF" stroke="none" x="146" y="457" width="37" height="17" stroke-width="0" style="fill: rgb(255, 255, 255);" />
-              <text x="164" y="470.47">native</text>
-            </g>
-          </g>
-        </g>
-        <g data-cell-id="e3">
-          <g>
-            <path d="M 765.33 405 L 765.33 585.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);" />
-            <path d="M 765.33 593.32 L 761.58 585.82 L 769.08 585.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);" />
-          </g>
-          <g>
-            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="13px" style="fill: rgb(24, 50, 79);">
-              <rect fill="#FFFFFF" stroke="none" x="752" y="493" width="27" height="17" stroke-width="0" style="fill: rgb(255, 255, 255);" />
-              <text x="765.33" y="505.5">auto</text>
-            </g>
-          </g>
-        </g>
-        <g data-cell-id="e4">
-          <g>
-            <path d="M 802.83 693 L 815.3 693 L 815.3 1190 L 855.3 1190 L 855.33 1255.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);" />
-            <path d="M 855.33 1263.32 L 851.58 1255.82 L 859.08 1255.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);" />
-          </g>
-          <g>
-            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="13px" style="fill: rgb(24, 50, 79);">
-              <rect fill="#FFFFFF" stroke="none" x="804" y="985" width="24" height="17" stroke-width="0" style="fill: rgb(255, 255, 255);" />
-              <text x="815.3" y="998.03">Нет</text>
-            </g>
-          </g>
-        </g>
-        <g data-cell-id="e5">
-          <g>
-            <path d="M 727.83 693 L 715.3 693 L 715.3 717 L 548.3 717 L 548.33 887.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);" />
-            <path d="M 548.33 895.32 L 544.58 887.82 L 552.08 887.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);" />
-          </g>
-          <g>
-            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="13px" style="fill: rgb(24, 50, 79);">
-              <rect fill="#FFFFFF" stroke="none" x="551" y="710" width="18" height="17" stroke-width="0" style="fill: rgb(255, 255, 255);" />
-              <text x="559.83" y="722.5">Да</text>
-            </g>
-          </g>
-        </g>
-        <g data-cell-id="e6">
-          <g>
-            <path d="M 585.83 995 L 598.3 995 L 598.3 1190 L 785.3 1190 L 785.33 1255.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);" />
-            <path d="M 785.33 1263.32 L 781.58 1255.82 L 789.08 1255.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);" />
-          </g>
-          <g>
-            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="13px" style="fill: rgb(24, 50, 79);">
-              <rect fill="#FFFFFF" stroke="none" x="617" y="1183" width="18" height="17" stroke-width="0" style="fill: rgb(255, 255, 255);" />
-              <text x="625.83" y="1195.5">Да</text>
-            </g>
-          </g>
-        </g>
-        <g data-cell-id="e7">
-          <g>
-            <path d="M 510.83 995 L 498.3 995 L 498.3 1019 L 487 1019 L 487 1255.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);" />
-            <path d="M 487 1263.32 L 483.25 1255.82 L 490.75 1255.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);" />
-          </g>
-          <g>
-            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="13px" style="fill: rgb(24, 50, 79);">
-              <rect fill="#FFFFFF" stroke="none" x="426" y="1111" width="122" height="17" stroke-width="0" style="fill: rgb(255, 255, 255);" />
-              <text x="487" y="1123.67">Нет или неизвестно</text>
-            </g>
-          </g>
-        </g>
-        <g data-cell-id="e8">
-          <g>
-            <path d="M 210.67 1180 L 210.7 1190 L 393.7 1190 L 393.67 1255.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);" />
-            <path d="M 393.66 1263.32 L 389.92 1255.82 L 397.42 1255.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);" />
-          </g>
-        </g>
-        <g data-cell-id="e9">
-          <g>
-            <path d="M 855.33 1351 L 855.34 1426.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);" />
-            <path d="M 855.34 1434.32 L 851.59 1426.82 L 859.09 1426.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);" />
-          </g>
-        </g>
-        <g data-cell-id="e10">
-          <g>
-            <path d="M 487 1351 L 487 1361 L 762 1361 L 762 1426.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);" />
-            <path d="M 762 1434.32 L 758.25 1426.82 L 765.75 1426.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);" />
-          </g>
-        </g>
-        <g data-cell-id="e11">
-          <g>
-            <path d="M 808.67 1522 L 808.67 1597.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);" />
-            <path d="M 808.67 1605.32 L 804.92 1597.82 L 812.42 1597.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);" />
-          </g>
-        </g>
-        <g data-cell-id="e12">
-          <g>
-            <path d="M 117.33 1180 L 117.3 1532 L 300.3 1532 L 300.33 1597.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);" />
-            <path d="M 300.33 1605.32 L 296.58 1597.82 L 304.08 1597.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);" />
-          </g>
-          <g>
-            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="13px" style="fill: rgb(24, 50, 79);">
-              <rect fill="#FFFFFF" stroke="none" x="73" y="1477" width="90" height="17" stroke-width="0" style="fill: rgb(255, 255, 255);" />
-              <text x="117.3" y="1490.5">Ошибка helper</text>
-            </g>
-          </g>
-        </g>
-        <g data-cell-id="e13">
-          <g>
-            <path d="M 393.66 1351 L 393.67 1597.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);" />
-            <path d="M 393.67 1605.32 L 389.92 1597.82 L 397.42 1597.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);" />
-          </g>
-          <g>
-            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="13px" style="fill: rgb(24, 50, 79);">
-              <rect fill="#FFFFFF" stroke="none" x="285" y="1471" width="219" height="17" stroke-width="0" style="fill: rgb(255, 255, 255);" />
-              <text x="393.66" y="1484.5">Ошибка выполнения или протокола</text>
-            </g>
-          </g>
-        </g>
-        <g data-cell-id="footer">
-          <g>
-            <rect x="24" y="1753" width="971.33" height="30" fill="none" stroke="none" pointer-events="all" />
-          </g>
-          <g>
-            <g fill="#526A82" font-family="Arial" text-anchor="start" font-size="13px" style="fill: rgb(82, 106, 130);">
-              <text x="26" y="1772.00">1.6.0 • обзор; точные переходы и ограничения — в руководстве</text>
-            </g>
-          </g>
-        </g>
-      </g>
-    </g>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="1200" height="1130" viewBox="0 0 1200 1130" role="img" aria-labelledby="title desc">
+  <title id="title">Выбор snapshot backend</title>
+  <desc id="desc">Agent Harness 1.6.0. Текстовое описание и Mermaid находятся в связанном руководстве.</desc>
+  <rect width="1200" height="1130" fill="#FFFFFF" />
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#526A82" />
+    </marker>
+  </defs>
+  <text x="30" y="48" font-family="Arial, sans-serif" font-size="24" text-anchor="start" fill="#18324F" font-weight="bold">
+    <tspan x="30" y="48.0">Выбор snapshot backend</tspan>
+  </text>
+  <polyline points="600.0,176 600.0,225" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <polyline points="450,280 220,280 220,600" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <rect x="190.0" y="422.0" width="60" height="20" fill="white" />
+  <text x="220.0" y="437.0" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" fill="#18324F">
+    <tspan x="220.0" y="437.0">python</tspan>
+  </text>
+  <polyline points="750,280 980,280 980,405" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <rect x="835.0" y="262.0" width="60" height="20" fill="white" />
+  <text x="865.0" y="277.0" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" fill="#18324F">
+    <tspan x="865.0" y="277.0">native</tspan>
+  </text>
+  <polyline points="600.0,335 600.0,405" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <rect x="578.0" y="352.0" width="44" height="20" fill="white" />
+  <text x="600.0" y="367.0" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="367.0">auto</tspan>
+  </text>
+  <polyline points="600.0,515 600.0,630" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <rect x="580.0" y="554.5" width="40" height="20" fill="white" />
+  <text x="600.0" y="569.5" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="569.5">Да</tspan>
+  </text>
+  <polyline points="450,460 220,460 220,600" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <rect x="315.0" y="442.0" width="40" height="20" fill="white" />
+  <text x="335.0" y="457.0" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" fill="#18324F">
+    <tspan x="335.0" y="457.0">Нет</tspan>
+  </text>
+  <polyline points="750,460 800,460 800,723 830,723" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <rect x="738.0" y="573.5" width="124" height="20" fill="white" />
+  <text x="800.0" y="588.5" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" fill="#18324F">
+    <tspan x="800.0" y="588.5">Invalid bundle</tspan>
+  </text>
+  <polyline points="980,491 980,560 600,560 600,630" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <rect x="752.0" y="542.0" width="76" height="20" fill="white" />
+  <text x="790.0" y="557.0" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" fill="#18324F">
+    <tspan x="790.0" y="557.0">Проверен</tspan>
+  </text>
+  <polyline points="1130,448 1140,448 1140,723 1130,723" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <rect x="1086.0" y="567.5" width="108" height="20" fill="white" />
+  <text x="1140.0" y="582.5" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" fill="#18324F">
+    <tspan x="1140.0" y="582.5">Нет / ошибка</tspan>
+  </text>
+  <polyline points="750,673 790,673 790,723 830,723" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <rect x="760.0" y="680.0" width="60" height="20" fill="white" />
+  <text x="790.0" y="695.0" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" fill="#18324F">
+    <tspan x="790.0" y="695.0">Ошибка</tspan>
+  </text>
+  <polyline points="600.0,716 600.0,805" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <polyline points="220,686 220,848 450,848" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <polyline points="600.0,891 600.0,965" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <rect x="450" y="90" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="600.0" y="138.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="138.0">Запрос snapshot</tspan>
+  </text>
+  <polygon points="600.0,225 750,280.0 600.0,335 450,280.0" fill="#FFF2CC" stroke="#54718E" stroke-width="1.5" />
+  <text x="600.0" y="285.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="285.0">AGENT_HARNESS_BACKEND</tspan>
+  </text>
+  <rect x="70" y="600" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="220.0" y="648.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="220.0" y="648.0">Python snapshot</tspan>
+  </text>
+  <rect x="830" y="405" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="980.0" y="453.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="980.0" y="453.0">Обязательный native helper</tspan>
+  </text>
+  <polygon points="600.0,405 750,460.0 600.0,515 450,460.0" fill="#FFF2CC" stroke="#54718E" stroke-width="1.5" />
+  <text x="600.0" y="465.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="456.0">Helper доступен</tspan>
+    <tspan x="600.0" y="474.0">и проверен?</tspan>
+  </text>
+  <rect x="450" y="630" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="600.0" y="678.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="678.0">Rust snapshot: любой размер</tspan>
+  </text>
+  <rect x="450" y="805" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="600.0" y="853.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="844.0">Полный content rehash</tspan>
+    <tspan x="600.0" y="862.0">и canonical manifest</tspan>
+  </text>
+  <rect x="450" y="965" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="600.0" y="1013.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="1004.0">Digest inputs для checks,</tspan>
+    <tspan x="600.0" y="1022.0">evidence и gate</tspan>
+  </text>
+  <rect x="830" y="680" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="980.0" y="728.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="980.0" y="719.0">Явная ошибка; без повторного</tspan>
+    <tspan x="980.0" y="737.0">запуска через Python</tspan>
+  </text>
+  <text x="30" y="1110" font-family="Arial, sans-serif" font-size="13" text-anchor="start" fill="#18324F">
+    <tspan x="30" y="1110.0">1.6.0 • обзор; required unknown/skipped не становятся PASS</tspan>
+  </text>
 </svg>

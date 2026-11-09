@@ -138,7 +138,9 @@ class PlanQualityBoundaryTests(unittest.TestCase):
     def test_root_preflight_drift_never_reserves_attempt_or_intent(self):
         for index,repair in enumerate((False,True)):
             if index:self.setUp()
-            owner,fake=self.fixture();preflight=supervisor_module.preflight
+            wall_seconds = fixtures.TWO_PHASE_WALL_SECONDS if repair else fixtures.VERIFIED_FLOW_WALL_SECONDS
+            owner,fake=self.fixture(wall_seconds=wall_seconds);preflight=supervisor_module.preflight
+            deadline=owner.state['deadline']
             tripped=[];before=[]
             def checked(adapter,prompt,**options):
                 value=preflight(adapter,prompt,**options)
@@ -153,7 +155,8 @@ class PlanQualityBoundaryTests(unittest.TestCase):
                 self.assertEqual(fake.with_suffix('.calls').read_bytes(),calls)
             else:
                 with patch.object(supervisor_module,'preflight',checked):owner.start()
-            self.assertTrue(tripped)
+            self.assertTrue(tripped, (repair, owner.state['status'], owner.state['reason']))
+            self.assertEqual(owner.state['deadline'],deadline)
             self.assertEqual(owner.state['status'],'BLOCKED_AMBIGUOUS')
             self.assertEqual(owner.state['attempts_used'],before[0])
             intents=[r for r in owner.receipts().records() if r['record_type']=='invocation_intent' and r['node_id']=='@integration']

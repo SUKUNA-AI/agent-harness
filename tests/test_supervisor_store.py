@@ -62,6 +62,17 @@ class StrictYAMLTests(unittest.TestCase):
         with self.assertRaises(sy.StrictYAMLError):
             sy.validate({}, {"type": "object", "unsupported": True})
 
+    def test_flow_documents_keep_lexical_and_mapping_guards(self):
+        limit = sy.MAX_DEPTH
+        sy.loads("[" * limit + "0" + "]" * limit)
+        with self.assertRaisesRegex(sy.StrictYAMLError, "YAML exceeds depth limit"):
+            sy.loads("[" * (limit + 1) + "0" + "]" * (limit + 1))
+        for text in ('{"a":&value 1,"b":*value}', '{"a":!!str 1}', '%YAML 1.1\n---\n{"a":1}'):
+            with self.subTest(text=text), self.assertRaisesRegex(sy.StrictYAMLError, "forbidden"):
+                sy.loads(text)
+        with self.assertRaisesRegex(sy.StrictYAMLError, "Duplicate YAML key"):
+            sy.loads('{"a":1,"a":1}')
+
     def test_json_migration_preserves_original_and_refuses_overwrite(self):
         with tempfile.TemporaryDirectory() as folder:
             source, destination = Path(folder) / "old.json", Path(folder) / "new.yaml"
@@ -109,6 +120,17 @@ class SupervisorStoreTests(unittest.TestCase):
         self.assertTrue(restored["recovered"])
         self.assertEqual(restored["state"]["status"], "accepted")
         self.assertFalse(self.store.recover()["recovered"])
+
+    def test_replay_rejects_scalar_schema(self):
+        self.store.commit({"schema_version": 1, "status": "pending"}, "start")
+        self.assertEqual(len(self.store.events()), 1)
+        schema = Path(self.temp.name) / "journal.schema.json"
+        for value in (None, "supervisor-journal-event.v2.schema.json"):
+            with self.subTest(value=value):
+                schema.write_text(json.dumps(value), encoding="utf-8")
+                with patch("agent_harness.supervisor_store.JOURNAL_READ_SCHEMA", schema):
+                    with self.assertRaisesRegex(HarnessError, "Corrupt journal record 1"):
+                        self.store.events()
 
     def test_recovery_marker_preserves_corrupt_projection_and_returns_journal_state(self):
         expected = {"schema_version": 1, "status": "pending"}

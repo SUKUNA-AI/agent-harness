@@ -71,7 +71,8 @@ class PlanQualityTests(unittest.TestCase):
             value=self.planner(value,atomic)
             rejection="\n if quality_packet['binding']['round']==1:\n  quality_verdict='requires_revision';quality_findings=[dict(node_ids=[quality_nodes[0]['node_id']],reason='Unrelated left and right outcomes are bundled only because cap is one.',revision_request='Use independent coherent outcomes with their own checks.')];quality_nodes[0]['atomicity']='too_broad'\n"
             return value.replace(" quality_wire=dict(",rejection+" quality_wire=dict(")
-        supervisor,_=self.fixture(plan_edit=giant,script_edit=script)
+        supervisor,_=self.fixture(plan_edit=giant,script_edit=script,
+                                  wall_seconds=fixtures.TWO_PHASE_WALL_SECONDS)
         deadline=supervisor.state['deadline']
         result=supervisor.start()
         self.assertEqual(result['status'],'ACCEPTED',result)
@@ -86,13 +87,23 @@ class PlanQualityTests(unittest.TestCase):
         self.assertEqual(supervisor.state['deadline'],deadline)
 
     def test_justified_single_coherent_operation_is_not_split(self):
+        def high_risk(plan):
+            self.giant(plan)
+            plan['tasks'][0].update(risk='high', reasoning_effort='medium')
         def script(value):
             marker="if mode!='managed':pathlib.Path(target).write_text('VALUE = '+str(value)+'\\n')"
             return value.replace(marker,marker+"\nif mode=='left':pathlib.Path('right.py').write_text('VALUE = '+str(value)+'\\n')")
-        supervisor,_=self.fixture(plan_edit=self.giant,script_edit=script,
+        supervisor,_=self.fixture(plan_edit=high_risk,script_edit=script,
             contract_edit=lambda c:c['mission'].update(original_request='Change both values as one coherent operation with joint acceptance.'))
-        result=supervisor.start()
+        efforts=[]
+        run=supervisor.adapter.run
+        def observed(prompt, **options):
+            efforts.append(options.get('reasoning_effort'))
+            return run(prompt, **options)
+        with patch.object(supervisor.adapter,'run',side_effect=observed):
+            result=supervisor.start()
         self.assertEqual(result['status'],'ACCEPTED',result)
+        self.assertEqual(efforts,['ultra','medium','ultra'])
         _,wire=self.quality_wire(supervisor)
         self.assertEqual(len(wire['nodes']),1)
         self.assertEqual(wire['nodes'][0]['atomicity'],'coherent')
@@ -161,7 +172,8 @@ class PlanQualityTests(unittest.TestCase):
     def test_completion_assessment_publication_boundaries_recover_without_double_call(self):
         for index,boundary in enumerate(('completion','artifact','receipt','state')):
             if index:self.setUp()
-            supervisor,_=self.fixture();deadline=supervisor.state['deadline']
+            supervisor,_=self.fixture(wall_seconds=fixtures.TWO_PHASE_WALL_SECONDS)
+            deadline=supervisor.state['deadline']
             publish=ExecutionReceipts.publish;artifact=plan_quality._publish;save=supervisor._save
             def crash_publish(receipts,value):
                 result=publish(receipts,value)

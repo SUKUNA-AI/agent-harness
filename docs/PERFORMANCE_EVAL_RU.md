@@ -1,6 +1,6 @@
 # Метрики и эксперименты — 1.6.0
 
-[Baseline](BASELINE_1_5_0.md) · [Источники](SOURCES_AND_EVALS.md) · [Memory/context](MEMORY_AND_CONTEXT_RU.md)
+[Источники](SOURCES_AND_EVALS.md) · [Memory/context](MEMORY_AND_CONTEXT_RU.md)
 
 Harness ускоряет только те части работы, для которых есть сопоставимое
 измерение. Correctness tests, меньший JSON или наличие пяти workers не
@@ -95,27 +95,13 @@ data digest, shape, model label, output type и environment fingerprint.
 Negative benchmark, quality regression, missing usage или новая структура
 выбирают JSON. Ни один произвольный `enabled: true` без samples не достаточен.
 
-## Наблюдённый pilot 1.5.0
-
-На frozen pilot candidate `5cdf3d3` проведены 5 repeats для каждой из трёх
-форм: 15/15 exact answers correct. Median paired input saving TOON около 0.71%,
-one-sided sign-test p=0.1875; результат `measured_negative`, выбран JSON.
-Это одна lookup-таблица и диагностический эксперимент, не общее сравнение моделей.
-Receipt без matching environment fingerprint не включает TOON задним числом.
-
-Контрольный scheduler cap1/2/3/5 на contained fake processes проверяет overlap,
-изоляцию, интеграцию и acceptance mechanics. Он не измеряет LLM quality,
-model latency или token throughput. Repetitive/error packet byte reductions
-и cache counters — локальные proxy. Causal end-to-end performance остаётся
-`insufficient_data`, пока нет сопоставимого real baseline/candidate A/B.
-
 ## Как читать результаты релиза
 
-Исходные проверки опубликованы отдельно в [baseline](BASELINE_1_5_0.md).
-Они подтверждают выполненные команды на исходном checkout и платформе,
-не ускорение 1.5.0. Финальный release report должен приводить actual test
-statuses, число real model samples, mode/cap, evidence hashes и residual
-limitations. Required `not_run`, `skipped`, `unknown` не являются passed.
+Результаты относятся к конкретным source/binary hashes и платформе. Отчёт
+должен приводить actual test statuses, число real model samples, mode/cap,
+evidence hashes и residual limitations. Required `not_run`, `skipped`,
+`unknown` не являются passed. Rust transport и увеличение concurrency
+сами по себе не доказывают ускорение полного model workflow.
 
 Сохранённый compaction threshold `500000` — пользовательская политика
 сжатия active history. Он не увеличивает физическое окно модели и не

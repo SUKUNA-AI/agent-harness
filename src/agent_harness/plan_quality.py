@@ -10,6 +10,7 @@ from .core import HarnessError, digest
 from .file_io import read_regular_file
 from .strict_yaml import _schema, validate
 from .supervisor_store import atomic_write
+from .scheduling import plan_reviewer_effort
 
 STATE_SCHEMA = 'work-state.v3.schema.json'
 POLICY_SCHEMA = 'plan-quality-policy.v1.schema.json'
@@ -350,7 +351,9 @@ def assess(supervisor, plan):
             'Do not rewrite requirements/requiredness or trusted bindings. Return the exact supplied binding and per-node rationales. '
             'Do not edit, spawn, publish, change model/provider/effort/settings or call session connectors.',
             {'purpose': 'plan_quality', 'binding': binding, 'input': input_value, 'input_ref': input_ref})
-        preflight(supervisor._adapter(), prompt, read_only=True, write_authorized=False, native_children=False, output_schema=str(schema_path))
+        effort = plan_reviewer_effort(plan)
+        preflight(supervisor._adapter(), prompt, read_only=True, write_authorized=False, native_children=False,
+            output_schema=str(schema_path), reasoning_effort=effort)
         quality['phase'] = 'reviewing'
         supervisor._save('plan-quality reviewer admission; original round/usage/deadline retained')
         source_contract = legacy_contract(supervisor.contract, cwd=supervisor.state['source_cwd'],
@@ -368,7 +371,7 @@ def assess(supervisor, plan):
             intent = receipts.publish(template)
             started = time.monotonic()
             result = invoke(supervisor._adapter(), prompt, slot=slot, cwd=supervisor.state['source_cwd'],
-                read_only=True, write_authorized=False, native_children=False, output_schema=str(schema_path),
+                read_only=True, write_authorized=False, native_children=False, output_schema=str(schema_path), reasoning_effort=effort,
                 timeout=invocation_timeout(supervisor, 'reviewer'), deadline=supervisor.state['deadline'],
                 cancel_file=supervisor.path / 'cancel.yaml', on_process=lambda value: (slot.bind(value), supervisor._on_process(value)),
                 log_dir=supervisor.path / 'codex' / ('plan-quality-' + str(binding['round'])))

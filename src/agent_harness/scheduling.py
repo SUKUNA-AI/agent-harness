@@ -2,7 +2,27 @@
 from __future__ import annotations
 
 from .core import HarnessError, IDENTIFIER, digest
+from .agent_lifecycle import MAX_CONCURRENT_REVIEWERS
 from .orchestration import _path, _overlap, _within
+
+
+def worker_effort(node):
+    """Select bounded per-invocation effort without changing the parent model."""
+    requested = node.get("reasoning_effort")
+    allowed = {"high", "ultra"} if node["role"] == "reviewer" else {"medium", "high"}
+    if requested is not None:
+        if requested not in allowed:
+            raise HarnessError("Managed node reasoning effort is incompatible with its role")
+        return requested
+    if node["role"] == "reviewer":
+        return "ultra" if node["risk"] == "high" else "high"
+    return "high" if node["risk"] == "high" else "medium"
+
+
+def plan_reviewer_effort(plan):
+    """Mandatory plan/final reviewers inherit the highest frozen task risk."""
+    return worker_effort({"role": "reviewer", "risk": "high" if any(
+        node["risk"] == "high" for node in plan["tasks"]) else "low"})
 
 
 def validate_plan(plan, contract):
@@ -29,6 +49,7 @@ def validate_plan(plan, contract):
             raise HarnessError("MISSION_COVERAGE_INCOMPLETE: mandatory requirement missing from task mapping")
         node_checks = {c["id"] for c in contract["node_checks"]}
     for node in nodes:
+        worker_effort(node)
         if not IDENTIFIER.fullmatch(node["id"]):
             raise HarnessError("Invalid task ID")
         if verified and any(not set(node["checks"][phase]) <= node_checks for phase in ("local", "integration")):
@@ -117,12 +138,17 @@ class Scheduler:
         ready.sort(key=lambda name: (-remaining[name][0], -self.nodes[name]["impact"], name))
         free = max(0, self.cap - len(active))
         selected = []
+        reviewers = sum(self.nodes[name]["role"] == "reviewer" for name in active)
         for name in ready:
             if len(selected) >= free:
                 break
+            if self.nodes[name]["role"] == "reviewer" and reviewers >= MAX_CONCURRENT_REVIEWERS:
+                continue
             if selected and self.nodes[name]["estimated_seconds"] <= self.spawn_cost:
                 continue
             selected.append(name)
+            if self.nodes[name]["role"] == "reviewer":
+                reviewers += 1
         critical = max(remaining.values(), key=lambda value: value[0], default=(0, []))
         return {"ready": ready, "selected": selected, "active": sorted(active), "cap": self.cap,
                 "critical_path": critical[1], "estimated_remaining_seconds": critical[0],

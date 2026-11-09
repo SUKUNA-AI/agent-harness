@@ -238,6 +238,24 @@ class WorkSupervisorTests(unittest.TestCase):
         self.assertEqual(result["status"], "TIMED_OUT", result)
         self.assertFalse(self.fake.with_suffix(".calls").exists())
 
+    def test_final_gate_expiry_records_timeout_without_publishing_acceptance(self):
+        from agent_harness import runner
+
+        supervisor = self.create()
+        deadline = supervisor.state["deadline"]
+
+        def expire_at_gate(run):
+            with patch.object(runner, "remaining_budget_seconds", return_value=0):
+                return runner.gate(run)
+
+        with patch("agent_harness.supervisor.gate", side_effect=expire_at_gate):
+            result = supervisor.start()
+        self.assertEqual(result["status"], "TIMED_OUT", result)
+        self.assertIn("GATE_DEADLINE_EXHAUSTED", result["reason"])
+        self.assertEqual(supervisor.state["deadline"], deadline)
+        self.assertIsNone(supervisor._core().state()["accepted"])
+        self.assertEqual(self.calls(), ["exec"])
+
     def test_token_budget_is_checked_after_observed_turn_before_acceptance(self):
         supervisor = self.create()
         contract = supervisor.contract

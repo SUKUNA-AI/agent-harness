@@ -1,7 +1,6 @@
 # Документация Native Agent Harness 1.6.0
 
-Этот индекс разделяет актуальные инструкции, короткие процедуры для агента и
-снимки прошлых проверок. Начальная точка — [README](../README.md).
+Этот индекс содержит актуальные руководства и короткие процедуры для агента. Начальная точка — [README](../README.md).
 
 Контракты исполнения, включённые в 1.6.0, и границы приёмки:
 [Стабилизация исполнения](STABILIZATION_RU.md).
@@ -62,29 +61,13 @@
 его автоматическую вставку в каждый prompt. `roles/`, `skills/`, `workflows/`
 и `templates/` содержат короткие исходные assets для установки и работы агента.
 
-## Релизы, проверки и архив исследования
+## Текущая версия и история
 
-Текущий выпуск — [1.6.0](RELEASE_NOTES_1.6.0.md). Предыдущие выпуски —
-[1.5.1](RELEASE_NOTES_1.5.1.md),
-[1.5.0](RELEASE_NOTES_1.5.0.md) и [1.4.2](RELEASE_1_4_2.md). Полная история:
-[CHANGELOG](../CHANGELOG.md).
-
-| Снимок | Что зафиксировано |
-| --- | --- |
-| [Исправления A1–A11 в 1.5.1](AUDIT_FIXES_1_5.md) | Candidate binding, процессные слоты, budgets, recovery, Ledger/memory и Linux rename; границы совместимости |
-| [Baseline перед 1.5.0](BASELINE_1_5_0.md) | Фактически проверенная исходная main 1.4.2; не финальная приёмка 1.5.0 |
-| [Аудит 1.4.1](REVIEW_1_4_1.md) | Исправления R01–R14, metadata, гонки, LSP recovery и native build |
-| [Проверка 1.4.0](REVIEW_1_4_0.md) | Перенос scanner/snapshot в Rust, RepoMap, LSP и измерения |
-| [Проверка 1.3.0](REVIEW_1_3_0.md) | Bounded output, handoff, reader races и CLI overhead |
-| [Проверка 1.2.0](REVIEW_1_2_0.md) | F01–F11, contracts, evidence, rollback и зависимости |
-| [Проверка 1.1.1](REVIEW_2026-11-01.md) | Первое исправление общего пакета |
-| [Проверка 1.1.0](RELEASE_REVIEW.md) | Историческая исходная поставка |
-| [Ecosystem screening](ECOSYSTEM_RU.md) | Датированный обзор закреплённых upstream, не текущий install list |
-| [Memory/TokenEconomizer](MEMORY_TOKENS_RU.md) | Исследованные, но не включённые дополнительные системы |
-
-Числа тестов, benchmark и ограничения старого отчёта относятся к его версии.
-Состояние нового релиза проверяется по его commit, CI, отдельному verification
-report и встроенному `release-manifest.json` с hashes payload файлов.
+Действующие руководства описывают `main`. Опубликованный архив
+[1.6.0](RELEASE_NOTES_1.6.0.md) закреплён своим тегом и manifest; последующие
+изменения `main` не меняют его содержимое. История остаётся в
+[CHANGELOG](../CHANGELOG.md), Git и [GitHub Releases](https://github.com/SUKUNA-AI/agent-harness/releases).
+Устаревшие отдельные release/review Markdown удалены из рабочего дерева.
 
 ## Verified task flow
 

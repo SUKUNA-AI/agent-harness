@@ -7,8 +7,8 @@ native child cap и supervisor global quota имеют разную семант
 
 | Режим | Кто управляет model sessions | Ограничение |
 | --- | --- | --- |
-| `mode: native` | Одна coordinator session Codex; её native children остаются под управлением Codex | Contract managed concurrency=1; установленный child cap=5 не включает primary |
-| `mode: managed` | Supervisor запускает отдельные Codex exec/resume в принадлежащих run worktrees | Contract cap 1–5; global active model sessions≤5, включая planner, reviewer и integration owner |
+| `mode: native` | Одна coordinator session Codex; её native children остаются под управлением Codex | Contract managed concurrency=1; default child cap=5, explicit 12; primary не включён |
+| `mode: managed` | Supervisor запускает отдельные Codex exec/resume в принадлежащих run worktrees | Contract cap 1–12; global active model sessions≤12, включая planner, reviewer и integration owner; reviewers≤3 |
 
 Локальный Python controller не потребляет model slot. Другой managed run с
 тем же `--state-dir` использует тот же OS-backed registry. Изолированные
@@ -38,7 +38,7 @@ schema validity не заменяют эту semantic validation.
 
 ```mermaid
 flowchart TD
-    P["Plan v2: schema / semantic validation + quality gate"] --> Q["Ready set / critical-path heuristic"]
+    P["Plan v2: schema / semantic validation + quality gate"] --> Q["Ready set: до 12 model sessions, reviewers ≤3; critical path"]
     Q -->|"независимый scope A"| A["Codex A / owned worktree A"]
     Q -->|"независимый scope B"| B["Codex B / owned worktree B"]
     A --> PA["Worker A: local acceptance, patch + session / receipts"]
@@ -58,7 +58,21 @@ Scheduler ранжирует ready nodes по оставшемуся крити�
 Observed durations уточняют estimates. Spawn cost может исключить лишний
 короткий параллельный node. Это heuristic, не точный ETA и не доказанный
 оптимум. Заблокированные dependencies не порождают бесполезные sessions.
-Контракт разрешает до пяти workers, но не требует запускать пять.
+Контракт разрешает до 12 одновременных model sessions. Не больше трёх
+reviewer могут работать одновременно во всех runs одного state root;
+свободные слоты могут занимать другие роли. Меньший contract cap сохраняется.
+
+## Effort managed-ролей
+
+Узел плана может задать `reasoning_effort`. Owner/architect/diagnostician
+допускают `medium` или `high`, reviewer — `high` или `ultra`. Без override
+`risk: high` выбирает `high` исполнителю и `ultra` reviewer; при меньшем риске —
+`medium` и `high` соответственно. Параметр передаётся конкретному
+`codex exec/resume`; model/provider и effort координатора сохраняются.
+Structured planner использует `high`. Mandatory plan-quality и final review
+берут максимальный риск frozen plan: `high` выбирает `ultra`, иначе `high`.
+Native-роли из TOML и native child cap настраиваются отдельно.
+
 
 ## Подавление рекурсивного native spawn
 

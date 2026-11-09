@@ -99,13 +99,18 @@ worktree — правила координации; они не являются
 
 ## Отдельные параметры work supervisor
 
-`work` наследует установленный model/provider/reasoning. При разрешённой edit
+`work` сохраняет установленный model/provider и reasoning координатора.
+Managed nodes задают effort только конкретному `exec/resume`: исполнители
+`medium/high`, reviewer `high/ultra`; default зависит от risk. Structured
+planner использует `high`, mandatory plan/final reviewers — максимальный
+risk frozen plan (`high` → `ultra`). Подробнее — [Dynamic agents](DYNAMIC_AGENTS_RU.md).
+При разрешённой edit
 phase adapter выбирает per-invocation workspace-write; explicit installed
 read-only сохраняется. Managed workers получают локальное отключение native
 children, reviewer — read-only. Эти argv overrides не переписывают TOML.
 
 Contract `budgets` задаёт конечные attempts, wall deadline, turn timeout,
-managed concurrency и optional `max_tokens`. Они не меняют Codex compaction
+managed concurrency (1–12, reviewers≤3 глобально) и optional `max_tokens`. Они не меняют Codex compaction
 или native child cap. Reported usage проверяется между turns; unknown usage
 при заданном token cap блокирует продолжение. Полные limits —
 [CLI](CLI_REFERENCE_RU.md#foreground-work-supervisor).

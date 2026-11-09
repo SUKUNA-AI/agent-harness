@@ -1,5 +1,21 @@
 # История изменений
 
+## Main после 1.6.0
+
+- Объединены недостающие recovery/YAML/schema исправления ветки582c5d7.
+- Глобальные managed leases:12 model sessions, максимум3 reviewer; budget и
+  cancellation проверяются перед reservation/dispatch, включая медленные записи.
+- Effort по роли/риску передаётся конкретному exec/resume, mandatory reviewer
+  учитывает максимальный риск frozen plan; настройки координатора сохраняются.
+- Auto snapshot предпочитает проверенный Rust для любого размера дерева.
+  Независимый LSP auto использует Rust/Tokio на Linux/Windows; Windows helper
+  запускается suspended и привязывается к private kill-on-close Job до resume.
+- Убраны13 устаревших release/review/research Markdown; действующие руководства,
+  Mermaid и draw.io/SVG приведены к текущему коду. GitHub Releases сохранены.
+
+Опубликованный v1.6.0 и его assets остаются неизменными; эти изменения доступны
+в текущем main и требуют нового соответствующего native bundle.
+
 ## 1.6.0
 
 - SessionStart добавляет короткий начальный контекст и связывает продолжение сессии
@@ -42,7 +58,7 @@
 Первый самостоятельный patch release после 1.5.0. Включает исправления
 независимого аудита A1–A11 и последующие регрессии по Windows JSON-state.
 Старые теги и вложения v1.5.0 сохранены. Подробности:
-[release notes 1.5.1](docs/RELEASE_NOTES_1.5.1.md).
+[release notes 1.5.1](https://github.com/SUKUNA-AI/agent-harness/blob/v1.6.0/docs/RELEASE_NOTES_1.5.1.md).
 
 - Acceptance core, workspace lock и report теперь связаны с одним candidate;
   ранний managed resume создаёт core только после staging, старый mismatch
@@ -78,7 +94,7 @@
   Владение native handle/descriptor и закрытие явные; права, writer lock,
   реальная ошибка записи и семантика cancellation не меняются.
 
-Подробности и воспроизводимые проверки: [A1–A11](docs/AUDIT_FIXES_1_5.md).
+Подробности и воспроизводимые проверки: [A1–A11](https://github.com/SUKUNA-AI/agent-harness/blob/v1.6.0/docs/AUDIT_FIXES_1_5.md).
 Model/provider/permissions, compaction 500000 и cap5 не менялись.
 
 ## 1.5.0 — 2026-11-02
@@ -97,7 +113,7 @@ Model/provider/permissions, compaction 500000 и cap5 не менялись.
   compaction500000 и явно выбранный native child cap5.
 
 Детали, migration, наблюдаемые ограничения и pilot results:
-[release notes](docs/RELEASE_NOTES_1.5.0.md).
+[release notes](https://github.com/SUKUNA-AI/agent-harness/blob/v1.6.0/docs/RELEASE_NOTES_1.5.0.md).
 
 Документация 1.5.0 дополнена редактируемыми draw.io схемами и SVG-экспортами.
 Уточнены declared inputs, сохранение token budgets при recovery и передача
@@ -135,13 +151,13 @@ Model/provider/reasoning, permissions и compaction 500000 не меняются
   соответствующие native bundles, инструкции применения, patch, checksums,
   verification manifest и автономную галерею диаграмм.
 
-Подробности: [релиз 1.4.2](docs/RELEASE_1_4_2.md),
+Подробности: [релиз 1.4.2](https://github.com/SUKUNA-AI/agent-harness/blob/v1.6.0/docs/RELEASE_1_4_2.md),
 [индекс документации](docs/INDEX.md).
 
 ## 1.4.1 — 2026-11-01
 
 Исправления всех R01–R14 из повторного аудита. Подробности и границы проверки —
-[отчёт 1.4.1](docs/REVIEW_1_4_1.md).
+[отчёт 1.4.1](https://github.com/SUKUNA-AI/agent-harness/blob/v1.6.0/docs/REVIEW_1_4_1.md).
 
 - Evidence: JSON boolean больше не равен number, включая вложенные значения;
   GoogleTest `notrun`/`suppressed` не удовлетворяет обязательный test case.
@@ -221,7 +237,7 @@ Model/provider/reasoning, permissions и compaction 500000 не меняются
 
 ## 1.2.0 — 2026-11-01
 
-[Отчёт 1.2.0](docs/REVIEW_1_2_0.md): исправления F01–F11, OS-lock recovery,
+[Отчёт 1.2.0](https://github.com/SUKUNA-AI/agent-harness/blob/v1.6.0/docs/REVIEW_1_2_0.md): исправления F01–F11, OS-lock recovery,
 обязательные JUnit cases, shared-record IDs, сохранение чужих edits при rollback,
 точные executable fingerprints, зависимые задачи и честная свежесть evidence.
 Добавлены source packets, review/handoff/wiki/experiment templates и browser
@@ -231,7 +247,7 @@ workflow. Локальное ускорение достигнуто сокра�
 ## 1.1.1 — 2026-11-01
 
 Исправления по аудиту исходного `main` и сокращение повторяющихся инструкций.
-Подробности проверки — [отчёт 1.1.1](docs/REVIEW_2026-11-01.md).
+Подробности проверки — [отчёт 1.1.1](https://github.com/SUKUNA-AI/agent-harness/blob/v1.6.0/docs/REVIEW_2026-11-01.md).
 
 - Старый JUnit/JSON report не подтверждает новый запуск; обновлённый отчёт с теми
   же байтами допустим. Ошибки parsing/copy/snapshot сохраняют failed evidence и
@@ -279,7 +295,7 @@ workflow. Локальное ускорение достигнуто сокра�
 - Отдельные необязательные plugin/MCP-примеры и обзор open source решений.
   БД, Claude-Mem, импорт чатов и фоновые службы не входят в установку.
 - [Инструкция переноса](SETUP_RU.md), [границы автозагрузки](docs/AUTOLOAD_RU.md)
-  и [фактически выполненные проверки](docs/RELEASE_REVIEW.md).
+  и [фактически выполненные проверки](https://github.com/SUKUNA-AI/agent-harness/blob/v1.6.0/docs/RELEASE_REVIEW.md).
 
 GitHub CI не стартовал из-за биллинга аккаунта; локальная проверка и hosted CI
 остаются разными статусами. Native-проверки выполнялись в Windows; полная

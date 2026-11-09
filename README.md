@@ -126,9 +126,8 @@ Windows Python bundle. Обычные global/venv/POSIX interpreters и arbitrar
 
 Версия **1.6.0** связывает короткий SessionStart bootstrap, проверяемый план,
 node/final acceptance и восстановление в пределах исходных budgets. Она включает
-исправления A1–A11 из 1.5.1 и последующую стабилизацию Windows IO и журнала.
+проверку candidate binding, восстановление и стабилизацию Windows IO и журнала.
 Совместимые legacy APIs сохраняются.
-Исправления всех R01–R14 из аудита включены в [1.4.1](docs/REVIEW_1_4_1.md).
 Существующие snapshot/runner/gate переиспользуются. Параметры моделей,
 provider, reasoning, permissions и порог compaction `500000` не меняются.
 Переносимый child cap по умолчанию теперь **5**; существующий более строгий cap
@@ -401,15 +400,20 @@ Language server запускается локально на время кома
 
 ### Как выбирается Rust
 
-`AGENT_HARNESS_BACKEND` принимает `auto`, `python`, `native`. В `auto` scanner
-использует Python для наблюдаемого дерева меньше **512 файлов**, Rust — для
-большого или неопределённого дерева при доступном helper. Подсказка маршрутизации
-живёт только внутри процесса. Входные файлы при snapshot всё равно хешируются:
-mtime-кэш не заменяет проверку содержимого. RepoMap выполняется в Rust.
+`AGENT_HARNESS_BACKEND=auto|python|native` управляет snapshot. В `auto`
+проверенный Rust helper выбирается для любого размера дерева; без helper
+используется Python. Явный `native` требует helper. Все inputs каждый раз
+хешируются заново; mtime-кэш не заменяет проверку содержимого. RepoMap
+выполняется в Rust.
 
-Rust ускоряет локальную работу с файлами. Время генерации модели, внешнего
-инструмента, language server и ревью нужно измерять отдельно. Исторические A/B
-и ограничения измерений сохранены в [отчёте 1.4.0](docs/REVIEW_1_4_0.md).
+LSP независимо выбирает `AGENT_HARNESS_LSP_BACKEND=auto|python|native`
+(default `auto`). Rust transport доступен на Linux/Windows; Windows использует
+suspended launch → private Job → resume. Ошибка выбранного helper не вызывает
+повторного исполнения через Python. Подробности — [LSP](docs/LSP_RU.md).
+
+Rust выполняет локальную работу с файлами и transport. Время генерации
+модели, внешнего инструмента, language server и ревью измеряется отдельно;
+методика приведена в [Performance/eval](docs/PERFORMANCE_EVAL_RU.md).
 
 ## Экономия контекста и долгие задачи
 
@@ -525,7 +529,7 @@ Plugin имеет собственную версию и не равен вер�
 зависит от внешнего инструмента, перечислено в
 [SELECTED_PATTERNS_RU.md](docs/SELECTED_PATTERNS_RU.md).
 
-Исследованные upstream и их pins сохранены в [обзоре](docs/ECOSYSTEM_RU.md) и
+Первичные источники и границы переноса описаны в
 `provenance/`. Это архив исследования, а не список установленных зависимостей.
 Claude-Mem, TokenEconomizer, Promptfoo, NVIDIA SkillEvaluator и Harbor не
 включены в базовую поставку. Массовый импорт histories/hooks и отдельная БД
@@ -595,9 +599,8 @@ Optional MCP smoke выполняется после отдельной уста
 [CI workflow](.github/workflows/check.yml). Проверяйте Actions конкретного commit:
 наличие workflow не подтверждает его успешное выполнение.
 
-Документация 1.5.0 включает проверяемые CLI-примеры, Mermaid source и
+Документация содержит проверяемые CLI-примеры, Mermaid и
 [редактируемые draw.io схемы со SVG](docs/diagrams/README.md).
-Состав ZIP, порядок применения и границы проверки описаны в
-[релизной заметке 1.5.0](docs/RELEASE_NOTES_1.5.0.md). Старые отчёты оставлены с исходными
-версиями и измерениями. Новые проценты ускорения, экономии токенов, полнота
-всех LSP-языков и бесконечная работа одного чата не заявляются без измерений.
+Опубликованный архив закреплён [заметкой 1.6.0](docs/RELEASE_NOTES_1.6.0.md);
+руководства описывают текущий `main`. История прежних выпусков остаётся в Git,
+CHANGELOG и GitHub Releases.

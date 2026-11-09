@@ -78,7 +78,7 @@ cwd должен находиться внутри source checkout; внутре
 | Work budget | Default | Допустимые значения |
 | --- | --- | --- |
 | `max_attempts` | 3 | 1–100; initial edit включён |
-| `max_concurrent_managed_agents` | 1 | 1–5; native mode требует 1 |
+| `max_concurrent_managed_agents` | 1 | 1–12; native mode требует 1; reviewers ≤3 глобально |
 | `max_wall_seconds` | 7200 s | 1–604800; исходный deadline не сбрасывается |
 | `turn_timeout_seconds` | 1800 s | 1–86400; ограничен оставшимся deadline |
 | `max_tokens` | Отсутствует | 1–100000000; проверяется по reported usage между turns |
@@ -208,11 +208,12 @@ serialized packet при verify ограничен 4 MiB. Слишком бол�
 
 ## LSP code
 
-`AGENT_HARNESS_LSP_BACKEND=python|native` выбирает transport; default `python`.
-Native доступен только на квалифицированном Linux x86_64/glibc с проверенным
-bundle, без автоматического fallback после ошибки. Snapshot backend задаётся
-отдельно. Для rollback уберите переменную или задайте `python` перед новой
-Session; подробности — [LSP reference](LSP_RU.md).
+`AGENT_HARNESS_LSP_BACKEND=auto|python|native` выбирает transport; default
+`auto` предпочитает проверенный Rust helper на Linux/Windows, без helper
+выбирает Python. Явный `native`, повреждённый bundle и ошибка handshake
+завершаются ошибкой без повторного запуска через Python. Snapshot backend
+задаётся отдельно. Явный возврат — `python` перед новой Session; подробности
+и platform prerequisites — [LSP reference](LSP_RU.md).
 
 | Команда | Обязательные аргументы | Особенности |
 | --- | --- | --- |
@@ -237,14 +238,13 @@ points; провод LSP — UTF-16. new-name: 1–256 символов без c
 
 | Команда / переменная | Default и поведение |
 | --- | --- |
-| `native status` | requested/selected/available/platform/path/build_info; adaptive policy при auto |
+| `native status` | requested/selected/available/platform/path/build_info; native preference при auto |
 | `native build [--offline]` | Explicit local build; нужны полный source checkout, Cargo и C toolchain; offline требует подготовленного Cargo cache |
 | `AGENT_HARNESS_BACKEND` | `auto`; также `python`, `native` |
 | `AGENT_HARNESS_NATIVE` | Не задана; optional существующий **абсолютный** executable для developer override |
 
-Auto при доступном проверенном binary выбирает Python для наблюдённого небольшого
-дерева `<512` файлов; native — для большого/неизвестного дерева. Counting ограничен
-20 ms и 64 каталогами; это routing hint, не inventory. `context map` вызывает
+Auto при доступном проверенном binary выбирает Rust для любого размера
+дерева. Без helper используется Python; размер дерева backend не меняет. `context map` вызывает
 обязательную native repomap операцию независимо от Python routing snapshot.
 Присутствующий повреждённый binary, неверный protocol, timeout или ошибка выполнения
 не маскируются fallback. Details — [native boundary](CONTEXT_AND_NATIVE_RU.md#native-backend-и-маршрутизация).

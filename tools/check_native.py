@@ -93,8 +93,7 @@ def parity(contract):
 
 
 def main():
-    # This command explicitly qualifies compiled execution, irrespective of the
-    # size-based auto selector used by ordinary small-workspace operations.
+    # This command requires compiled execution even when the helper is absent.
     os.environ["AGENT_HARNESS_BACKEND"] = "native"
     info = backend_info()
     assert info["selected"] == "native" and info["available"], "Compiled native backend is mandatory"

@@ -1,9 +1,11 @@
-"""Explicit Linux Tokio LSP transport; Python retains all semantic decisions.
+"""Linux/Windows Tokio LSP transport; Python retains semantic decisions.
 
-A helper remains an UNREAPED SID/PGID leader until owned-group cleanup. Do not
+On Linux a helper remains an UNREAPED SID/PGID leader until cleanup. Do not
 replace the WNOWAIT observation with Popen.poll/wait: that would allow PGID reuse
 and lose children after a helper crash. This is cooperative containment, not an
-OS sandbox against deliberately escaping servers.
+OS sandbox against deliberately escaping servers. Windows retains a private
+Job handle, assigns the suspended helper before execution, and verifies an
+empty Job before reporting cleanup.
 """
 from __future__ import annotations
 
@@ -64,6 +66,54 @@ def _identity(pid):
             "pgid": int(fields[2]), "sid": int(fields[3]), "state": fields[0].decode("ascii")}
 
 
+def select_backend(requested):
+    """Independent LSP policy; a present helper must pass its live handshake."""
+    if not isinstance(requested, str) or requested not in {"auto", "python", "native"}:
+        raise HarnessError("AGENT_HARNESS_LSP_BACKEND must be auto, python or native")
+    if requested != "auto":
+        return requested
+    if not (sys_platform_linux() or os.name == "nt"):
+        return "python"
+    return "native" if find_binary() is not None else "python"
+
+
+class _WindowsTree:
+    """Retain a private Job until all contained processes have stopped."""
+    def __init__(self, process):
+        from .runner import WindowsJob
+        from ctypes import wintypes
+        self.job = WindowsJob(process)
+        self.job.kernel.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        self.job.kernel.QueryInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int,
+                                                             ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p]
+
+    def resume(self, process):
+        self.job.resume_suspended_process(process)
+
+    def stop(self):
+        class Accounting(ctypes.Structure):
+            _fields_ = [(name, ctypes.c_int64) for name in ("user", "kernel", "period_user", "period_kernel")] + [
+                (name, ctypes.c_uint32) for name in ("faults", "total", "active", "terminated")]
+        handle = self.job.handle
+        if not handle:
+            return False
+        try:
+            if not self.job.kernel.TerminateJobObject(handle, 1):
+                return False
+            deadline = time.monotonic() + 1
+            while True:
+                info = Accounting()
+                if not self.job.kernel.QueryInformationJobObject(handle, 1, ctypes.byref(info), ctypes.sizeof(info), None):
+                    return False
+                if info.active == 0:
+                    return True
+                if time.monotonic() >= deadline:
+                    return False
+                time.sleep(0.01)
+        finally:
+            self.job.close()
+
+
 def _rpc(body):
     if not isinstance(body, str) or len(body.encode("utf-8")) > MAX_FRAME:
         raise HarnessError("Invalid native LSP message body")
@@ -96,15 +146,17 @@ def _rpc(body):
 
 
 class NativeTransport:
-    """One bounded helper + one language-server process group per Session."""
+    """One bounded helper and one owned language-server tree per Session."""
     def __init__(self, root, argv, deadline, on_message):
-        if not sys_platform_linux():
+        if not (sys_platform_linux() or os.name == "nt"):
             raise HarnessError("Native LSP transport is not qualified on this platform; select python")
-        _default_reaping()
+        if os.name != "nt":
+            _default_reaping()
         import uuid
         self.session_id = uuid.uuid4().hex
         self.root, self.argv, self.deadline, self.on_message = root, argv, deadline, on_message
         self._helper = None
+        self._windows_tree = None
         self.helper_identity = self.child_identity = None
         self.child_pid = None
         self.stderr_tail, self.stderr_bytes = bytearray(), 0
@@ -132,11 +184,17 @@ class NativeTransport:
         before = _stamp(binary)
         self._helper = subprocess.Popen([str(binary), "--lsp-session", self.session_id], cwd=self.root,
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                        bufsize=0, shell=False, start_new_session=True, close_fds=True)
+                                        bufsize=0, shell=False, start_new_session=os.name != "nt", close_fds=True,
+                                        creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP | 0x00000004) if os.name == "nt" else 0)
         try:
-            self.helper_identity = _identity(self._helper.pid)
-            if (self.helper_identity["pgid"], self.helper_identity["sid"]) != (self._helper.pid, self._helper.pid):
-                raise HarnessError("Native LSP helper is not its owned SID/PGID leader")
+            if os.name == "nt":
+                self._windows_tree = _WindowsTree(self._helper)
+                self.helper_identity = {"pid": self._helper.pid, "created": self.session_id, "pgid": None, "sid": None}
+                self._windows_tree.resume(self._helper)
+            else:
+                self.helper_identity = _identity(self._helper.pid)
+                if (self.helper_identity["pgid"], self.helper_identity["sid"]) != (self._helper.pid, self._helper.pid):
+                    raise HarnessError("Native LSP helper is not its owned SID/PGID leader")
             for target in (self._read, self._write, self._watch):
                 thread = threading.Thread(target=target, daemon=True)
                 self._threads.append(thread)
@@ -160,7 +218,13 @@ class NativeTransport:
                 # unreaped direct child is still ours even if /proc birth
                 # observation failed. Signal it directly, never an unknown
                 # numeric process group and never Popen.kill (which polls).
-                os.kill(self._helper.pid,signal.SIGKILL)
+                if os.name == "nt":
+                    if self._windows_tree is not None:
+                        self._windows_tree.stop()
+                    else:
+                        self._helper.kill()  # Still suspended: no user-mode descendants exist.
+                else:
+                    os.kill(self._helper.pid,signal.SIGKILL)
                 self._killed = True
                 self._stop.set()
                 self._helper.wait(timeout=2)
@@ -194,6 +258,14 @@ class NativeTransport:
         with self._lifecycle:
             if self._helper is None or self._killed or self._reaped:
                 return
+            if os.name == "nt":
+                self.cleanup_complete = self._windows_tree.stop()
+                self._killed = True
+                with self._condition:
+                    self._condition.notify_all()
+                if not self.cleanup_complete:
+                    raise HarnessError("Native LSP process job cleanup is unknown")
+                return
             pid = self._helper.pid
             try:
                 current = _identity(pid)  # Deliberately accepts a zombie anchor.
@@ -214,8 +286,9 @@ class NativeTransport:
                 if self._stop.is_set():
                     return
                 # WNOWAIT observes exit without releasing the group-ID anchor.
-                exited = os.waitid(os.P_PID, self._helper.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
-                if exited is not None or time.monotonic() >= self.deadline:
+                exited = (self._helper.poll() is not None) if os.name == "nt" else (
+                    os.waitid(os.P_PID, self._helper.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None)
+                if exited or time.monotonic() >= self.deadline:
                     self._kill_owned()
                     if not self.closing:
                         self._fail(HarnessError("Native LSP helper exited or session timed out"))
@@ -327,22 +400,24 @@ class NativeTransport:
                 common = {"protocol_version", "session_id", "sequence", "kind"}
                 kind = value.get("kind")
                 if kind == "ready":
+                    group = None if os.name == "nt" else self._helper.pid
                     if (sequence != 1 or set(value) != common | {"helper_pid", "pgid", "sid", "created", "version", "platform", "limits"}
-                            or value["helper_pid"] != self._helper.pid or value["pgid"] != self._helper.pid
-                            or value["sid"] != self._helper.pid or value["created"] != self.helper_identity["created"]
-                            or value["version"] != __version__ or value["platform"] != "linux" or value["limits"] != LIMITS):
+                            or value["helper_pid"] != self._helper.pid or value["pgid"] != group
+                            or value["sid"] != group or value["created"] != self.helper_identity["created"]
+                            or value["version"] != __version__ or value["platform"] != ("windows" if os.name == "nt" else "linux") or value["limits"] != LIMITS):
                         raise HarnessError("Native LSP ready capability mismatch")
                     self._ready.set()
                 elif kind == "process_started":
                     if (set(value) != common | {"child_pid", "pgid"} or self.child_pid is not None
                             or type(value["child_pid"]) is not int or value["child_pid"] <= 1
-                            or value["child_pid"] == self._helper.pid or value["pgid"] != self._helper.pid):
+                            or value["child_pid"] == self._helper.pid or value["pgid"] != (None if os.name == "nt" else self._helper.pid)):
                         raise HarnessError("Invalid native LSP child identity")
                     self.child_pid = value["child_pid"]
-                    try:
-                        self.child_identity = _identity(self.child_pid)
-                    except (OSError, ValueError, HarnessError):
-                        self.child_identity = None
+                    if os.name != "nt":
+                        try:
+                            self.child_identity = _identity(self.child_pid)
+                        except (OSError, ValueError, HarnessError):
+                            self.child_identity = None
                 elif kind == "message":
                     if set(value) != common | {"body"} or self.child_pid is None:
                         raise HarnessError("Invalid native LSP message envelope")
@@ -392,6 +467,8 @@ class NativeTransport:
         self._kill_owned()
 
     def _stopped_group(self):
+        if os.name == "nt":
+            return self.cleanup_complete
         pid = self._helper.pid
         deadline = time.monotonic() + 1
         while True:

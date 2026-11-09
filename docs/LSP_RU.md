@@ -5,23 +5,30 @@
 проверяемый план. Сервис, база данных и постоянный индекс harness не создаются.
 Серверы не входят в Python-пакет и не устанавливаются автоматически.
 
-По умолчанию LSP transport — Python. Явный `AGENT_HARNESS_LSP_BACKEND=native`
-выбирает Linux Tokio transport из проверенного native bundle. Один helper
-`--lsp-session <session-id>` обслуживает всю Session: initialize, didOpen,
-несколько RPC, server requests/notifications, shutdown и exit. Python сохраняет
+По умолчанию `AGENT_HARNESS_LSP_BACKEND=auto` выбирает Rust/Tokio при
+доступном проверенном helper. Без helper используется Python. Явный `native`
+требует Rust; `python` выбирает прежний transport. Повреждённый bundle, ошибка
+handshake или запуска завершают вызов: повторного запуска через Python нет.
+
+Один helper `--lsp-session <session-id>` обслуживает initialize, didOpen,
+RPC, server requests/notifications, shutdown и exit. Python сохраняет
 semantic API, URI/UTF-16 mapping, source checks, rename policy и запрет
 `workspace/applyEdit`. HTTP server и постоянный daemon не создаются.
 
-Этот backend квалифицирован только для Linux x86_64/glibc с доступной `/proc`
-process identity и обычным SIGCHLD без auto-reaping. Windows/macOS/ARM не
-квалифицированы: оставьте Python transport. Windows containment сохраняет
-прежний порядок suspended launch → private Job → resume. Ошибка явно выбранного
-native backend не вызывает повторный запуск через Python. Выбор snapshot
-`AGENT_HARNESS_BACKEND` от выбора LSP независим.
+На Windows helper создаётся suspended, привязывается к private kill-on-close
+Job и только затем продолжается; language server наследует Job. Cleanup
+завершает Job и проверяет отсутствие активных процессов. Закрытие parent
+также закрывает принадлежащий ему Job handle.
 
-Для возврата к Python задайте `AGENT_HARNESS_LSP_BACKEND=python` или уберите
-переменную перед новой Session. Не меняйте binary/backend во время работы
-сервера. Это не меняет установленный профиль Codex.
+Linux сохраняет SID/PGID anchor, `/proc` identity и default SIGCHLD без
+auto-reaping; текущая ABI-проверка требует x86_64/glibc. Windows и Linux
+проверяются отдельными native CI jobs. Наличие кода и workflow само по себе
+не является пройденной проверкой другого host. macOS/ARM transport этой
+доработкой не добавлен.
+
+Выбор snapshot `AGENT_HARNESS_BACKEND` независим от LSP. Для явного Python
+transport задайте `AGENT_HARNESS_LSP_BACKEND=python` перед новой Session.
+Не меняйте binary/backend во время работы сервера.
 
 Полный каталог flags/exit codes — [CLI reference](CLI_REFERENCE_RU.md#lsp-code).
 Для выбора между `rg`, heuristic RepoMap и semantic LSP см.

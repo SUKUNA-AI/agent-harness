@@ -1,6 +1,6 @@
 <?xml version='1.0' encoding='utf-8'?>
 <mxfile host="app.diagrams.net" agent="Native Agent Harness documentation" version="32.6.1" modified="2026-11-09T09:01:17Z">
-  <diagram id="managed-worktrees" name="DAG, worktrees и единая приёмка">
+  <diagram id="managed-worktrees" name="Managed v2: DAG и единая приёмка">
     <mxGraphModel dx="1400" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1155" pageHeight="1427" math="0" shadow="0" background="#FFFFFF">
       <root>
         <mxCell id="0" />
@@ -11,7 +11,7 @@
         <mxCell id="P" value="Plan v2: schema / semantic&#10;validation + quality gate" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="200" y="110" width="280" height="86" as="geometry" />
         </mxCell>
-        <mxCell id="Q" value="Ready set / critical-path&#10;heuristic" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+        <mxCell id="Q" value="Ready set: до 12 model sessions,&#10;reviewers ≤3; critical path" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="200" y="281" width="280" height="86" as="geometry" />
         </mxCell>
         <mxCell id="A" value="Codex A / owned worktree A" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">

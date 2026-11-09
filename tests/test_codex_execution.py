@@ -185,6 +185,22 @@ class CodexExecutionTests(unittest.TestCase):
         self.assertNotIn("--last", argv)
         self.assertFalse(any("danger" in x or x == "--yolo" for x in argv))
 
+    def test_managed_role_effort_is_per_invocation_and_not_persisted(self):
+        for effort in ("medium", "high", "ultra"):
+            with self.subTest(effort=effort):
+                argv = self.adapter.argv("fix", reasoning_effort=effort)
+                self.assertIn(f'model_reasoning_effort="{effort}"', argv)
+                self.assertIn('agents.enabled=false', argv)
+                self.assertEqual(self.run_fake("mode-check", reasoning_effort=effort, read_only=True)["status"], "completed")
+        self.assertFalse(any("model_reasoning_effort" in x for x in self.adapter.argv("fix")))
+        resumed = self.adapter.argv("fix", session_id="12345678-1234-1234-1234-123456789abc", reasoning_effort="high", read_only=True)
+        self.assertIn('model_reasoning_effort="high"', resumed)
+        self.assertIn('sandbox_mode="read-only"', resumed)
+        self.assertIn("resume", resumed)
+        for invalid in ("low", "max", "invalid", True, [], {}):
+            with self.assertRaises(HarnessError):
+                self.adapter.argv("fix", reasoning_effort=invalid)
+
     def test_observed_pre_turn_diagnostic_is_preserved_without_weakening_terminal_checks(self):
         result = self.run_fake("early-warning")
         self.assertEqual(result["status"], "completed", result)

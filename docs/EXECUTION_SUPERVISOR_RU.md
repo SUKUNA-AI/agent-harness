@@ -168,7 +168,7 @@ slot: старый root получает новый binding в другом св
 старый lease, неизвестный journal prefix или уже опубликованный invocation
 intent требуют reconciliation; отсутствие PID не является no-dispatch proof.
 
-Bounded ожидание пяти занятых slots даёт typed `BLOCKED_ENVIRONMENT`; истечение
+Bounded ожидание 12 занятых model slots или трёх reviewer slots даёт typed `BLOCKED_ENVIRONMENT`; истечение
 исходного deadline остаётся `TIMED_OUT`, cancellation — `CANCELLED`. Неизвестная
 ошибка slot/workspace acquisition сохраняется как controlled recovery с causal
 artifact. Пойманная ошибка входа в workspace lease может освободить точный

@@ -105,6 +105,13 @@
               "high"
             ]
           },
+          "reasoning_effort": {
+            "enum": [
+              "medium",
+              "high",
+              "ultra"
+            ]
+          },
           "impact": {
             "type": "integer",
             "minimum": 1,

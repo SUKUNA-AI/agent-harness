@@ -1,4 +1,4 @@
-"""Compiled Linux transport integration; Python semantic policy stays shared.
+"""Compiled Linux/Windows transport integration; semantic policy stays shared.
 
 Set AGENT_HARNESS_TEST_NATIVE_LSP to the current compiled native executable.
 Missing compiled capability is explicitly skipped in the portable unit suite;
@@ -22,17 +22,31 @@ BINARY = os.environ.get("AGENT_HARNESS_TEST_NATIVE_LSP")
 
 class NativeSelectionTests(unittest.TestCase):
     def test_default_and_explicit_backend_selection(self):
+        from agent_harness import lsp_native, native
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            with patch.dict(os.environ, {"AGENT_HARNESS_BACKEND": "native"}, clear=False):
+            with patch.dict(os.environ, {"AGENT_HARNESS_BACKEND": "native"}, clear=False), patch.object(lsp_native, "find_binary", return_value=None):
                 os.environ.pop("AGENT_HARNESS_LSP_BACKEND", None)
                 self.assertEqual("python", lsp.Session(root, [sys.executable]).backend)
                 self.assertEqual("native", lsp.Session(root, [sys.executable], backend="native").backend)
-            with self.assertRaises(HarnessError):
-                lsp.Session(root, [sys.executable], backend="unknown")
+            with patch.dict(os.environ, {"AGENT_HARNESS_BACKEND": "python"}, clear=False), patch.object(lsp_native, "find_binary", return_value=Path(sys.executable)), patch.object(lsp_native, "sys_platform_linux", return_value=True):
+                os.environ.pop("AGENT_HARNESS_LSP_BACKEND", None)
+                self.assertEqual("native", lsp.Session(root, [sys.executable]).backend)
+                self.assertEqual("python", lsp.Session(root, [sys.executable], backend="python").backend)
+            with patch.object(lsp_native, "find_binary", side_effect=HarnessError("invalid bundle")):
+                with self.assertRaisesRegex(HarnessError, "invalid bundle"):
+                    lsp.Session(root, [sys.executable], backend="auto")
+            for invalid in ("unknown", [], 1):
+                with self.assertRaises(HarnessError):
+                    lsp.Session(root, [sys.executable], backend=invalid)
+            manifest = {"schema_version": 1, "kind": "non_file", "files": {}, "external_inputs": {},
+                        "snapshot_scheme_version": 2, "topology_policy": "nofollow-ancestors-literal-leaf-v1", "content_digest": "fixture"}
+            with patch.dict(os.environ, {"AGENT_HARNESS_BACKEND": "auto"}), patch.object(native, "find_binary", return_value=Path(sys.executable)), patch.object(native, "invoke", return_value=manifest) as invoke:
+                self.assertEqual(manifest, native.snapshot({}))
+                invoke.assert_called_once()
 
 
-@unittest.skipUnless(BINARY and sys.platform.startswith("linux"), "Compiled Linux LSP capability not provided")
+@unittest.skipUnless(BINARY and (sys.platform.startswith("linux") or os.name == "nt"), "Compiled LSP capability not provided")
 class NativeLSPTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="native-lsp-test-")
@@ -78,7 +92,10 @@ class NativeLSPTests(unittest.TestCase):
         self.assertTrue(client._native_exit_admitted)
         self.assertTrue(transport.session_complete)
         self.assertFalse(identity_alive(child))
-        self.assertEqual(-9, transport._helper.returncode)
+        if os.name != "nt":
+            self.assertEqual(-9, transport._helper.returncode)
+        else:
+            self.assertIsNotNone(transport._helper.returncode)
 
     def test_semantic_query_and_stderr_tail_keeps_262144_positive_control(self):
         result = lsp.query(self.root, "a.py", server=self.server("stderr"), settings={"test": {"flag": True}})
@@ -125,10 +142,10 @@ if mode in {'sleep','flood','partial_descendant','devnull_descendant'}:
     stdio={} if mode=='partial_descendant' else {'stdin':subprocess.DEVNULL,'stdout':subprocess.DEVNULL,'stderr':subprocess.DEVNULL}
     child=subprocess.Popen([sys.executable,'-I','-c','import time;time.sleep(30)'],**stdio)
 fds={}
-for name in os.listdir('/proc/self/fd'):
+for name in os.listdir('/proc/self/fd') if sys.platform.startswith('linux') else []:
     try:fds[name]=os.readlink('/proc/self/fd/'+name)
     except OSError:pass
-record={'pid':os.getpid(),'child':child.pid if child else None,'pgid':os.getpgrp(),'sid':os.getsid(0),
+record={'pid':os.getpid(),'child':child.pid if child else None,'pgid':os.getpgrp() if os.name!='nt' else None,'sid':os.getsid(0) if os.name!='nt' else None,
         'argv':sys.argv[3:],'cwd':os.getcwd(),'env':os.environ.get('HARNESS_LSP_TEST_VALUE'),'fds':fds,'sent':0}
 receipt.write_text(json.dumps(record))
 def send(value):
@@ -215,6 +232,71 @@ class NativeLSPFixture:
         for key in ("pid", "child"):
             if record.get(key):
                 wait_until(lambda: process_identity(record[key]) is None)
+
+
+@unittest.skipUnless(BINARY and os.name == "nt", "Compiled Windows LSP capability not provided")
+class NativeLSPWindowsTests(NativeLSPFixture, unittest.TestCase):
+    def test_helper_crash_stops_server_and_grandchild(self):
+        from agent_harness.lsp_native import NativeTransport
+        transport = NativeTransport(self.root, self.argv("sleep"), time.monotonic()+8, lambda _: None).start()
+        try:
+            record = wait_until(self.record)
+            identities = [process_identity(record[key]) for key in ("pid", "child")]
+            self.assertTrue(all(identities))
+            transport._helper.kill()
+            wait_until(lambda: transport._killed)
+            with self.assertRaises(HarnessError):
+                transport.close(grace=0)
+            self.assertTrue(transport.cleanup_complete)
+            self.assertTrue(all(not identity_alive(item) for item in identities))
+        finally:
+            try:
+                transport.close(grace=0)
+            except HarnessError:
+                pass
+
+    def test_failed_job_assignment_never_runs_helper(self):
+        from agent_harness import lsp_native
+        from unittest.mock import Mock
+        process = Mock(pid=4242)
+        with patch.object(lsp_native.subprocess, "Popen", return_value=process) as spawn, patch.object(
+                lsp_native, "_WindowsTree", side_effect=HarnessError("injected job assignment failure")):
+            transport = lsp_native.NativeTransport(self.root, self.argv("sleep"), time.monotonic()+5, lambda _: None)
+            with self.assertRaisesRegex(HarnessError, "job assignment"):
+                transport.start()
+        self.assertTrue(spawn.call_args.kwargs["creationflags"] & 0x00000004)
+        process.kill.assert_called_once()
+        process.wait.assert_called_once()
+        self.assertFalse(self.receipt.exists())
+
+    def test_parent_crash_closes_job_and_stops_entire_tree(self):
+        import subprocess
+        source = self.base / "parent.py"
+        started = self.base / "started.json"
+        source.write_text('''
+import json,sys,time
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from agent_harness.lsp_native import NativeTransport
+transport=NativeTransport(Path(sys.argv[2]),json.loads(sys.argv[3]),time.monotonic()+20,lambda _:None).start()
+Path(sys.argv[4]).write_text(json.dumps({'helper':transport._helper.pid}))
+time.sleep(30)
+''', encoding="utf-8")
+        parent = subprocess.Popen([sys.executable, "-I", "-B", str(source), str(Path(lsp.__file__).resolve().parents[1]),
+                                   str(self.root), json.dumps(self.argv("sleep")), str(started)])
+        try:
+            record = wait_until(self.record)
+            wait_until(started.exists)
+            helper = json.loads(started.read_text())["helper"]
+            identities = [process_identity(pid) for pid in (helper, record["pid"], record["child"])]
+            self.assertTrue(all(identities))
+            parent.kill()
+            parent.wait(timeout=3)
+            wait_until(lambda: all(not identity_alive(item) for item in identities))
+        finally:
+            if parent.poll() is None:
+                parent.kill()
+                parent.wait(timeout=3)
 
 
 @unittest.skipUnless(BINARY and sys.platform.startswith("linux"), "Compiled Linux LSP capability not provided")

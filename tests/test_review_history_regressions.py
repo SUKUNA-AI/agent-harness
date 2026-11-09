@@ -48,10 +48,12 @@ class ReviewHistoryRegressions(unittest.TestCase):
         environment.start()
         self.addCleanup(environment.stop)
 
-    def controls(self, failures):
-        supervisor, fake = self.fixture(script_edit=review_failures(failures))
+    def controls(self, failures, *, wall_seconds=verified_fixture.VERIFIED_FLOW_WALL_SECONDS):
+        supervisor, fake = self.fixture(script_edit=review_failures(failures), wall_seconds=wall_seconds)
+        deadline = supervisor.state["deadline"]
         result = supervisor.start()
         self.assertEqual(result["status"], "ACCEPTED", supervisor.adapter.failure_summary(result))
+        self.assertEqual(supervisor.state["deadline"], deadline)
         records = supervisor.receipts().records()
         for record in records:
             validate_record(record)
@@ -70,7 +72,7 @@ class ReviewHistoryRegressions(unittest.TestCase):
         self.controls(["compiler alpha"])
 
     def test_two_distinct_repairable_failures_then_approval(self):
-        self.controls(["compiler alpha", "test beta"])
+        self.controls(["compiler alpha", "test beta"], wall_seconds=verified_fixture.TWO_PHASE_WALL_SECONDS)
 
     def test_repeated_failure_remains_bounded_no_progress(self):
         supervisor, fake = self.fixture(script_edit=review_failures(["test alpha", "test alpha"]))
@@ -79,8 +81,8 @@ class ReviewHistoryRegressions(unittest.TestCase):
         self.assertFalse(any(r["record_type"] in {"review", "coverage"} for r in supervisor.receipts().records()))
         self.assertIsNone(supervisor._core().state()["accepted"])
 
-    def crash_at(self, boundary, *, failures=()):
-        supervisor, fake = self.fixture(script_edit=review_failures(list(failures)))
+    def crash_at(self, boundary, *, failures=(), wall_seconds=verified_fixture.VERIFIED_FLOW_WALL_SECONDS):
+        supervisor, fake = self.fixture(script_edit=review_failures(list(failures)), wall_seconds=wall_seconds)
         publish = ExecutionReceipts.publish
         def crash(instance, record):
             value = publish(instance, record)
@@ -94,9 +96,11 @@ class ReviewHistoryRegressions(unittest.TestCase):
     def recover(self, supervisor, fake):
         calls = fake.with_suffix(".calls").read_bytes()
         completions = [r for r in supervisor.receipts().records() if r["record_type"] == "completion"]
+        deadline = supervisor.state["deadline"]
         recovered = Supervisor(supervisor.path, adapter=supervisor.adapter)
         result = recovered.resume()
         self.assertEqual(result["status"], "ACCEPTED", recovered.adapter.failure_summary(result))
+        self.assertEqual(recovered.state["deadline"], deadline)
         self.assertEqual(fake.with_suffix(".calls").read_bytes(), calls)
         records = recovered.receipts().records()
         self.assertEqual([r for r in records if r["record_type"] == "completion"], completions)
@@ -106,16 +110,17 @@ class ReviewHistoryRegressions(unittest.TestCase):
         return recovered
 
     def test_crash_after_completion_recovers_exact_raw_without_model(self):
-        self.recover(*self.crash_at("completion", failures=("compiler alpha", "test beta")))
+        self.recover(*self.crash_at("completion", failures=("compiler alpha", "test beta"),
+                                    wall_seconds=verified_fixture.TWO_PHASE_WALL_SECONDS))
 
     def test_crash_between_coverage_and_review_recovers_without_model(self):
-        self.recover(*self.crash_at("coverage"))
+        self.recover(*self.crash_at("coverage", wall_seconds=verified_fixture.TWO_PHASE_WALL_SECONDS))
 
     def test_crash_after_review_before_state_recovers_without_model(self):
-        self.recover(*self.crash_at("review"))
+        self.recover(*self.crash_at("review", wall_seconds=verified_fixture.TWO_PHASE_WALL_SECONDS))
 
-    def assert_raw_required(self, boundary):
-        supervisor, fake = self.crash_at(boundary)
+    def assert_raw_required(self, boundary, *, wall_seconds=verified_fixture.VERIFIED_FLOW_WALL_SECONDS):
+        supervisor, fake = self.crash_at(boundary, wall_seconds=wall_seconds)
         records = supervisor.receipts().records()
         completion = next(r for r in records if r["record_type"] == "completion" and r["node_id"] == "@review")
         raw = Path(completion["payload"]["logs"]["stdout"])
@@ -140,7 +145,7 @@ class ReviewHistoryRegressions(unittest.TestCase):
         self.assert_raw_required("completion")
 
     def test_missing_or_corrupt_raw_after_publication_cannot_approve(self):
-        self.assert_raw_required("review")
+        self.assert_raw_required("review", wall_seconds=verified_fixture.TWO_PHASE_WALL_SECONDS)
 
     def test_deterministic_publication_replay_and_same_id_conflict(self):
         supervisor, fake = self.crash_at("completion")
@@ -208,8 +213,8 @@ class ReviewHistoryRegressions(unittest.TestCase):
         self.assertEqual(fake.with_suffix(".calls").read_bytes(), calls)
         self.assertIsNone(supervisor._core().state()["accepted"])
 
-    def legacy_coverage(self, *, conflict=False):
-        supervisor, fake = self.fixture()
+    def legacy_coverage(self, *, conflict=False, wall_seconds=verified_fixture.VERIFIED_FLOW_WALL_SECONDS):
+        supervisor, fake = self.fixture(wall_seconds=wall_seconds)
         publish = ExecutionReceipts.publish
         def legacy(instance, record):
             if record["record_type"] == "coverage":
@@ -225,7 +230,7 @@ class ReviewHistoryRegressions(unittest.TestCase):
         return supervisor, fake
 
     def test_legacy_coverage_only_recovery_keeps_original_id_and_bytes(self):
-        supervisor, fake = self.legacy_coverage()
+        supervisor, fake = self.legacy_coverage(wall_seconds=verified_fixture.TWO_PHASE_WALL_SECONDS)
         before = next(r for r in supervisor.receipts().records() if r["record_type"] == "coverage")
         projection = supervisor.store.path("receipts/" + before["record_id"] + ".yaml")
         original = projection.read_bytes()

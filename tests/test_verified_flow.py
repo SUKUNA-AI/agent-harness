@@ -39,6 +39,12 @@ def legacy_verified_creation(supervisor, material):
     supervisor._save('fixture frozen v2 creation; no implicit quality upgrade')
 
 
+VERIFIED_FLOW_WALL_SECONDS = 300
+# Two-phase fixtures exercise an initial flow and one recovery or repair flow
+# under a single persisted deadline. Each phase can use the single-flow budget.
+TWO_PHASE_WALL_SECONDS = 2 * VERIFIED_FLOW_WALL_SECONDS
+
+
 class VerifiedFlowTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -48,14 +54,15 @@ class VerifiedFlowTests(unittest.TestCase):
         self.environment.start()
         self.addCleanup(self.environment.stop)
 
-    def fixture(self, *, verified=True, attempts=3, script_edit=None, plan_edit=None, contract_edit=None, planning_rounds=None, legacy=False):
+    def fixture(self, *, verified=True, attempts=3, script_edit=None, plan_edit=None, contract_edit=None,
+                planning_rounds=None, legacy=False, wall_seconds=VERIFIED_FLOW_WALL_SECONDS):
         supervisor, fake = durability.ExecutionDurabilityTests().fixture(self.root)
         contract = deepcopy(supervisor.contract)
         plan_path = self.root / "plan.yaml"
         plan = load(plan_path, "agent-plan.schema.json")
-        contract["budgets"].update(max_wall_seconds=300, max_attempts=attempts)
+        contract["budgets"].update(max_wall_seconds=wall_seconds, max_attempts=attempts)
         for n in plan["tasks"]:
-            n.update(max_attempts=attempts, max_wall_seconds=300)
+            n.update(max_attempts=attempts, max_wall_seconds=wall_seconds)
         if verified:
             contract["schema_version"] = 2
             contract["memory"] = True
@@ -217,12 +224,14 @@ if manifest:
         self.assertIsNone(supervisor._core().state()["accepted"])
 
     def test_changed_integrated_source_invalidates_requirement_frontier(self):
-        supervisor, _ = self.fixture()
+        supervisor, _ = self.fixture(wall_seconds=TWO_PHASE_WALL_SECONDS)
+        deadline = supervisor.state["deadline"]
         result = supervisor.start()
         self.assertEqual(result["status"], "ACCEPTED", result)
         (Path(result["cwd"]) / "left.py").write_text("VALUE = 3\n")
         status = supervisor.status(verify=True)
         self.assertEqual(status["status"], "STALE")
+        self.assertEqual(supervisor.state["deadline"], deadline)
         self.assertFalse(status["progress"]["execution_complete"])
 
     def test_integrated_ancestor_regression_allows_only_responsible_repair(self):
@@ -231,11 +240,14 @@ if manifest:
             value["node_checks"][1]["argv"][-1] = "from pathlib import Path; assert any('VALUE = '+str(v) in Path('right.py').read_text() for v in (42,43))"
         def script(value):
             return value.replace("if mode in ('left','right'):target=mode+'.py'", "if mode in ('left','right'):target=mode+'.py'\nif mode=='right':\n marker=pathlib.Path(__file__).with_suffix('.right-seen');value=43 if marker.exists() else 42;marker.write_text('seen')")
-        supervisor, fake = self.fixture(contract_edit=contract, script_edit=script)
+        supervisor, fake = self.fixture(contract_edit=contract, script_edit=script,
+                                        wall_seconds=TWO_PHASE_WALL_SECONDS)
+        deadline = supervisor.state["deadline"]
         result = supervisor.start()
         self.assertEqual(result["status"], "ACCEPTED", result)
         self.assertEqual(supervisor.store.read("agents/right.yaml")["attempts_used"], 2)
         self.assertIn("VALUE = 43", (Path(result["cwd"]) / "right.py").read_text())
+        self.assertEqual(supervisor.state["deadline"], deadline)
 
     def test_independent_integration_regression_repairs_responsible_writer(self):
         # The same cross-file regression must be checked without a dependency
@@ -276,11 +288,14 @@ if manifest:
         def script(value):
             return value.replace("if mode in ('left','right'):target=mode+'.py'",
                 "if mode in ('left','right','zzobserver'):target=mode+'.py'\nif mode=='right':\n marker=pathlib.Path(__file__).with_suffix('.right-seen');value=43 if marker.exists() else 42;marker.write_text('seen')")
-        supervisor, fake = self.fixture(contract_edit=contract, plan_edit=plan, script_edit=script)
+        supervisor, fake = self.fixture(contract_edit=contract, plan_edit=plan, script_edit=script,
+                                        wall_seconds=TWO_PHASE_WALL_SECONDS)
+        deadline = supervisor.state["deadline"]
         capabilities = supervisor.adapter.capabilities
         with patch.object(supervisor.adapter, "capabilities", lambda: dict(capabilities(), native_children_disabled=True)):
             result = supervisor.start()
         self.assertEqual(result["status"], "ACCEPTED", result)
+        self.assertEqual(supervisor.state["deadline"], deadline)
         for name, attempts in (("left", 1), ("right", 2), ("zzobserver", 1)):
             self.assertEqual(supervisor.store.read("agents/" + name + ".yaml")["attempts_used"], attempts)
         records = supervisor.receipts().records()
@@ -544,7 +559,7 @@ if manifest:
         from agent_harness.execution_receipts import ExecutionReceipts
         def script(value):
             return value.replace("if mode=='permission':", "if mode=='managed' and 'resume' not in args:event('turn.failed',error={'message':'transient integration failure'});raise SystemExit(1)\nif mode=='permission':")
-        supervisor, fake = self.fixture(script_edit=script)
+        supervisor, fake = self.fixture(script_edit=script, wall_seconds=TWO_PHASE_WALL_SECONDS)
         deadline = supervisor.state["deadline"]
         real = ExecutionReceipts.completion
         def complete(receipts, intent, result, **options):
@@ -564,7 +579,8 @@ if manifest:
     def test_committed_repair_decision_is_not_a_second_failed_attempt_on_resume(self):
         def script(value):
             return value.replace("if mode=='permission':", "if mode=='managed' and 'resume' not in args:event('turn.failed',error={'message':'transient integration failure'});raise SystemExit(1)\nif mode=='permission':")
-        supervisor, _ = self.fixture(script_edit=script)
+        supervisor, _ = self.fixture(script_edit=script, wall_seconds=TWO_PHASE_WALL_SECONDS)
+        deadline = supervisor.state["deadline"]
         save = supervisor._save
         def crash_after_decision(reason):
             result = save(reason)
@@ -579,11 +595,13 @@ if manifest:
         self.assertEqual(result["status"], "ACCEPTED", result)
         self.assertEqual(recovered.state["attempts_used"], 2)
         self.assertEqual(len(recovered.state["failure_history"]), 1)
+        self.assertEqual(recovered.state["deadline"], deadline)
 
     def test_prepared_core_repair_attempt_survives_a_second_crash(self):
         def script(value):
             return value.replace("if mode=='permission':", "if mode=='managed' and 'resume' not in args:event('turn.failed',error={'message':'transient integration failure'});raise SystemExit(1)\nif mode=='permission':")
-        supervisor, _ = self.fixture(script_edit=script)
+        supervisor, _ = self.fixture(script_edit=script, wall_seconds=TWO_PHASE_WALL_SECONDS)
+        deadline = supervisor.state["deadline"]
         prepare = supervisor._new_core_attempt
         def crash_after_prepare(reason):
             prepare(reason)
@@ -594,8 +612,10 @@ if manifest:
         # root model reservations are consumed across these three generations.
         self.assertEqual(len(supervisor._core().state()["attempts"]), 3)
         recovered = Supervisor(supervisor.path, adapter=supervisor.adapter)
-        self.assertEqual(recovered.resume()["status"], "ACCEPTED")
+        result = recovered.resume()
+        self.assertEqual(result["status"], "ACCEPTED", recovered.adapter.failure_summary(result))
         self.assertEqual(len(recovered._core().state()["attempts"]), 3)
+        self.assertEqual(recovered.state["deadline"], deadline)
 
     def test_null_process_cleanup_keeps_lease_unresolved_on_resume(self):
         from agent_harness.agent_lifecycle import GlobalSlots
@@ -637,14 +657,16 @@ sup.start()
     def test_equal_independent_failures_are_counted_per_work_item(self):
         def script(value):
             return value.replace("if mode=='permission':", "if mode in ('left','right') and 'resume' not in args:event('turn.failed',error={'message':'same transient failure'});raise SystemExit(1)\nif mode=='permission':")
-        supervisor, _ = self.fixture(script_edit=script,
+        supervisor, _ = self.fixture(script_edit=script, wall_seconds=TWO_PHASE_WALL_SECONDS,
             plan_edit=lambda p: p["tasks"][1].update(depends_on=[]),
             contract_edit=lambda c: c["budgets"].update(max_concurrent_managed_agents=2))
+        deadline = supervisor.state["deadline"]
         capabilities = supervisor.adapter.capabilities
         with patch.object(supervisor.adapter, "capabilities", lambda: dict(capabilities(), native_children_disabled=True)):
             result = supervisor.start()
         self.assertEqual(result["status"], "ACCEPTED", result)
         self.assertTrue(all(supervisor.store.read("agents/" + name + ".yaml")["attempts_used"] == 2 for name in ("left", "right")))
+        self.assertEqual(supervisor.state["deadline"], deadline)
 
     def test_unchanged_node_check_failure_stops_with_a_valid_terminal_transition(self):
         def script(value):
@@ -659,7 +681,9 @@ sup.start()
             value["acceptance"][0]["argv"][-1] = "from pathlib import Path; assert 'REPAIRED' in Path('left.py').read_text()"
         def script(value):
             return value.replace("if mode=='permission':", "if mode=='managed' and 'resume' in args:pathlib.Path('left.py').write_text('VALUE = 42\\n# REPAIRED\\n')\nif mode=='permission':")
-        supervisor, _ = self.fixture(script_edit=script, contract_edit=contract)
+        supervisor, _ = self.fixture(script_edit=script, contract_edit=contract,
+                                     wall_seconds=TWO_PHASE_WALL_SECONDS)
+        deadline = supervisor.state["deadline"]
         save = supervisor._save
         def crash_after_decision(reason):
             result = save(reason)
@@ -673,9 +697,11 @@ sup.start()
         self.assertEqual(result["status"], "ACCEPTED", result)
         self.assertEqual(recovered.state["attempts_used"], 2)
         self.assertEqual(len(recovered.state["failure_history"]), 1)
+        self.assertEqual(recovered.state["deadline"], deadline)
 
     def test_cap_one_uses_structured_plan_without_an_explicit_plan_argument(self):
-        supervisor, fake = self.fixture()
+        supervisor, fake = self.fixture(wall_seconds=TWO_PHASE_WALL_SECONDS)
+        deadline = supervisor.state["deadline"]
         plan_file = self.root / "plan.yaml"
         script = fake.read_text()
         planner = "if 'Return a complete map of coherent bounded outcomes.' in prompt:\n plan=json.loads(" + repr(json.dumps(load(plan_file))) + ")\n event('item.completed',item={'type':'agent_message','text':json.dumps(plan)});event('turn.completed',usage={'input_tokens':10,'output_tokens':3});raise SystemExit\n"
@@ -683,6 +709,7 @@ sup.start()
         supervisor.plan_input = None
         result = supervisor.start()
         self.assertEqual(result["status"], "ACCEPTED", result)
+        self.assertEqual(supervisor.state["deadline"], deadline)
         self.assertEqual(len(result["progress"]["nodes"]), 2)
         self.assertTrue(any(r["record_type"] == "invocation_intent" and r["node_id"] == "@planner" for r in supervisor.receipts().records()))
 

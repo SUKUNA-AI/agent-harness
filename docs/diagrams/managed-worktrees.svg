@@ -32,8 +32,8 @@
           </g>
           <g>
             <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);">
-              <text x="346" y="333.5">Ready set / critical-path</text>
-              <text x="346" y="351.5">heuristic</text>
+              <text x="346" y="333.50">Ready set: до 12 model sessions,</text>
+              <text x="346" y="351.50">reviewers ≤3; critical path</text>
             </g>
           </g>
         </g>

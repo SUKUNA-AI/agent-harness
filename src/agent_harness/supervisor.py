@@ -12,7 +12,7 @@ import time
 import uuid
 
 from . import __version__
-from .core import HarnessError, Run, digest, identity_alive, now, snapshot
+from .core import AcceptanceDeadlineExhausted, HarnessError, Run, digest, identity_alive, now, snapshot
 from .runner import run_check, gate, redact
 from .supervisor_store import SupervisorStore, atomic_write
 from .work_contract import load_contract, legacy_contract, deadline_for, source_revision
@@ -873,6 +873,8 @@ class Supervisor:
             if self.state["status"] == "FREEZING":
                 try:
                     self._verify()
+                except AcceptanceDeadlineExhausted as error:
+                    self.transition("TIMED_OUT", str(error))
                 except HarnessError as error:
                     target = "FAILED_TERMINAL" if "scope" in str(error).lower() or "outside" in str(error).lower() else "UNKNOWN_OUTCOME"
                     self.transition(target, "Independent verification could not establish acceptance: " + str(error))

@@ -8,6 +8,24 @@
 Документация в `main` может уточняться позднее; опубликованный тег и архив
 сохраняют исходный состав поставки.
 
+## Текущий main после выпуска
+
+В `main` дополнительно объединены изменения `fix/native-session-bootstrap`
+до `582c5d7` и `codex/managed-12-reviewer-effort-20261108` до `da5c6d4`:
+
+- Сохраняются исходные deadline recovery; доказанное истечение даёт `timed_out`.
+  Захваченные YAML/schema inputs валидируются без повторного чтения/валидации.
+- До 12 global managed sessions и не более трёх reviewer на общий state root.
+- Per-invocation effort по роли/риску; настройки координатора сохраняются.
+- Rust snapshot предпочитается для любого размера дерева. LSP auto предпочитает
+  Rust на Linux/Windows; Windows использует private Job containment.
+- Устаревшие отдельные release/review Markdown удалены, действующие guides и
+  диаграммы синхронизированы. GitHub Releases и их assets сохранены.
+
+Эти изменения не входят в ранее опубликованный ZIP ниже. Для текущего поведения
+установите source/bundle выбранного commit `main`; проверяйте CI именно этого
+commit. Старые native bundles не подходят при изменённом native source digest.
+
 ## Что изменилось
 
 - **Native-сессия.** Установщик добавляет SessionStart handler и owned launcher.

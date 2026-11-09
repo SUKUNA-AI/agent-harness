@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 import time
 
-from .core import HarnessError, Run, _os_lock, digest
+from .core import AcceptanceDeadlineExhausted, HarnessError, Run, _os_lock, digest
 from .supervisor_store import _parents, _ordinary
 
 MAX_DEPTH = 32
@@ -113,7 +113,7 @@ def commit_guard(run, observed, *, timeout=30, allow_root_change=False):
                 raise HarnessError("unverifiable_dependency: physical store identity changed")
             current.assert_current(item["state"], item["contract"])
         if time.monotonic() >= until:
-            raise HarnessError("GATE_DEADLINE_EXHAUSTED: dependency commit deadline reached before publication")
+            raise AcceptanceDeadlineExhausted("GATE_DEADLINE_EXHAUSTED: dependency commit deadline reached before publication")
         yield actual
 
 

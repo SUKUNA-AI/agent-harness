@@ -70,12 +70,36 @@ jobs:
       - run: cargo +1.90.0 test --release --manifest-path native/Cargo.toml --locked
         working-directory: .
       - run: python tools/build_native.py
+      - name: Compiled LSP transport containment and protocol
+        shell: python {0}
+        run: |
+          import os
+          import sys
+          import unittest
+          sys.path[:0] = ["src", "tests"]
+          from agent_harness.native import find_binary
+          os.environ["AGENT_HARNESS_TEST_NATIVE_LSP"] = str(find_binary(required=True))
+          names = ["test_native_lsp"] if os.name != "nt" else [
+              "test_native_lsp.NativeSelectionTests", "test_native_lsp.NativeLSPTests",
+              "test_native_lsp.NativeLSPWindowsTests"]
+          suite = unittest.defaultTestLoader.loadTestsFromNames(names)
+          if os.name != "nt":
+              # The separate Windows class is deliberately inapplicable here.
+              import test_native_lsp
+              suite = unittest.TestSuite(unittest.defaultTestLoader.loadTestsFromTestCase(cls)
+                  for name, cls in vars(test_native_lsp).items()
+                  if isinstance(cls, type) and issubclass(cls, unittest.TestCase)
+                  and cls is not test_native_lsp.NativeLSPWindowsTests)
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          raise SystemExit(not result.wasSuccessful() or bool(result.skipped) or result.testsRun == 0)
       - run: python tools/check_native.py
         env:
           AGENT_HARNESS_BACKEND: native
       - run: python tools/check_native_build.py
       - run: npm install --prefix .test-tmp/language-tools --no-audit --no-fund --ignore-scripts pyright@1.1.414
       - run: python tools/check_lsp.py
+        env:
+          AGENT_HARNESS_LSP_BACKEND: native
       - run: python tools/release_check.py
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

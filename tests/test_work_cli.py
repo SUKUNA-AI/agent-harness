@@ -10,7 +10,7 @@ import time
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from agent_harness.strict_yaml import dump
+from agent_harness.strict_yaml import dump, load
 from test_work_supervisor import FAKE
 from unittest.mock import patch
 
@@ -37,9 +37,9 @@ class WorkCLITests(unittest.TestCase):
         return [sys.executable, "-I", "-B", str(self.tool), "work", action,
                 "--run-dir", str(self.run_dir), "--format", "json", *extra]
 
-    def command(self, action, *extra, expected=0):
+    def command(self, action, *extra, expected=0, watchdog=45):
         result = subprocess.run(self.argv(action, *extra), cwd=self.source,
-            env=self.environment, capture_output=True, text=True, encoding="utf-8", timeout=45)
+            env=self.environment, capture_output=True, text=True, encoding="utf-8", timeout=watchdog)
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
         return json.loads(result.stdout)
 
@@ -53,7 +53,9 @@ class WorkCLITests(unittest.TestCase):
                 "--state-dir", str(self.root / "state")]
 
     def test_cli_repair_status_watch_report_and_accepted_resume(self):
-        result = self.command("start", *self.start_args("repair"))
+        args = self.start_args("repair")
+        watchdog = load(self.root / "task.yaml")["budgets"]["max_wall_seconds"]
+        result = self.command("start", *args, watchdog=watchdog)
         self.assertEqual(result["status"], "ACCEPTED")
         self.assertEqual(self.fake.with_suffix(".calls").read_text().splitlines(), ["exec", "resume"])
         status = self.command("status", "--summary", "--verify-evidence")

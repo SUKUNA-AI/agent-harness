@@ -1,7 +1,7 @@
 """On-demand model leases and isolated Git worktrees, without a daemon."""
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 import os
 import subprocess
@@ -24,6 +24,9 @@ LEASE_SCHEMA = {"type": "object", "additionalProperties": False,
                     "tree_cleanup_required": {"type": "boolean"},
                     "child_identity": {**IDENTITY_SCHEMA, "type": ["object", "null"]}},
                 "required": ["schema_version", "run_id", "task_id", "role", "identity", "created_at", "lease_id", "status", "child_identity"]}
+
+MAX_MANAGED_MODEL_SLOTS = 12
+MAX_CONCURRENT_REVIEWERS = 3
 
 
 class InvocationUnresolved(HarnessError):
@@ -130,7 +133,7 @@ class ModelLease:
 
 
 class GlobalSlots:
-    """All managed planners/workers/reviewers share five OS-backed leases."""
+    """Managed model invocations share 12 leases, with at most three reviewers."""
     def __init__(self, state_dir, *, create=True):
         from .supervisor_store import SupervisorStore
         self.directory = Path(state_dir) / "global-model-slots"
@@ -140,7 +143,7 @@ class GlobalSlots:
         if self.store is None:
             return []
         rows = []
-        for slot in range(5):
+        for slot in range(MAX_MANAGED_MODEL_SLOTS):
             name = "slot-" + str(slot) + ".yaml"
             if not self.store.path(name).exists():
                 continue
@@ -214,57 +217,89 @@ class GlobalSlots:
 
     @contextmanager
     def acquire(self, run_id, task_id, role, *, cancel_file=None, timeout=60):
-        from .strict_yaml import dump
+        start = time.monotonic()
         if self.store is None:
             from .supervisor_store import SupervisorStore
             self.store = SupervisorStore(self.directory)
-        start = time.monotonic()
-        while True:
+        def check_admission():
             if cancel_file and Path(cancel_file).exists():
                 raise SlotWaitCancelled("Cancelled while waiting for a global model slot")
-            for slot in range(5):
-                # Exclusive OS leases, no PID-only slot release or mutable active=false.
-                guard = self.store.root / ("slot-" + str(slot) + ".guard")
-                if guard.is_symlink():
-                    raise HarnessError("Unsafe model slot guard")
-                context = _os_lock(guard)
-                try:
-                    context.__enter__()
-                except HarnessError as error:
-                    if "busy" in str(error).lower():
-                        continue
+            if time.monotonic() - start >= timeout:
+                raise SlotCapacityUnavailable("Managed model or reviewer capacity is exhausted")
+        reviewer_guard = self.store.root / "reviewer-admission.guard"
+        while True:
+            check_admission()
+            admission = nullcontext()
+            if role == "reviewer":
+                if reviewer_guard.is_symlink():
+                    raise HarnessError("Unsafe reviewer admission guard")
+                admission = _os_lock(reviewer_guard)
+            selected = None
+            try:
+                # Serialize reviewer admission across *all* runs sharing this
+                # state root. Hold this lock only while reserving a lease, not
+                # during the model invocation.
+                with admission:
+                    if role != "reviewer" or sum(row["unresolved"] and row["role"] == "reviewer"
+                                                       for row in self.inventory()) < MAX_CONCURRENT_REVIEWERS:
+                        for slot in range(MAX_MANAGED_MODEL_SLOTS):
+                            guard = self.store.root / ("slot-" + str(slot) + ".guard")
+                            if guard.is_symlink():
+                                raise HarnessError("Unsafe model slot guard")
+                            context = _os_lock(guard)
+                            try:
+                                context.__enter__()
+                            except HarnessError as error:
+                                if "busy" in str(error).lower():
+                                    continue
+                                raise
+                            name = "slot-" + str(slot) + ".yaml"
+                            try:
+                                check_admission()
+                                if self.store.path(name).exists():
+                                    previous = self.store.read(name, LEASE_SCHEMA)
+                                    if previous["status"] != "released":
+                                        # A dead process alone never proves that its
+                                        # descendants stopped; retain the lease.
+                                        context.__exit__(None, None, None)
+                                        continue
+                                lease = {"schema_version": 1, "run_id": run_id, "task_id": task_id,
+                                         "role": role, "identity": process_identity(os.getpid()),
+                                         "created_at": now(), "lease_id": uuid.uuid4().hex,
+                                         "status": "reserved", "child_identity": None}
+                                ownership = ModelLease(self.store, name, lease)
+                                ownership.wait_seconds = time.monotonic() - start
+                                # Inventory, locking, reads and process identity
+                                # probes must not extend the original wait budget.
+                                check_admission()
+                                self.store.write(name, lease, LEASE_SCHEMA)
+                                selected = (ownership, context)
+                                break
+                            except BaseException:
+                                context.__exit__(None, None, None)
+                                raise
+            except HarnessError as error:
+                if "busy" not in str(error).lower():
                     raise
-                name = "slot-" + str(slot) + ".yaml"
+            if selected is not None:
+                ownership, context = selected
                 try:
-                    if self.store.path(name).exists():
-                        previous = self.store.read(name, LEASE_SCHEMA)
-                        if previous["status"] != "released":
-                            # Neither a dead controller nor a dead leader proves
-                            # its descendants stopped. Only explicit completion
-                            # can release a previously reserved/active slot.
-                            context.__exit__(None, None, None)
-                            continue
-                except BaseException:
-                    context.__exit__(None, None, None)
-                    raise
-                lease = {"schema_version": 1, "run_id": run_id, "task_id": task_id,
-                         "role": role, "identity": process_identity(os.getpid()),
-                         "created_at": now(), "lease_id": uuid.uuid4().hex,
-                         "status": "reserved", "child_identity": None}
-                ownership = ModelLease(self.store, name, lease)
-                ownership.wait_seconds = time.monotonic() - start
-                try:
-                    self.store.write(name, lease, LEASE_SCHEMA)
+                    try:
+                        check_admission()
+                    except (SlotWaitCancelled, SlotCapacityUnavailable):
+                        # No caller/model has observed this reservation yet.
+                        # A slow durable write must not dispatch after expiry.
+                        ownership.complete()
+                        raise
                     yield ownership
                     return
                 finally:
-                    # Keep a historical ownership receipt. The guard, not stale YAML, is the lease.
+                    # Historical ownership receipts remain for recovery.
                     try:
                         ownership.close()
                     finally:
                         context.__exit__(None, None, None)
-            if time.monotonic() - start >= timeout:
-                raise SlotCapacityUnavailable("All five global model slots are busy")
+            check_admission()
             time.sleep(0.1)
 
 

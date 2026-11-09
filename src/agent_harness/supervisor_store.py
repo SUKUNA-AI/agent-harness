@@ -376,7 +376,9 @@ class SupervisorStore:
             if not line or len(line) > strict_yaml.MAX_BYTES:
                 raise HarnessError("Invalid or oversized journal record")
             try:
-                record = strict_yaml.loads(line, JOURNAL_READ_SCHEMA)
+                if index == 1:
+                    schema = strict_yaml._schema(JOURNAL_READ_SCHEMA)
+                record = strict_yaml.loads(line, schema)
             except (ValueError, UnicodeError) as error:
                 raise HarnessError("Corrupt journal record " + str(index)) from error
             expected = dict(record)

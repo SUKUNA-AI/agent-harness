@@ -6,7 +6,7 @@
 
 | Файл внутри bundle | Назначение |
 | --- | --- |
-| `harness-native` или `harness-native.exe` | Rust scanner/snapshot и Tree-sitter RepoMap; Linux opt-in LSP stream mode |
+| `harness-native` или `harness-native.exe` | Rust scanner/snapshot, Tree-sitter RepoMap и Linux/Windows LSP stream mode |
 | `build-info.json` | Версия, протокол, host target, toolchain, source digest, SHA-256 и размер бинарника |
 | `licenses/index.json` и notices | Закреплённые зависимости и их лицензии |
 
@@ -23,7 +23,7 @@ python tools/release_check.py
 ```
 
 `native status` показывает requested/selected backend, platform и metadata
-найденного bundle. `adaptive` соответствует `auto` при доступном helper.
+найденного bundle. `auto` предпочитает Rust для любого размера дерева при доступном helper.
 Версия и protocol должны соответствовать Python package; hash бинарника
 проверяется перед использованием. `release_check` дополнительно сверяет source
 fingerprint и notices. Проверка несовместимого найденного bundle завершается
@@ -65,11 +65,11 @@ cross-compilation pipeline. Поставляемые платформы соби
 `capabilities` версии 1. Файловое ядро используется внутри snapshot/RepoMap,
 отдельный filesystem/context/generic-process wire API не заявлен.
 
-Linux capabilities также объявляют `stream_modes` с `lsp-session` protocol v1.
+Linux/Windows capabilities объявляют `stream_modes` с `lsp-session` protocol v1.
 Это отдельный long-lived `--lsp-session <session-id>` entrypoint на Tokio, не
-one-shot operation v2. Его использует Python LSP adapter при явном
-`AGENT_HARNESS_LSP_BACKEND=native`; default остаётся Python. Session protocol,
-границы Linux/glibc qualification и возврат к Python описаны в
+one-shot operation v2. Независимый `AGENT_HARNESS_LSP_BACKEND=auto` предпочитает
+его при доступном helper; `native` требует его, `python` выбирает Python.
+Session protocol, platform prerequisites и Job containment описаны в
 [LSP reference](../docs/LSP_RU.md#лимиты-и-завершение-процесса).
 
 Пример для собранного Linux bundle из корня пакета:
@@ -87,7 +87,7 @@ OS и architecture. Exact binary SHA/source fingerprint проверяются �
 
 Поле `protocol_version: 1` существующего build-info описывает legacy entrypoint;
 его schema не переопределяется. Новые capabilities читаются явно у того же
-проверенного бинарника. Snapshot routing `auto` и порог 512 файлов сохранены.
+проверенного бинарника. Snapshot routing `auto` предпочитает проверенный Rust для любого размера.
 Linux [strict read/hash](../docs/CONTEXT_AND_NATIVE_RU.md#общее-файловое-ядро-rust)
 не переключает Python файловые consumers.
 
@@ -118,7 +118,6 @@ executable посреди Session и не редактируйте metadata ра
 | Helper завис/вернул неверный ответ | Timeout/protocol error, не успешный Python result |
 | Указан `AGENT_HARNESS_NATIVE` | Явный абсолютный путь к developer-owned executable; bundled identity не приписывается внешнему бинарнику |
 
-Полная схема `auto` и порог 512 файлов — в
+Полная схема `auto` — в
 [архитектуре](../docs/ARCHITECTURE_RU.md). Команды и бюджеты — в
-[CLI reference](../docs/CLI_REFERENCE_RU.md). Локальные benchmarks прошлой версии
-сохранены в [отчёте 1.4.0](../docs/REVIEW_1_4_0.md).
+[CLI reference](../docs/CLI_REFERENCE_RU.md). Методика сопоставимых измерений — в [Performance/eval](../docs/PERFORMANCE_EVAL_RU.md).

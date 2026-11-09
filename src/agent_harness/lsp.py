@@ -159,9 +159,8 @@ class Session:
         self.capabilities = {}
         self.server_info = {"name": Path(argv[0]).name}
         self.initialized = False
-        self.backend = backend if backend is not None else os.environ.get("AGENT_HARNESS_LSP_BACKEND", "python")
-        if not isinstance(self.backend,str) or self.backend not in {"python", "native"}:
-            raise HarnessError("AGENT_HARNESS_LSP_BACKEND must be python or native")
+        from .lsp_native import select_backend
+        self.backend = select_backend(backend if backend is not None else os.environ.get("AGENT_HARNESS_LSP_BACKEND", "auto"))
         self._native = None
         self._native_shutdown_ack = False
         self._native_exit_admitted = False

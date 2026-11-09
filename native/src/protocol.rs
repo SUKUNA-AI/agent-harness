@@ -156,7 +156,7 @@ pub fn dispatch(raw: &[u8]) -> (Vec<u8>, i32) {
             {"operation":"snapshot","operation_version":1,"protocol_version":1},
             {"operation":"repomap","operation_version":1,"protocol_version":1},
             {"operation":"capabilities","operation_version":1,"protocol_version":2}],
-            "stream_modes":if cfg!(target_os="linux") {vec![crate::lsp_session::capability()]} else {vec![]},
+            "stream_modes":if cfg!(any(target_os="linux", windows)) {vec![crate::lsp_session::capability()]} else {vec![]},
             "limits":{"max_request_bytes":MAX_REQUEST_BYTES,"max_response_bytes":MAX_RESPONSE_BYTES,
                 "min_response_bytes":MIN_RESPONSE_BYTES,"max_depth":MAX_DEPTH,"max_nodes":MAX_NODES}}))
     };
