@@ -69,6 +69,46 @@ jobs:
           assert changes == [WORKFLOW], "Application sources differ from native CI candidate"
           assert tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"] == VERSION
           
+          # Reconcile the exact draft produced by the preceding successful build/upload.
+          # Drafts are discoverable through the release collection, not the tag endpoint.
+          prior = [r for r in api("releases?per_page=100") if r["tag_name"] == TAG]
+          if prior:
+              assert len(prior) == 1 and prior[0]["id"] == 438901456, "Unexpected existing release"
+              release = prior[0]
+              release_revision = "94cf9769e588bb8ed664cf4fe81b4e5769997f57"
+              tag = api("git/ref/tags/" + TAG)
+              assert tag["object"]["type"] == "commit" and tag["object"]["sha"] == release_revision
+              assert release["target_commitish"] == release_revision
+              expected = {
+                  "agent-harness-1.6.0.zip": "b0f252fd152913c67bbc8de0c34dc8961a6945ff444e734bde0f6760ca9d6329",
+                  "release-manifest.json": "1cb85e848e9f08fa0ac2d73b97f25419fe627d7f265d89fd9b44ef152cc94fea",
+                  "VERIFICATION.json": "d46cdce9f0b5427aafb0bbe76fab6e189387ff28ae9eaac640bed9f616d2997f",
+                  "SHA256SUMS": "75d34d3c735e1bf6f690f1f00fc23d67d2dc56daf6a09b9c365dc2588a0bbf5b",
+              }
+              assert {a["name"]: a["digest"] for a in release["assets"]} == {
+                  name: "sha256:" + digest for name, digest in expected.items()}
+              download = work / "existing-draft"
+              command(["gh", "release", "download", TAG, "--repo", REPO, "--dir", download])
+              for name, digest in expected.items():
+                  assert sha(download / name) == digest, "Existing draft asset changed: " + name
+              manifest = json.loads((download / "release-manifest.json").read_bytes())
+              report = json.loads((download / "VERIFICATION.json").read_bytes())
+              assert manifest["source_revision"] == report["source_revision"] == release_revision
+              assert report["archive"]["sha256"] == expected["agent-harness-1.6.0.zip"]
+              assert report["release_checks"]["extracted_install_smoke"]["status"] == "passed"
+              assert all(report["release_checks"][key] == "passed" for key in (
+                  "source_release_check", "linux_native_check", "archive_integrity", "deterministic_double_build"))
+              command([sys.executable, "tools/build_release.py", "--verify",
+                  download / "agent-harness-1.6.0.zip", "--skip-smoke"])
+              if release["draft"]:
+                  command(["gh", "release", "edit", TAG, "--repo", REPO, "--draft=false", "--latest"])
+              published = api("releases/" + str(release["id"]))
+              assert not published["draft"] and not published["prerelease"]
+              assert api("releases/latest")["id"] == published["id"]
+              print(json.dumps({"status": "published", "release": published["html_url"],
+                  "source_revision": release_revision, "assets": sorted(expected)}, indent=2))
+              raise SystemExit(0)
+          
           existing = subprocess.run(["gh", "api", "repos/" + REPO + "/releases/tags/" + TAG],
               capture_output=True, text=True)
           if existing.returncode == 0:
@@ -195,10 +235,10 @@ jobs:
           command(["gh", "release", "download", TAG, "--repo", REPO, "--dir", download])
           for asset in assets:
               assert sha(download / asset.name) == sha(asset), "Uploaded asset differs: " + asset.name
-          draft = api("releases/tags/" + TAG)
+          draft = next(r for r in api("releases?per_page=100") if r["tag_name"] == TAG)
           assert draft["draft"] and {a["name"] for a in draft["assets"]} == {a.name for a in assets}
           command(["gh", "release", "edit", TAG, "--repo", REPO, "--draft=false", "--latest"])
-          published = api("releases/tags/" + TAG)
+          published = api("releases/" + str(draft["id"]))
           assert not published["draft"] and not published["prerelease"]
           assert api("releases/latest")["id"] == published["id"]
           print(json.dumps({"status": "published", "release": published["html_url"],
