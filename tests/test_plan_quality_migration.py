@@ -448,7 +448,24 @@ else:
 
     def test_legacy_migration_schemas_and_state_reader_bytes_stay_frozen(self):
         for name in BASELINE_SCHEMAS:
-            self.assertEqual((self.old_root/'schemas'/name).read_bytes(), (ROOT/'schemas'/name).read_bytes(), name)
+            old_bytes = (self.old_root/'schemas'/name).read_bytes()
+            current_bytes = (ROOT/'schemas'/name).read_bytes()
+            if name in {'work-contract.schema.json', 'agent-plan.schema.json'}:
+                expected = json.loads(old_bytes)
+                # These are the only authorized backward-compatible extensions
+                # to c9. The archived old schemas/writer remain unchanged.
+                if name == 'work-contract.schema.json':
+                    budget = expected['properties']['budgets']['properties']['max_concurrent_managed_agents']
+                    self.assertEqual(budget['maximum'], 5)
+                    budget['maximum'] = 12
+                else:
+                    task = expected['properties']['tasks']['items']
+                    self.assertNotIn('reasoning_effort', task['properties'])
+                    self.assertNotIn('reasoning_effort', task['required'])
+                    task['properties']['reasoning_effort'] = {'enum': ['medium', 'high', 'ultra']}
+                self.assertEqual(json.loads(current_bytes), expected, name)
+            else:
+                self.assertEqual(old_bytes, current_bytes, name)
         for name, expected in R02_SCHEMA_GOLDENS.items():
             self.assertEqual(hashlib.sha256((ROOT/'schemas'/name).read_bytes()).hexdigest(), expected, name)
         code = '''import json,sys

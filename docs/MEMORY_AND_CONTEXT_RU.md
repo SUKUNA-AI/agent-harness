@@ -42,7 +42,13 @@ escaping и CRLF; optional omissions ведут к сохранённому па
 
 ## Provenance и свежесть
 
-Запись связана с local repository identity, revision, whole-tree snapshot,
+Native session adapter использует ограниченную `bounded_context` привязку
+instruction-путей и cwd вместо whole-tree snapshot. В ней source inventory
+неполон; own checkpoint доставляется как untrusted/source_unverified, source facts
+требуют отдельной проверки, а govern не возвращает arbitrary reuse по такому
+proof. Подробные limits и omissions — [Native session](NATIVE_SESSION_RU.md#ограничения-bootstrap-context).
+
+При полном snapshot запись связана с local repository identity, revision, whole-tree snapshot,
 file hashes и при необходимости toolchain digest. Identity использует
 канонический локальный путь репозитория/Git common directory. Собственные
 worktrees одного репозитория могут разделять namespace; другой clone или проект

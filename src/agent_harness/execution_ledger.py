@@ -43,11 +43,15 @@ PROVENANCE_SCHEMA = object_schema({
     "toolchain_digest": HASH, "branch": SHORT,
     "file_inventory_complete": {"type": "boolean"},
     "omitted_file_count": {"type": "integer", "minimum": 0},
-    "binding_kind": {"enum": ["whole_snapshot"]}, "snapshot_algorithm": SHORT,
+    "binding_kind": {"enum": ["whole_snapshot", "bounded_context"]}, "snapshot_algorithm": SHORT,
     "snapshot_ref": HASH, "inventory_policy_digest": HASH, "scope_digest": HASH,
     "checkout_ref": HASH, "checkout_root": SHORT, "inventory_complete": {"type": "boolean"},
     "details_complete": {"type": "boolean"}, "details_omitted_count": {"type": "integer", "minimum": 0},
     "details_ref": {"type": ["string", "null"], "maxLength": 512},
+    "context_complete": {"type": "boolean"},
+    "context_path_encoding": {"const": "ancestor_relative_v1"},
+    "context_paths": {"type": "array", "maxItems": 64, "items": {"type": "string", "maxLength": 128}},
+    "context_omissions": {"type": "array", "maxItems": 66, "items": {"type": "string", "maxLength": 128}},
 }, ("repository_identity", "revision", "snapshot_id", "files"))
 
 PAYLOAD_PROPERTIES = {
@@ -264,6 +268,11 @@ def provenance_for(root, snapshot, *, toolchain_digest=None, file_limit=256):
 def validity(provenance, current, *, status="valid", evidence=None):
     if status != "valid":
         return status
+    # Session context binds a small explicit instruction scope, never all source
+    # inputs. Equal context hashes cannot validate arbitrary facts or checks,
+    # including legacy records without an explicit binding kind.
+    if "bounded_context" in (provenance.get("binding_kind"), current.get("binding_kind")):
+        return "needs_revalidation"
     for field in ("repository_identity", "revision", "branch", "toolchain_digest",
                   "binding_kind", "snapshot_algorithm", "inventory_policy_digest", "scope_digest", "checkout_ref"):
         if field in provenance and provenance.get(field) != current.get(field):
@@ -510,7 +519,8 @@ class Ledger:
         argv = operation.get("argv", [])
         program = Path(argv[0]).name.lower().removesuffix(".exe") if argv else ""
         allowed = program == "rg" and operation.get("effect") == "read_only"
-        proof = (operation.get("input_closure_complete") is True and operation.get("toolchain_digest")
+        proof = (current.get("binding_kind") != "bounded_context"
+                 and operation.get("input_closure_complete") is True and operation.get("toolchain_digest")
                  and operation.get("env_digest") and operation.get("config_digest") and current.get("snapshot_id"))
         context, context_error = None, None
         if allowed and proof and not force and operation.get("policy_denied") is not True:

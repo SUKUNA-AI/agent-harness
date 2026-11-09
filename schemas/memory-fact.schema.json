@@ -82,7 +82,8 @@
         },
         "binding_kind": {
           "enum": [
-            "whole_snapshot"
+            "whole_snapshot",
+            "bounded_context"
           ]
         },
         "snapshot_algorithm": {
@@ -125,6 +126,28 @@
             "null"
           ],
           "maxLength": 512
+        },
+        "context_complete": {
+          "type": "boolean"
+        },
+        "context_path_encoding": {
+          "const": "ancestor_relative_v1"
+        },
+        "context_paths": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "maxLength": 128
+          }
+        },
+        "context_omissions": {
+          "type": "array",
+          "maxItems": 66,
+          "items": {
+            "type": "string",
+            "maxLength": 128
+          }
         }
       },
       "required": [

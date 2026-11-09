@@ -11,8 +11,10 @@ Private state выбирается по `$CODEX_HOME/harness-machine.json` (по
 Совместимая оболочка сохраняет `session`, `root`, `evidence` и `packet`.
 `packet.required.raw_pointer` ведёт к полным результатам ограниченного retrieval и
 SHA256 evidence, `packet.required.packet_pointer` — к сохранённому пакету. Пропуски и
-stale counters явные. Whole-tree snapshot digest пересчитывается; короткий вывод
-не означает token savings или ускорение чтения source. Память не является приёмкой.
+stale counters явные. Bootstrap, checkpoint и govern используют ограниченную
+привязку `bounded_context`: cwd/repository identity, revision и hashes файлов
+AGENTS.md/AGENTS.override.md в цепочке предков. Обход дерева исходников и домашнего
+каталога не выполняется. Память не является приёмкой.
 
 Если длинные пути не помещаются, адаптер сначала убирает повторный digest из
 `recordset_ref`: полный SHA256 уже содержится в `id` после `recordset-`.
@@ -37,6 +39,29 @@ agent-harness-session checkpoint --session <native-ID> --note 'Проверен�
 Для явно контролируемого вызова `govern --session <ID> --argv-json '["rg","symbol"]'
 --effect read_only` возвращает advisory-решение без исполнения команды.
 
+## Ограничения bootstrap context
+
+Проверяется до32 каталогов текущего cwd и его предков, только два явно заданных
+instruction-файла в каждом; до64KiB на файл и256KiB суммарно. Сохраняются hashes,
+статусы отсутствия/недоступности и явные omissions. Пути предков представлены
+компактно через `context_path_encoding=ancestor_relative_v1`; это metadata scope,
+а не разрешение читать произвольные пути. Глобальный Codex config и инструкции
+вне этой цепочки в bounded proof не входят; штатный клиент загружает их отдельно.
+
+`inventory_complete=false` и `file_inventory_complete=false` относятся к source
+inventory. `context_complete` описывает только заданные instruction-пути.
+`source_inventory_not_collected` остаётся явным omission даже при полном context.
+Смена instruction bytes или привязки cwd меняет context digest. Изменения других
+исходников таким digest не подтверждаются.
+
+Own checkpoint можно восстановить как недоверенное наблюдение с
+`source_validity=unverified`. Bounded context не разрешает повторное использование
+произвольных read/check результатов или признание source facts актуальными.
+Неизменность core evidence проверяется отдельно; revoked evidence не возвращается
+как текущее. Существующие full-snapshot записи читаются консервативно и требуют
+source revalidation. Полные snapshot/check/gate и `verify-result` сохраняют
+проверку фактического candidate; bootstrap не подменяет их приёмку.
+
 ## Жизненный цикл native-сессии
 
 ![Native-сессия: bootstrap и продолжение](diagrams/native-session.svg)
@@ -52,8 +77,8 @@ flowchart TD
     Hook{"Hook поддержан, доверен и успешно исполнился?"}
     Auto["SessionStart → session adapter"]
     Explicit["Явный session start: fallback"]
-    Memory["Memory(enabled=True), recall, Ledger inform + reducer"]
-    Packet["Packet: required context, pointers / omissions / stale"]
+    Memory["Memory(enabled=True), recall, Ledger inform + reducer; bounded instruction context"]
+    Packet["Packet: bounded context; source unverified, pointers / omissions"]
     Agent["Codex: текущая цель / разрешённая работа"]
     Checkpoint["Checkpoint + evidence SHA256; явный goal update при изменении"]
     Resume["Resume / compact: bounded recall в прежнем repository namespace"]

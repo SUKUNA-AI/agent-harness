@@ -3,9 +3,11 @@ from copy import deepcopy
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import unittest
+import venv
 from unittest.mock import patch
 
 from agent_harness import installation as install
@@ -240,3 +242,114 @@ class HookAdoptionTests(unittest.TestCase):
         self.assertEqual('blocked', run('verify', '--adopt-hook-sha256', expected, code=2)['status'])
         self.assertEqual('rolled_back', run('rollback', '--apply')['status'])
         self.assertEqual(original, (self.home / 'hooks.json').read_bytes())
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX interpreter symlinks')
+    def test_interpreter_alias_cli_keeps_owned_command_and_rollback(self):
+        _, _, expected = self.legacy()
+        original = (self.home / 'hooks.json').read_bytes()
+        interpreters = self.base / 'Python aliases'
+        interpreters.mkdir()
+        first, second = interpreters / 'python original', interpreters / 'python alias'
+        for executable in (first, second):
+            executable.symlink_to(sys.executable)
+        self.assertTrue(os.path.samefile(first, second))
+        tool = Path(__file__).resolve().parents[1] / 'tools/harness.py'
+        locations = ['--package-root', str(self.package), '--codex-home', str(self.home),
+                     '--skills-home', str(self.skills), '--state-dir', str(self.state)]
+        def run(executable, command, *extra):
+            result = subprocess.run([str(executable), '-I', '-B', str(tool), command, *locations, *extra],
+                capture_output=True, text=True, encoding='utf-8', timeout=15,
+                env={**os.environ, 'CODEX_HOME': str(self.home)})
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            return json.loads(result.stdout)
+        self.assertEqual('written_pending_native_verification',
+                         run(first, 'install', '--adopt-hook-sha256', expected, '--apply')['status'])
+        installed = self.target_bytes()
+        receipt = (self.state / 'active.json').read_bytes()
+        for executable in (second, first):
+            self.assertEqual('structural_verified', run(executable, 'verify')['status'])
+            self.assertEqual('unchanged', run(executable, 'install', '--apply')['status'])
+            self.assertEqual(installed, self.target_bytes())
+            self.assertEqual(receipt, (self.state / 'active.json').read_bytes())
+        self.assertEqual('rolled_back', run(second, 'rollback', '--apply')['status'])
+        self.assertEqual(original, (self.home / 'hooks.json').read_bytes())
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX venv interpreter symlinks')
+    def test_same_binary_venv_and_directory_alias_are_not_equivalent(self):
+        environment = self.base / 'separate venv'
+        venv.EnvBuilder(with_pip=False, symlinks=True).create(environment)
+        executable = environment / 'bin/python'
+        self.assertTrue(executable.samefile(sys.executable))
+        result = subprocess.run([str(executable), '-c', 'import sys; print(sys.prefix)'],
+                                capture_output=True, text=True, check=True, timeout=10)
+        self.assertEqual(str(environment), result.stdout.strip())
+        with patch.object(sys, 'executable', str(executable)):
+            self.apply(None)
+            self.assertEqual('structural_verified',
+                             install.verify(self.package, self.home, self.skills, self.state)['status'])
+        original = self.target_bytes()
+        self.assertEqual('failed', install.verify(self.package, self.home, self.skills, self.state)['status'])
+        pending = self.plan()
+        self.assertEqual([self.home / 'hooks.json'], [row['path'] for row in pending])
+        self.assertEqual(original, self.target_bytes())
+        # Even physically identical executable directories need not have the
+        # same lexical ancestors for Python startup configuration discovery.
+        alias = self.base / 'directory alias'
+        alias.symlink_to(executable.parent, target_is_directory=True)
+        self.assertTrue(alias.samefile(executable.parent))
+        with patch.object(sys, 'executable', str(alias / 'python')):
+            self.assertEqual('failed', install.verify(self.package, self.home, self.skills, self.state)['status'])
+            self.assertEqual([self.home / 'hooks.json'], [row['path'] for row in self.plan()])
+        self.assertEqual(original, self.target_bytes())
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX interpreter symlinks')
+    def test_different_executable_in_same_directory_is_not_alias(self):
+        directory = self.base / 'interpreters'
+        directory.mkdir()
+        first, different = directory / 'python alias', directory / 'different python'
+        first.symlink_to(sys.executable)
+        shutil.copyfile(sys.executable, different)
+        self.assertFalse(first.samefile(different))
+        with patch.object(sys, 'executable', str(first)):
+            self.apply(None)
+        original = self.target_bytes()
+        with patch.object(sys, 'executable', str(different)):
+            self.assertEqual('failed', install.verify(self.package, self.home, self.skills, self.state)['status'])
+            self.assertEqual([self.home / 'hooks.json'], [row['path'] for row in self.plan()])
+        self.assertEqual(original, self.target_bytes())
+
+    def test_owned_hook_edits_are_conflicts_not_interpreter_aliases(self):
+        self.apply(None)
+        path = self.home / 'hooks.json'
+        pristine = json.loads(path.read_text(encoding='utf-8'))
+        for edit in ('flags', 'shell', 'launcher', 'timeout', 'matcher'):
+            value = deepcopy(pristine)
+            handler = value['hooks']['SessionStart'][0]
+            hook = handler['hooks'][0]
+            if edit == 'flags':
+                hook['command'] += ' -I'
+            elif edit == 'shell':
+                hook['command'] += ' && echo changed'
+            elif edit == 'launcher':
+                hook['command'] = hook['command'].replace('agent-harness-hook.py', 'agent-harness-hook-other.py')
+            elif edit == 'timeout':
+                hook['timeout'] += 1
+            else:
+                handler['matcher'] = 'startup'
+            with self.subTest(edit=edit):
+                path.write_bytes(install.canonical(value))
+                before = self.target_bytes()
+                self.assertEqual('failed', install.verify(self.package, self.home, self.skills, self.state)['status'])
+                with self.assertRaisesRegex(install.InstallError, 'edited harness hook conflicts'):
+                    self.plan()
+                self.assertEqual(before, self.target_bytes())
+
+    def test_windows_hook_command_keeps_generated_quoting(self):
+        argv = [r'C:\Program Files\Python313\python.exe',
+                r'C:\Fixture Space\профиль .codex\agent-harness-hook.py']
+        expected = subprocess.list2cmdline(argv)
+        with patch.object(install.os, 'name', 'nt'):
+            self.assertEqual(expected, install._hook_command(argv))
+            for character in ('&', '%', '!', '\n'):
+                with self.subTest(character=character), self.assertRaises(install.InstallError):
+                    install._hook_command([argv[0], argv[1] + character])

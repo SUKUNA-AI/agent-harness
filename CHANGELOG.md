@@ -2,6 +2,13 @@
 
 ## Main после 1.6.0
 
+- SessionStart/start/checkpoint/govern используют bounded instruction context без
+  рекурсивного snapshot домашнего каталога. Partial provenance не разрешает
+  source acceptance или произвольный reuse; full gate остаётся строгим.
+- POSIX installer/verify сохраняет точную owned-команду для безопасных алиасов
+  одного Python в одном каталоге, без смешения virtualenv и чужих handlers.
+
+
 - Объединены недостающие recovery/YAML/schema исправления ветки582c5d7.
 - Глобальные managed leases:12 model sessions, максимум3 reviewer; budget и
   cancellation проверяются перед reservation/dispatch, включая медленные записи.

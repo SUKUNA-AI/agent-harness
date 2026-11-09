@@ -49,7 +49,9 @@ class NarrowContextFollowup(unittest.TestCase):
         (self.root / "style.css").write_text("body { color: blue; }\n")
         (self.root / "plugin.py").write_text("raise RuntimeError('discovery')\n")
         after = self.current()
-        self.assertNotEqual(before["snapshot_id"], after["snapshot_id"])
+        # Native context ignores unrelated source; the narrow fact verifier
+        # independently rereads its complete deterministic file closure below.
+        self.assertEqual(before["snapshot_id"], after["snapshot_id"])
         recalled = self.memory.recall("module", after)
         self.assertEqual(recalled["verified_facts"][0]["id"], row["id"])
         self.assertEqual(recalled["verified_facts"][0]["verification_level"], "self_checked")

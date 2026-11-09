@@ -95,15 +95,22 @@ class PlanQualityTests(unittest.TestCase):
             return value.replace(marker,marker+"\nif mode=='left':pathlib.Path('right.py').write_text('VALUE = '+str(value)+'\\n')")
         supervisor,_=self.fixture(plan_edit=high_risk,script_edit=script,
             contract_edit=lambda c:c['mission'].update(original_request='Change both values as one coherent operation with joint acceptance.'))
-        efforts=[]
+        calls=[]
         run=supervisor.adapter.run
         def observed(prompt, **options):
-            efforts.append(options.get('reasoning_effort'))
+            calls.append((prompt, options))
             return run(prompt, **options)
         with patch.object(supervisor.adapter,'run',side_effect=observed):
             result=supervisor.start()
         self.assertEqual(result['status'],'ACCEPTED',result)
-        self.assertEqual(efforts,['ultra','medium','ultra'])
+        self.assertEqual([options.get('reasoning_effort') for _,options in calls],
+            ['ultra','medium',None,'ultra'])
+        # The supplied plan invokes its quality reviewer, one worker, root
+        # integration and final review. Root preserves coordinator defaults.
+        for (prompt,_),marker in zip(calls,('HARNESS_PLAN_QUALITY','Perform only this scoped task.',
+                'Implement this authorized task in the current workspace.','HARNESS_FINAL_REVIEW')):
+            self.assertIn(marker,prompt)
+        self.assertNotIn('reasoning_effort',calls[2][1])
         _,wire=self.quality_wire(supervisor)
         self.assertEqual(len(wire['nodes']),1)
         self.assertEqual(wire['nodes'][0]['atomicity'],'coherent')

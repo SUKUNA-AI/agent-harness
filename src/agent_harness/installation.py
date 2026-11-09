@@ -779,7 +779,51 @@ def manifest_chain(manifest: dict | None) -> list[dict]:
 
 
 
-def hook_payload(package, home):
+def _hook_command(argv):
+    if os.name == "nt":
+        if any(re.search(r'[%%!&|<>^\r\n]', argument) for argument in argv):
+            raise InstallError("Hook launcher path has unsupported Windows shell metacharacters")
+        return subprocess.list2cmdline(argv)
+    return shlex.join(argv)
+
+
+def _owned_hook_alias(handler, owned, launcher):
+    """Retain an owned spelling, never infer ownership from a command substring.
+
+    Matching executable inodes alone would conflate a venv with its base Python.
+    Restrict aliases to the same lexical executable directory; resolving the
+    parent could hide different startup configuration in lexical ancestors.
+    Windows also has executable-name-specific ._pth startup, so keep its exact
+    spelling only.
+    """
+    if owned == handler or os.name == "nt" or not isinstance(owned, dict):
+        return handler
+    entries = owned.get("hooks")
+    if not isinstance(entries, list) or len(entries) != 1 or not isinstance(entries[0], dict):
+        return handler
+    command = entries[0].get("command")
+    if not isinstance(command, str):
+        return handler
+    expected = {**owned, "hooks": [{**entries[0], "command": handler["hooks"][0]["command"]}]}
+    if expected != handler:
+        return handler
+    try:
+        argv = shlex.split(command)
+        if (len(argv) != 2 or argv[1] != str(launcher)
+                or command != _hook_command(argv)):
+            return handler
+        original = Path(argv[0])
+        current = Path(sys.executable).absolute()
+        if (original.is_absolute()
+                and os.path.normcase(os.path.abspath(original.parent)) == os.path.normcase(os.path.abspath(current.parent))
+                and original.samefile(current)):
+            return owned
+    except (OSError, ValueError):
+        pass
+    return handler
+
+
+def hook_payload(package, home, owned_handler=None):
     """A static launcher inherits stdin; event fields never become shell code."""
     script = package / "tools/session.py"
     if not script.is_file():
@@ -787,12 +831,7 @@ def hook_payload(package, home):
     launcher = home / "agent-harness-hook.py"
     interpreter = str(Path(sys.executable).absolute())
     argv = [interpreter, str(launcher)]
-    if os.name == "nt":
-        if any(re.search(r'[%%!&|<>^\r\n]', argument) for argument in argv):
-            raise InstallError("Hook launcher path has unsupported Windows shell metacharacters")
-        command = subprocess.list2cmdline(argv)
-    else:
-        command = shlex.join(argv)
+    command = _hook_command(argv)
     payload = ("# Generated Agent Harness SessionStart launcher; stdin is inherited.\n"
                f"# Entrypoint sha256: {digest(required_read(script))}\n"
                "import runpy, sys\n"
@@ -800,7 +839,7 @@ def hook_payload(package, home):
                f"runpy.run_path({str(script)!r}, run_name='__main__')\n").encode("utf-8")
     handler = {"matcher": "^(startup|resume|clear|compact|fork)$", "hooks": [
         {"type": "command", "command": command, "timeout": 30, "additionalContextLimit": 5000}]}
-    return launcher, payload, handler
+    return launcher, payload, _owned_hook_alias(handler, owned_handler, launcher)
 
 
 def _harness_commands(value):
@@ -914,22 +953,22 @@ def plan(package: Path, home: Path, skills: Path, state: Path, overlay: Path, ma
     add(config_path, encode_like(config, read(config_path)), "config", config_meta)
     pointer = {"schema_version": 1, "policy_version": VERSION, "package_root": str(package), "machine_overlay": str(overlay), "installation_state": str(state)}
     add(home / "harness-machine.json", canonical(pointer), "owned")
-    launcher, launcher_bytes, handler = hook_payload(package, home)
+    hook_path = home / "hooks.json"
+    prior = owned.get(str(hook_path))
+    prior_handler = prior.get("meta", {}).get("handler_after") if prior else None
+    launcher, launcher_bytes, handler = hook_payload(package, home, prior_handler)
     config_hooks = tomllib.loads(old_config).get("hooks", {})
     # hooks.state records are client trust state, not source definitions.
     if isinstance(config_hooks, dict):
         config_hooks = {key: value for key, value in config_hooks.items() if key != "state"}
     if list(_harness_commands(config_hooks)):
         raise InstallError("Harness hook is also defined in config.toml; resolve duplicate effective source")
-    hook_path = home / "hooks.json"
     regular_target(hook_path)
     hook_original = read(hook_path)
     hooks = _hook_document(hook_original)
     groups = hooks["hooks"].setdefault("SessionStart", [])
     if not isinstance(groups, list):
         raise InstallError("SessionStart hook groups must be an array")
-    prior = owned.get(str(hook_path))
-    prior_handler = prior.get("meta", {}).get("handler_after") if prior else None
     managed = [index for index, group in enumerate(groups) if list(_harness_commands(group))]
     if len(managed) > 1:
         raise InstallError("Duplicate harness SessionStart handlers; no user hooks changed")
@@ -1423,12 +1462,15 @@ def verify(package: Path, home: Path, skills: Path, state: Path, native: bool = 
     errors = []
     warnings = []
     pointer = home / "harness-machine.json"
+    owned = {}
     try:
         active = active_manifest(state)
         if active is None:
             errors.append("active installation manifest missing; installed files alone are not a verified installation")
         else:
-            for manifest in manifest_chain(active):
+            chain = manifest_chain(active)
+            owned = {x["path"]: x for m in reversed(chain) for x in m["files"]}
+            for manifest in chain:
                 for entry in manifest["files"]:
                     if "parent_binding" in entry:
                         verify_parent_binding(Path(entry["path"]), entry["parent_binding"])
@@ -1471,7 +1513,8 @@ def verify(package: Path, home: Path, skills: Path, state: Path, native: bool = 
         agents = {}
         errors.append(str(ex))
     try:
-        _, launcher_bytes, handler = hook_payload(package, home)
+        prior_hook = owned.get(str(home / "hooks.json"), {})
+        _, launcher_bytes, handler = hook_payload(package, home, prior_hook.get("meta", {}).get("handler_after"))
         hook_doc = _hook_document(read(home / "hooks.json"))
         if hook_doc["hooks"].get("SessionStart", []).count(handler) != 1:
             errors.append("managed SessionStart hook missing or duplicated")

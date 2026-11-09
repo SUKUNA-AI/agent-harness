@@ -58,13 +58,14 @@
   </text>
   <rect x="450" y="570" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
   <text x="600.0" y="618.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
-    <tspan x="600.0" y="609.0">Memory(enabled=True), recall,</tspan>
-    <tspan x="600.0" y="627.0">Ledger inform + reducer</tspan>
+    <tspan x="600.0" y="600.0">Memory(enabled=True), recall,</tspan>
+    <tspan x="600.0" y="618.0">Ledger inform + reducer;</tspan>
+    <tspan x="600.0" y="636.0">bounded instruction context</tspan>
   </text>
   <rect x="450" y="710" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
   <text x="600.0" y="758.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
-    <tspan x="600.0" y="749.0">Packet: required context,</tspan>
-    <tspan x="600.0" y="767.0">pointers / omissions / stale</tspan>
+    <tspan x="600.0" y="749.0">Packet: bounded context;</tspan>
+    <tspan x="600.0" y="767.0">source unverified, pointers / omissions</tspan>
   </text>
   <rect x="450" y="850" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
   <text x="600.0" y="898.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">

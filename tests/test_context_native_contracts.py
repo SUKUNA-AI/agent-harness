@@ -35,7 +35,8 @@ class Contracts(unittest.TestCase):
         (self.root / "one.py").write_text("def alpha():\n    return 1\n", encoding="utf-8")
         (self.root / "two.py").write_text("x = 2\n", encoding="utf-8")
         self.state = self.base / "state"
-        self.current = current_provenance(self.root)
+        # Source/check acceptance uses full provenance, never native context.
+        self.current = provenance_for(self.root, snapshot({"cwd": str(self.root)}), file_limit=1)
         self.memory = Memory(self.state / "memory", self.current["repository_identity"], enabled=True)
 
     def start(self, **kwargs):
@@ -82,12 +83,15 @@ class Contracts(unittest.TestCase):
         for key in ("repository_identity", "inventory_policy_digest", "scope_digest", "checkout_ref", "snapshot_algorithm"):
             self.assertEqual(validity(full, {**compact, key: "different"}), "needs_revalidation")
 
-    def test_full_provenance_fact_survives_native_one_file_projection(self):
+    def test_full_provenance_fact_requires_source_proof_beyond_native_context(self):
         _, ref = self.evidence()
         row = self.episode(refs=[ref])
         row["provenance"] = provenance_for(self.root, snapshot({"cwd": str(self.root)}), file_limit=2)
         self.memory.record_episode(row)
         self.assertEqual(len(self.memory.recall("alpha", self.current)["verified_facts"]), 1)
+        bounded = current_provenance(self.root)
+        self.assertEqual(self.memory.recall("alpha", bounded)["verified_facts"], [])
+        self.assertEqual(validity(row["provenance"], bounded), "needs_revalidation")
         (self.root / "two.py").write_text("x = 9\n")
         changed = current_provenance(self.root)
         self.assertEqual(self.memory.recall("alpha", changed)["verified_facts"], [])
@@ -148,12 +152,19 @@ class Contracts(unittest.TestCase):
         packet = self.start()
         identifier = packet["required"]["session"]
         receipt, ref = self.evidence()
-        session_packet(self.state, session=identifier, note="Check passed", next_step="Review", evidence=receipt)
+        self.memory.record_episode(self.episode(refs=[ref]))
+        # Native context must not re-enter full acceptance through evidence recall.
+        with patch.object(self.memory.__class__, "_current_core_check", side_effect=AssertionError("Unexpected full source scan")):
+            session_packet(self.state, session=identifier, note="Check passed", next_step="Review", evidence=receipt)
+            resumed = session_packet(self.state, session=identifier)
         own = self.memory.root / "short_term" / (identifier + ".yaml")
         row = load(own)
         self.assertEqual(row["evidence_refs"][0]["reference"]["kind"], "evidence")
-        resumed = session_packet(self.state, session=identifier)
         self.assertIn("Check passed", json.dumps(resumed))
+        raw = json.loads(Path(resumed["required"]["raw_pointer"]).read_text())
+        observed = next(r for r in raw["previous_short_term"] if r["pointer"] == str(own))
+        self.assertEqual(observed["payload"]["source_validity"], "unverified")
+        self.assertEqual(observed["payload"]["evidence_validity"], "needs_revalidation")
         self.memory.invalidate_evidence(ref["id"])
         revoked = session_packet(self.state, session=identifier)
         raw = json.loads(Path(revoked["required"]["raw_pointer"]).read_text())

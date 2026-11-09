@@ -12,9 +12,9 @@ import time
 import uuid
 
 from .context_reducer import reduce
-from .core import HarnessError, atomic_json, canonical, digest, lock, now, snapshot
-from .execution_ledger import HASH, IDENTIFIER, SHORT, Ledger, object_schema, provenance_for, safe_private, sanitized, validity
-from .file_io import read_regular_file
+from .core import HarnessError, _git, atomic_json, canonical, digest, lock, now
+from .execution_ledger import HASH, IDENTIFIER, SHORT, Ledger, object_schema, repository_identity, safe_private, sanitized, validity
+from .file_io import ParentDirectory, read_regular_file
 from .memory import Memory, SHORT_SCHEMA
 from .strict_yaml import load, dump
 from .output import write_json, write_utf8, json_bytes
@@ -65,8 +65,59 @@ def sync_directory(path):
 
 
 def current_provenance(root):
-    """Сохраняет полный snapshot digest; подробный inventory ограничен одним файлом."""
-    return provenance_for(root, snapshot({"cwd": str(root)}), file_limit=1)
+    """Bind native context without enumerating a repository or a home directory.
+
+    Only explicit ancestor instruction paths are inspected (at most 64 paths,
+    64 KiB per file, 256 KiB total). This is deliberately insufficient proof for
+    source acceptance or reuse; those callers still take a full snapshot.
+    """
+    root = Path(root).resolve(strict=True)
+    policy = {"algorithm": "native-context-v1", "names": ["AGENTS.md", "AGENTS.override.md"],
+              "max_directories": 32, "max_file_bytes": 65536, "max_total_bytes": 262144}
+    directories = [root, *root.parents]
+    omissions = ["source_inventory_not_collected"]
+    complete = len(directories) <= policy["max_directories"]
+    if not complete:
+        omissions.append("ancestor_directory_limit")
+    observed, files, paths, used = [], {}, [], 0
+    for depth, directory in enumerate(directories[:policy["max_directories"]]):
+        for name in policy["names"]:
+            path = directory / name
+            # Fixed ASCII ancestor-relative labels also bound persisted metadata,
+            # rather than duplicating a long Unicode checkout path up to 64 times.
+            label = "../" * depth + name
+            paths.append(label)
+            entry = {"path": label}
+            try:
+                data = read_regular_file(path, max_bytes=min(policy["max_file_bytes"], policy["max_total_bytes"] - used))
+                used += len(data)
+                entry.update(status="observed", sha256=hashlib.sha256(data).hexdigest())
+                if directory == root:
+                    files[name] = entry["sha256"]
+            except FileNotFoundError:
+                entry["status"] = "missing"
+            except (OSError, ValueError):
+                entry["status"] = "unavailable"
+                complete = False
+                omissions.append("unavailable:" + label)
+            observed.append(entry)
+    with ParentDirectory(root / ".native-context-anchor") as parent:
+        physical = parent.physical_identity()
+    head = _git(root, "rev-parse", "--verify", "HEAD")
+    branch = _git(root, "symbolic-ref", "--short", "HEAD")
+    revision = os.fsdecode(head).strip() if head else "directory"
+    value = {"repository_identity": repository_identity(root), "revision": revision,
+        "binding_kind": "bounded_context", "snapshot_algorithm": policy["algorithm"],
+        "checkout_ref": digest({"root": str(root), "physical": physical}), "checkout_root": str(root),
+        "inventory_policy_digest": digest(policy), "scope_digest": digest(paths),
+        "inventory_complete": False, "file_inventory_complete": False,
+        "context_complete": complete, "context_path_encoding": "ancestor_relative_v1",
+        "context_paths": paths, "context_omissions": omissions,
+        "files": files}
+    if branch:
+        value["branch"] = os.fsdecode(branch).strip()
+    value["snapshot_id"] = digest({"binding": value, "observed": observed})
+    return value
 
 
 def checked_text(value, name, maximum):
@@ -121,12 +172,21 @@ def packet_envelope(packet):
 
 def checkpoint_observation(memory, row, path, current):
     source = validity(row["provenance"], current)
-    evidence = memory.evidence_status(row) if row.get("evidence_ids") else "unknown"
-    usable = source == "valid" and (not row.get("evidence_ids") or evidence == "current")
-    return {"kind": "checkpoint", "payload": {"checkpoint": row["checkpoint"],
+    bounded = current.get("binding_kind") == "bounded_context"
+    evidence = memory.evidence_status(row, verify_source=not bounded) if row.get("evidence_ids") else "unknown"
+    context_current = (bounded and row["provenance"].get("binding_kind") == "bounded_context"
+        and current.get("context_complete") is True and row["provenance"].get("context_complete") is True
+        and row["provenance"].get("repository_identity") == current["repository_identity"]
+        and row["provenance"].get("snapshot_id") == current["snapshot_id"])
+    evidence_usable = evidence in {"current", "needs_revalidation"} if bounded else evidence == "current"
+    usable = (context_current if bounded else source == "valid") and (not row.get("evidence_ids") or evidence_usable)
+    payload = {"checkpoint": row["checkpoint"],
         "next_step": row["next_step"], "goal_generation": row.get("goal_generation", 1),
-        "source_validity": "current" if source == "valid" else "changed",
-        "evidence_validity": evidence, "verification_level": "observation"},
+        "source_validity": "unverified" if bounded else "current" if source == "valid" else "changed",
+        "evidence_validity": evidence, "verification_level": "observation"}
+    if bounded:
+        payload["context_validity"] = "current" if context_current else "changed"
+    return {"kind": "checkpoint", "payload": payload,
         "validity_status": "valid" if usable else "needs_revalidation", "pointer": str(path)}
 
 
@@ -282,8 +342,9 @@ def session_packet(state, *, root=None, goal=None, session=None, note=None,
                     or packet["required"].get("goal", prior_goal) != prior_goal):
                 raise HarnessError("GOAL_GENERATION_CONFLICT: operation replay belongs to a previous mission")
             if (packet["required"].get("snapshot_id") != current["snapshot_id"]
-                    or packet["required"].get("repository_identity") != current["repository_identity"]):
-                raise HarnessError("STALE_OPERATION_REPLAY: source changed; preserve receipt and request a fresh handoff")
+                    or packet["required"].get("repository_identity") != current["repository_identity"]
+                    or current.get("context_complete") is False):
+                raise HarnessError("STALE_OPERATION_REPLAY: context changed or unavailable; preserve receipt and request a fresh handoff")
             # The Python API has the same complete transport bound as the CLI.
             json_bytes(packet_envelope(packet), max_bytes=max_bytes)
             context = replay_context(memory, ledger, current, session, goal, row, own_checkpoint)
@@ -341,6 +402,7 @@ def session_packet(state, *, root=None, goal=None, session=None, note=None,
         required = {
             "session": session, "root": str(root), "repository_identity": current["repository_identity"],
             "snapshot_id": current["snapshot_id"], "memory": True, "ledger": "inform",
+            "binding_kind": current["binding_kind"], "inventory_complete": False,
             "no_model_calls": True, "acceptance": "not_performed", "raw_pointer": str(raw_path),
             "packet_pointer": str(packet_path), "stale_memory_count": recall["stale_memory_prevented"],
             "stale_ledger_count": inform["required"]["stale_items_count"],

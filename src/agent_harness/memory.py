@@ -297,7 +297,8 @@ class Memory:
             status = (status if status != "valid" else "valid" if narrow["source_validity"] == "current" else "needs_revalidation") if narrow else validity(row["provenance"], current, status=status)
             if "outcome" in row and row["outcome"] == "verified" and not self._evidence_current(row):
                 status = "needs_revalidation"
-            evidence_validity = self.evidence_status(row) if row.get("evidence_refs") else "unknown"
+            evidence_validity = self.evidence_status(row,
+                verify_source=current.get("binding_kind") != "bounded_context") if row.get("evidence_refs") else "unknown"
             if row.get("claim_kind") == "check_result" and evidence_validity != "current":
                 status = "needs_revalidation"
             terms = set(re.findall(r"\w+", " ".join(str(row.get(k, "")) for k in ("problem_signature", "category", "tags", "claim", "context", "closure")).casefold()))
@@ -540,8 +541,13 @@ class Memory:
         self._require()
         return self._evidence_transition(identifier, status)
 
-    def evidence_status(self, record):
-        """Integrity and current lifecycle are independent; unavailable is unknown."""
+    def evidence_status(self, record, *, verify_source=True):
+        """Check integrity/lifecycle; context-only callers cannot report current source.
+
+        The default performs full core source verification. Bounded native recall
+        may inspect lifecycle without a source scan, returning needs_revalidation
+        even for intact references whose recorded lifecycle is current.
+        """
         from .strict_yaml import load, validate
         if not self._evidence_current(record):
             return "stale"
@@ -557,10 +563,10 @@ class Memory:
                 authoritative = load(safe_private(self.root / "evidence" / (typed["id"] + ".yaml")), EVIDENCE_RECORD_SCHEMA)
                 if (digest(authoritative) != typed["content_digest"] or authoritative["sha256"] != ref["sha256"]
                         or authoritative["path"] != ref["path"] or authoritative["project_id"] != self.repository_identity
-                        or authoritative["candidate_digest"] != record["provenance"]["snapshot_id"]
+                        or (verify_source and authoritative["candidate_digest"] != record["provenance"]["snapshot_id"])
                         or (record.get("claim_kind") == "check_result" and authoritative["check_id"] != record.get("check_id"))):
                     return "stale"
-                if authoritative.get("verification_method") == "core_command_check_v1":
+                if verify_source and authoritative.get("verification_method") == "core_command_check_v1":
                     self._current_core_check(authoritative["run_dir"], authoritative["check_id"], record["provenance"])
                 files = sorted(safe_private(self.root / "evidence_status" / typed["id"]).glob("*.yaml"))
                 head = load(safe_private(self.root / "evidence_heads" / (typed["id"] + ".yaml")), EVIDENCE_HEAD_SCHEMA)
@@ -582,7 +588,7 @@ class Memory:
                     return previous["status"] if previous["status"] in {"revoked", "superseded"} else "unknown"
             except (OSError, ValueError, KeyError, TypeError, HarnessError):
                 return "unknown"
-        return "current" if record.get("evidence_refs") else "unknown"
+        return ("current" if verify_source else "needs_revalidation") if record.get("evidence_refs") else "unknown"
 
     def maintenance(self, operation, *, scope, apply=False):
         """Explicit scoped dry-run/migration and conservative retention planning.

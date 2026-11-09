@@ -82,10 +82,10 @@
         <mxCell id="Explicit" value="Явный session start: fallback" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="780" y="420" width="300" height="86" as="geometry" />
         </mxCell>
-        <mxCell id="Memory" value="Memory(enabled=True), recall,&#10;Ledger inform + reducer" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+        <mxCell id="Memory" value="Memory(enabled=True), recall,&#10;Ledger inform + reducer;&#10;bounded instruction context" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="450" y="570" width="300" height="86" as="geometry" />
         </mxCell>
-        <mxCell id="Packet" value="Packet: required context,&#10;pointers / omissions / stale" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+        <mxCell id="Packet" value="Packet: bounded context;&#10;source unverified, pointers / omissions" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="450" y="710" width="300" height="86" as="geometry" />
         </mxCell>
         <mxCell id="Agent" value="Codex: текущая цель /&#10;разрешённая работа" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">

@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 from agent_harness import native_session
 from agent_harness.core import HarnessError, Run, digest, snapshot, snapshot_python
-from agent_harness.execution_ledger import Ledger, INDEX_SCHEMA
+from agent_harness.execution_ledger import Ledger, INDEX_SCHEMA, provenance_for
 from agent_harness.knowledge_claims import verify_fact
 from agent_harness.memory import Memory, SHORT_SCHEMA
 from agent_harness.repomap_queries import query_repository
@@ -30,7 +30,7 @@ class ContextIntegrity(unittest.TestCase):
         self.root.mkdir()
         (self.root / 'one.py').write_text('def alpha():\n    return 1\n')
         self.state = self.base / 'state'
-        self.current = native_session.current_provenance(self.root)
+        self.current = provenance_for(self.root, snapshot({'cwd': str(self.root)}), file_limit=1)
         self.memory = Memory(self.state / 'memory', self.current['repository_identity'], enabled=True)
 
     def start(self):
@@ -127,15 +127,15 @@ with patch('agent_harness.native_session.Memory.update_short_term', side_effect=
             native_session.session_packet(self.state, session=identifier, goal='Mission two', expected_generation=1, operation_id='goal-two')
         self.assertEqual(native_session.session_packet(self.state, session=identifier)['required']['goal'], 'Mission three')
 
-    def test_replay_rejects_changed_source_and_preserves_immutable_operation(self):
+    def test_replay_rejects_changed_context_and_preserves_immutable_operation(self):
         identifier = self.start()['required']['session']
         arguments = dict(session=identifier, note='Observed source', next_step='Review', operation_id='observed')
         original = native_session.session_packet(self.state, **arguments)
         directory = self.state / 'native-sessions' / identifier
         operation = directory / 'operation-observed.yaml'
         saved = operation.read_bytes()
-        (self.root / 'one.py').write_text('def alpha():\n    return 2\n')
-        with self.assertRaisesRegex(HarnessError, 'STALE_OPERATION_REPLAY: source changed'):
+        (self.root / 'AGENTS.md').write_text('Use the updated project instructions.\n')
+        with self.assertRaisesRegex(HarnessError, 'STALE_OPERATION_REPLAY: context changed'):
             native_session.session_packet(self.state, **arguments)
         self.assertEqual(operation.read_bytes(), saved)
         current = native_session.session_packet(self.state, session=identifier)
@@ -144,6 +144,8 @@ with patch('agent_harness.native_session.Memory.update_short_term', side_effect=
 
     def test_replay_rechecks_the_complete_requested_transport_budget(self):
         identifier = self.start()['required']['session']
+        native_session.session_packet(self.state, session=identifier, goal='Review alpha source carefully. ' * 16,
+            expected_generation=1)
         arguments = dict(session=identifier, note='Observed source', next_step='Review', operation_id='budget')
         packet = native_session.session_packet(self.state, max_bytes=65536, **arguments)
         required = packet['required']

@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from agent_harness import native_session as session
 from agent_harness.core import HarnessError, canonical, now
@@ -83,8 +84,8 @@ class NativeSessionTests(unittest.TestCase):
         separate = session.hook_packet(self.state, self.event(cwd=str(other)))
         self.assertNotEqual(separate["required"]["repository_identity"], packet["required"]["repository_identity"])
 
-    def test_source_change_prevents_stale_recall(self):
-        """Изменение source bytes исключает старый verified fact и старый checkpoint."""
+    def test_context_change_and_bounded_memory_never_prove_source_facts(self):
+        """Ограниченный context не подтверждает даже неизменённый semantic fact."""
         first = self.start()
         required = first["required"]
         raw = json.loads(Path(required["raw_pointer"]).read_text())
@@ -95,8 +96,9 @@ class NativeSessionTests(unittest.TestCase):
             "confidence": "verified", "last_checked": now(), "provenance": raw["provenance"],
             "validity_status": "valid", "relations": [], "supersedes": None})
         same = self.start()
-        self.assertIn("Known fixture decision", json.dumps(same))
-        (self.root / "input.txt").write_text("second\n")
+        self.assertNotIn("Known fixture decision", json.dumps(same))
+        self.assertEqual(same["required"]["stale_memory_count"], 1)
+        (self.root / "AGENTS.md").write_text("Updated project instructions.\n")
         changed = self.start()
         self.assertNotEqual(changed["required"]["snapshot_id"], required["snapshot_id"])
         self.assertEqual(changed["required"]["stale_memory_count"], 1)
@@ -118,6 +120,89 @@ class NativeSessionTests(unittest.TestCase):
             with self.subTest(run=run), self.assertRaises((HarnessError, ValueError)):
                 run()
             self.assertFalse(self.state.exists())
+
+    def test_bootstrap_checkpoint_and_govern_do_not_enumerate_source(self):
+        """Даже home-подобный root не требует source inventory для native API."""
+        unrelated = self.root / "unrelated-cache"
+        unrelated.mkdir()
+        # A sparse giant input must never be read by bootstrap.
+        with (unrelated / "large.bin").open("wb") as stream:
+            stream.truncate(2**34)
+        scandir = os.scandir
+        def guarded(path):
+            if not isinstance(path, int) and Path(path) in {self.root, unrelated}:
+                raise AssertionError("Source enumeration is forbidden during native context")
+            return scandir(path)
+        with patch("agent_harness.core.snapshot", side_effect=HarnessError("Native snapshot failed (exit 1): inventory limit")), \
+                patch("os.scandir", side_effect=guarded), patch.object(session, "write_json") as output:
+            started = session.hook_packet(self.state, self.event())
+            identifier = started["required"]["session"]
+            resumed = session.session_packet(self.state, session=identifier, note="Observed fixture", next_step="Review")
+            self.assertEqual(session.main(["--state", str(self.state), "govern", "--session", identifier,
+                "--argv-json", '["rg", "fixture", "input.txt"]', "--effect", "read_only"]), 0)
+        self.assertEqual(resumed["required"]["binding_kind"], "bounded_context")
+        self.assertFalse(resumed["required"]["inventory_complete"])
+        self.assertEqual(output.call_args.args[0]["packet"]["decision"], "requires_revalidation")
+        raw = json.loads(Path(resumed["required"]["raw_pointer"]).read_text())
+        self.assertFalse(raw["provenance"]["file_inventory_complete"])
+        self.assertIn("source_inventory_not_collected", raw["provenance"]["context_omissions"])
+
+    def test_context_paths_are_bounded_and_instruction_creation_invalidates(self):
+        first = session.current_provenance(self.root)
+        self.assertLessEqual(len(first["context_paths"]), 64)
+        (self.base / "AGENTS.md").write_text("Ancestor instructions.\n")
+        ancestor = session.current_provenance(self.root)
+        self.assertNotEqual(first["snapshot_id"], ancestor["snapshot_id"])
+        (self.root / "input.txt").write_text("Unrelated task input.\n")
+        self.assertEqual(ancestor["snapshot_id"], session.current_provenance(self.root)["snapshot_id"])
+        (self.root / "AGENTS.md").write_bytes(b"x" * 65537)
+        incomplete = session.current_provenance(self.root)
+        self.assertFalse(incomplete["context_complete"])
+        self.assertIn("unavailable:AGENTS.md", incomplete["context_omissions"])
+        started = self.start()
+        arguments = {"session": started["required"]["session"], "note": "Observe", "next_step": "Review", "operation_id": "incomplete"}
+        session.session_packet(self.state, **arguments)
+        with self.assertRaisesRegex(HarnessError, "STALE_OPERATION_REPLAY: context changed or unavailable"):
+            session.session_packet(self.state, **arguments)
+
+    def test_deep_unicode_context_metadata_and_checkpoint_replay_are_bounded(self):
+        for index in range(24):
+            self.root = self.root / ("路径😀" * 4 + str(index).zfill(2))
+            self.root.mkdir()
+        current = session.current_provenance(self.root)
+        self.assertLess(len(canonical(current)), 16384)
+        self.assertTrue(all(path.isascii() and len(path) <= 128 for path in current["context_paths"]))
+        self.assertEqual(current["context_path_encoding"], "ancestor_relative_v1")
+        started = self.start()
+        arguments = {"session": started["required"]["session"], "note": "Observe", "next_step": "Review", "operation_id": "deep"}
+        packet = session.session_packet(self.state, **arguments)
+        self.assertEqual(session.session_packet(self.state, **arguments), packet)
+
+    def test_bounded_context_cannot_enable_ledger_reuse_or_full_acceptance(self):
+        from agent_harness.core import snapshot
+        from agent_harness.execution_ledger import Ledger, provenance_for, validity
+        full = provenance_for(self.root, snapshot({"cwd": str(self.root)}))
+        bounded = session.current_provenance(self.root)
+        self.assertEqual(validity(full, full), "valid")
+        self.assertEqual(validity(full, bounded), "needs_revalidation")
+        self.assertEqual(validity(bounded, bounded), "needs_revalidation")
+        legacy = {key: full[key] for key in ("repository_identity", "revision", "snapshot_id", "files")}
+        self.assertEqual(validity(legacy, {**bounded, "snapshot_id": legacy["snapshot_id"]}), "needs_revalidation")
+        memory = Memory(self.state / "memory", bounded["repository_identity"], enabled=True)
+        old_checkpoint = {"provenance": full, "evidence_ids": [], "checkpoint": "Legacy checkpoint", "next_step": "Revalidate"}
+        observed = session.checkpoint_observation(memory, old_checkpoint, self.state / "legacy.yaml", bounded)
+        self.assertEqual(observed["validity_status"], "needs_revalidation")
+        self.assertEqual(observed["payload"]["source_validity"], "unverified")
+        self.assertEqual(old_checkpoint["provenance"], full)
+        ledger = Ledger(self.state, bounded["repository_identity"])
+        with patch("agent_harness.execution_ledger._rg_reuse_context", side_effect=AssertionError("Bounded proof cannot reuse")):
+            advisory = ledger.govern({"argv": ["rg", "fixture", "input.txt"], "effect": "read_only",
+                "input_closure_complete": True, "toolchain_digest": "a" * 64,
+                "env_digest": "b" * 64, "config_digest": "c" * 64}, bounded)
+        self.assertEqual(advisory["decision"], "requires_revalidation")
+        with patch("agent_harness.native.snapshot", side_effect=HarnessError("Native snapshot failed (exit 1): inventory limit")):
+            with self.assertRaisesRegex(HarnessError, "Native snapshot failed"):
+                snapshot({"cwd": str(self.root)})
 
     def test_symlink_state_and_evidence_are_rejected(self):
         """Private store и evidence не могут перенаправляться символической ссылкой."""
@@ -162,7 +247,7 @@ class EscapedPathNativeBudgetTests(unittest.TestCase):
     """Exercise real native APIs with Windows-like serialized path costs on POSIX."""
 
     start = NativeSessionTests.start
-    test_source_change_prevents_stale_recall = NativeSessionTests.test_source_change_prevents_stale_recall
+    test_context_change_and_bounded_memory_never_prove_source_facts = NativeSessionTests.test_context_change_and_bounded_memory_never_prove_source_facts
 
     def setUp(self):
         NativeSessionTests.setUp(self)
