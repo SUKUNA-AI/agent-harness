@@ -901,7 +901,10 @@ with SupervisorStore(sys.argv[1]).lease('actual competing writer'):
             process.terminate();process.communicate(timeout=5)
 
     def test_explicit_no_progress_reopening_consumes_original_remaining_reservation(self):
-        owner=self.fixture(mode='no-progress',attempts=3,memory=True);deadline=owner.state['deadline']
+        # Both the original task and the controlled reopening share one deadline.
+        owner=self.fixture(mode='no-progress',attempts=3,memory=True,
+            contract_edit=lambda c:c['budgets'].update(max_wall_seconds=2*c['budgets']['max_wall_seconds']))
+        deadline=owner.state['deadline']
         result=owner.start();self.assertEqual(result['status'],'NO_PROGRESS',result)
         self.assertEqual(owner.state['attempts_used'],2)
         with self.assertRaises(HarnessError):Supervisor(owner.path,adapter=self.adapter).resume()
@@ -947,7 +950,8 @@ with SupervisorStore(sys.argv[1]).lease('actual competing writer'):
     def test_managed_plan_and_quality_drift_block_then_exact_restoration_resumes_one_reservation(self):
         fixture=managed_fixtures.VerifiedFlowTests();fixture.setUp()
         try:
-            owner,fake=fixture.fixture();reservation=self.interrupted_reservation(owner)
+            owner,fake=fixture.fixture(wall_seconds=managed_fixtures.TWO_PHASE_WALL_SECONDS)
+            reservation=self.interrupted_reservation(owner)
             calls=fake.with_suffix('.calls').read_bytes();counter=owner.state['attempts_used'];deadline=owner.state['deadline']
             materials=protocol._materials(owner)
             self.assertEqual(len(materials),2)  # origin bootstrap, then current integrated input
@@ -977,6 +981,7 @@ with SupervisorStore(sys.argv[1]).lease('actual competing writer'):
             resumed=Supervisor(owner.path,adapter=owner.adapter);result=resumed.resume()
             self.assertEqual(result['status'],'ACCEPTED',result)
             self.assertEqual(protocol.reservations(resumed),[reservation]);self.assertEqual(resumed.state['attempts_used'],counter)
+            self.assertEqual(resumed.state['deadline'],deadline)
             self.assertEqual(origin_path.read_bytes(),origin_bytes)
             self.assertEqual(len(run.state()['attempts']),2)
         finally:fixture.doCleanups()

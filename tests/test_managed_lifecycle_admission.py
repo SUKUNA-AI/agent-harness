@@ -196,7 +196,8 @@ class ManagedLifecycleAdmissionTests(unittest.TestCase):
             self.assertTrue(any(r['unresolved'] for r in GlobalSlots(supervisor.state_dir).inventory(supervisor.state['run_id'])))
 
     def test_real_stopped_roles_respect_timeout_caps_and_original_deadline(self):
-        supervisor,fake=self.planner_fixture(contract_edit=lambda c:c['budgets'].update(turn_timeout_seconds=17))
+        supervisor,fake=self.planner_fixture(wall_seconds=fixtures.TWO_PHASE_WALL_SECONDS,
+            contract_edit=lambda c:c['budgets'].update(turn_timeout_seconds=17))
         deadline=supervisor.state['deadline']; observed={}; run=supervisor.adapter.run
         def timed(prompt,**options):
             node=next(r['node_id'] for r in reversed(supervisor.receipts().records()) if r['record_type']=='invocation_intent')

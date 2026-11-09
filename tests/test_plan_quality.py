@@ -71,7 +71,8 @@ class PlanQualityTests(unittest.TestCase):
             value=self.planner(value,atomic)
             rejection="\n if quality_packet['binding']['round']==1:\n  quality_verdict='requires_revision';quality_findings=[dict(node_ids=[quality_nodes[0]['node_id']],reason='Unrelated left and right outcomes are bundled only because cap is one.',revision_request='Use independent coherent outcomes with their own checks.')];quality_nodes[0]['atomicity']='too_broad'\n"
             return value.replace(" quality_wire=dict(",rejection+" quality_wire=dict(")
-        supervisor,_=self.fixture(plan_edit=giant,script_edit=script)
+        supervisor,_=self.fixture(plan_edit=giant,script_edit=script,
+                                  wall_seconds=fixtures.TWO_PHASE_WALL_SECONDS)
         deadline=supervisor.state['deadline']
         result=supervisor.start()
         self.assertEqual(result['status'],'ACCEPTED',result)
