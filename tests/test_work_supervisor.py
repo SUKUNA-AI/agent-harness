@@ -27,7 +27,8 @@ if 'resume' in args: assert args[args.index('resume')+1]==sid
 def event(t,**v):print(json.dumps(dict(type=t,**v)),flush=True)
 event('thread.started',thread_id=sid);event('turn.started')
 calls=pathlib.Path(__file__).with_suffix('.calls')
-with calls.open('a') as f:f.write(('resume' if 'resume' in args else 'exec')+'\n')
+with calls.open('a', encoding='utf-8', newline='\n') as f:
+ f.write(('resume' if 'resume' in args else 'exec')+'\n')
 if 'HARNESS_FINAL_REVIEW' in prompt:
  event('item.completed',item={'type':'agent_message','text':json.dumps({'schema_version':1,'verdict':'approved','findings':[]})})
  event('turn.completed',usage={'input_tokens':10,'output_tokens':3});raise SystemExit

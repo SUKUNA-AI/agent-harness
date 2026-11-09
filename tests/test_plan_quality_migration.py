@@ -108,7 +108,7 @@ Supervisor.create(sys.argv[2],run_dir=sys.argv[3],cwd=sys.argv[4],state_dir=sys.
         return self.store.recover(read_only=True)['state']
 
     def files(self):
-        return {str(path.relative_to(self.run)): path.read_bytes() for path in self.run.rglob('*')
+        return {path.relative_to(self.run).as_posix(): path.read_bytes() for path in self.run.rglob('*')
                 if path.is_file() and 'locks' not in path.relative_to(self.run).parts}
 
     def preview(self, **kwargs):
