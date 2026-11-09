@@ -425,7 +425,8 @@ print(json.dumps(result))
                 root = Path(temp)
                 killed = subprocess.run([sys.executable, "-c", script, str(tests), str(root), boundary], capture_output=True, timeout=30)
                 self.assertEqual(killed.returncode, -9, killed.stderr.decode())
-                original_deadline = load(root / "private" / "run" / "state.yaml")["deadline"]
+                state_path = root / "private" / "run" / "state.yaml"
+                original_deadline = load(state_path)["deadline"]
                 watchdog = load(root / "task.yaml")["budgets"]["max_wall_seconds"]
                 # Recovery can use the fixture's wall budget. The child enforces the persisted deadline.
                 recovered = subprocess.run(
@@ -435,6 +436,6 @@ print(json.dumps(result))
                 self.assertEqual(recovered.returncode, 0, recovered.stderr.decode())
                 result = json.loads(recovered.stdout)
                 self.assertEqual(result["status"], "ACCEPTED", result)
-                self.assertEqual(result["deadline"], original_deadline)
+                self.assertEqual(load(state_path)["deadline"], original_deadline)
                 self.assertEqual((result["metrics"]["input_tokens"], result["metrics"]["output_tokens"]), (40, 12))
                 self.assertEqual((root / "fake.calls").read_text().splitlines(), ["exec"] * 4)
