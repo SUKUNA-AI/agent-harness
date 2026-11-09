@@ -161,7 +161,8 @@ class PlanQualityTests(unittest.TestCase):
     def test_completion_assessment_publication_boundaries_recover_without_double_call(self):
         for index,boundary in enumerate(('completion','artifact','receipt','state')):
             if index:self.setUp()
-            supervisor,_=self.fixture();deadline=supervisor.state['deadline']
+            supervisor,_=self.fixture(wall_seconds=fixtures.TWO_PHASE_WALL_SECONDS)
+            deadline=supervisor.state['deadline']
             publish=ExecutionReceipts.publish;artifact=plan_quality._publish;save=supervisor._save
             def crash_publish(receipts,value):
                 result=publish(receipts,value)
