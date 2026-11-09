@@ -28,6 +28,24 @@ class StrictYAMLError(ValueError):
 class _Loader(yaml.SafeLoader):
     yaml_implicit_resolvers = {}
 
+    def __init__(self, stream):
+        super().__init__(stream)
+        self._token_depth = 0
+
+    def get_token(self):
+        # Enforce lexical limits as the parser consumes each token.
+        token = super().get_token()
+        if isinstance(token, (yaml.TagToken, yaml.AnchorToken, yaml.AliasToken, yaml.DirectiveToken)):
+            raise StrictYAMLError("Tags, anchors, aliases and directives are forbidden")
+        if isinstance(token, (yaml.BlockMappingStartToken, yaml.BlockSequenceStartToken,
+                              yaml.FlowMappingStartToken, yaml.FlowSequenceStartToken)):
+            self._token_depth += 1
+            if self._token_depth > MAX_DEPTH:
+                raise StrictYAMLError("YAML exceeds depth limit")
+        elif isinstance(token, (yaml.BlockEndToken, yaml.FlowMappingEndToken, yaml.FlowSequenceEndToken)):
+            self._token_depth -= 1
+        return token
+
     def construct_mapping(self, node, deep=False):
         result = {}
         for key_node, value_node in node.value:
@@ -76,8 +94,7 @@ def _schema(value):
             source = SCHEMAS / path
             installed = Path(__file__).resolve().parent / "schemas" / path
             path = source if source.is_file() else installed
-        data = read_regular_file(path, max_bytes=MAX_BYTES)
-        return json.loads(data)
+        value = json.loads(read_regular_file(path, max_bytes=MAX_BYTES))
     if isinstance(value, (dict, bool)):
         return value
     raise StrictYAMLError("Schema must be an object, boolean, or schema filename")
@@ -225,22 +242,12 @@ def loads(text, schema=None):
     if not isinstance(text, str) or len(text.encode("utf-8")) > MAX_BYTES:
         raise StrictYAMLError("YAML exceeds byte limit or is not text")
     try:
-        depth = 0
-        for token in yaml.scan(text, Loader=_Loader):
-            if isinstance(token, (yaml.TagToken, yaml.AnchorToken, yaml.AliasToken, yaml.DirectiveToken)):
-                raise StrictYAMLError("Tags, anchors, aliases and directives are forbidden")
-            if isinstance(token, (yaml.BlockMappingStartToken, yaml.BlockSequenceStartToken, yaml.FlowMappingStartToken, yaml.FlowSequenceStartToken)):
-                depth += 1
-                if depth > MAX_DEPTH:
-                    raise StrictYAMLError("YAML exceeds depth limit")
-            elif isinstance(token, (yaml.BlockEndToken, yaml.FlowMappingEndToken, yaml.FlowSequenceEndToken)):
-                depth -= 1
         value = yaml.load(text, Loader=_Loader)
     except (yaml.YAMLError, RecursionError, UnicodeError) as error:
         raise StrictYAMLError("Invalid Strict YAML: " + str(error)[:512]) from error
-    _bounds(value)
     if schema is not None:
-        validate(value, schema)
+        return validate(value, schema)
+    _bounds(value)
     return value
 
 

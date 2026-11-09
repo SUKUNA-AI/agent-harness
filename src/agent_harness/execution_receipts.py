@@ -12,7 +12,7 @@ import uuid
 
 from . import __version__, telemetry
 from .core import HarnessError, digest, now
-from .strict_yaml import validate
+from .strict_yaml import _schema, validate
 
 SCHEMA = "execution-receipt.schema.json"
 REQUIRED_PAYLOAD = {
@@ -42,8 +42,13 @@ def record_schema(version):
     return SCHEMA if version == 1 else "execution-receipt.v2.schema.json"
 
 
-def validate_record(record):
-    validate(record, record_schema(record["schema_version"]))
+def validate_record(record, *, replay_schemas=None):
+    schema = record_schema(record["schema_version"])
+    if replay_schemas is not None:
+        if schema not in replay_schemas:
+            replay_schemas[schema] = _schema(schema)
+        schema = replay_schemas[schema]
+    validate(record, schema)
     required = (REQUIRED_PAYLOAD if record["schema_version"] == 1 else V2_PAYLOAD)[record["record_type"]]
     optional = {"error"} if record["record_type"] == "completion" else set()
     if not required <= set(record["payload"]) or set(record["payload"]) - required - optional:
@@ -65,6 +70,7 @@ def validate_record(record):
         binding = record["payload"]["review_binding"]
         if not isinstance(binding, dict) or not {binding["policy_digest"], binding["schema_digest"], digest(binding)} <= set(record["input_refs"]):
             raise HarnessError("Review receipt lacks exact policy/schema input binding")
+    return schema
 
 
 def build_digest():
@@ -86,12 +92,13 @@ class ExecutionReceipts:
 
     def _records_locked(self, *, repair=False):
         records = {}
+        schemas = {}
         for event in self.store.events():
             payload = event["payload"]
             if payload.get("kind") != "execution_receipt":
                 continue
             record = payload["receipt"]
-            validate_record(record)
+            schema = validate_record(record, replay_schemas=schemas)
             content = dict(record)
             supplied = content.pop("payload_digest")
             if supplied != digest(content):
@@ -104,7 +111,7 @@ class ExecutionReceipts:
                 raise HarnessError("Execution receipt subject binding mismatch")
             name = "receipts/" + record_id + ".yaml"
             if self.store.path(name).exists():
-                if self.store.read(name, record_schema(record["schema_version"])) != record:
+                if self.store.read(name, schema) != record:
                     raise HarnessError("Execution receipt projection integrity conflict")
             elif repair:
                 self.store.write(name, record, record_schema(record["schema_version"]), exclusive=True)
