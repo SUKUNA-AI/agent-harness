@@ -1,4 +1,4 @@
-# Эксплуатация совместимого Run API — 1.5.1
+# Эксплуатация совместимого Run API — 1.6.0
 
 Для foreground исполнения Codex используйте новый
 [Execution Supervisor](EXECUTION_SUPERVISOR_RU.md): `work start/status/watch/resume/stop/report`.

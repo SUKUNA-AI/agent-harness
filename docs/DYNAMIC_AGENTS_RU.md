@@ -1,4 +1,4 @@
-# Динамические агенты и DAG — 1.5.1
+# Динамические агенты и DAG — 1.6.0
 
 [Supervisor](EXECUTION_SUPERVISOR_RU.md) · [Координация](ORCHESTRATION_RU.md) · [Приёмка](ACCEPTANCE.md)
 
@@ -16,8 +16,11 @@ state roots намеренно независимы; для общей квот�
 
 ## План и условный spawn
 
-Простой managed task с cap1 получает один bounded node. Для полезной
-декомпозиции planner вызывается с `--output-schema` по
+Для legacy contract v1 cap1 допускает один implicit node. Managed contract v2
+требует validated explicit plan либо structured planner также при cap1;
+новый managed run дополнительно проходит plan-quality assessment. Cap1
+ограничивает конкурентность и не объединяет независимые outcomes автоматически.
+Planner вызывается с `--output-schema` по
 [`agent-plan.schema.json`](../schemas/agent-plan.schema.json), либо используется
 явный `work start --plan PLAN.yaml`. План сохраняется в Strict YAML.
 
@@ -26,7 +29,7 @@ Supervisor проверяет уникальные task IDs, известные 
 исходные budgets и пересечения одновременно editable scopes. JSON syntax и
 schema validity не заменяют эту semantic validation.
 
-![DAG, worktrees и единая приёмка](diagrams/managed-worktrees.svg)
+![Managed v2: DAG и единая приёмка](diagrams/managed-worktrees.svg)
 
 [Редактировать в draw.io](diagrams/managed-worktrees.drawio) · [Все схемы](diagrams/README.md)
 
@@ -35,16 +38,16 @@ schema validity не заменяют эту semantic validation.
 
 ```mermaid
 flowchart TD
-    P["Schema + semantic validation"] --> Q["Ready set / critical-path heuristic"]
+    P["Plan v2: schema / semantic validation + quality gate"] --> Q["Ready set / critical-path heuristic"]
     Q -->|"независимый scope A"| A["Codex A / owned worktree A"]
     Q -->|"независимый scope B"| B["Codex B / owned worktree B"]
-    A --> PA["Scoped patch A + session / evidence pointers"]
-    B --> PB["Scoped patch B + session / evidence pointers"]
-    PA --> I["Один staging integrator: apply --check, затем apply"]
+    A --> PA["Worker A: local acceptance, patch + session / receipts"]
+    B --> PB["Worker B: local acceptance, patch + session / receipts"]
+    PA --> I["Staging: durable integration + integrated node checks"]
     PB --> I
-    I --> D["Следующая DAG wave от новой staging base"]
+    I --> D["Current node receipts: открыть зависимую работу"]
     D --> Q
-    I --> F["Unified source freeze + checks + gate"]
+    I --> F["Один candidate: coverage, fresh review v3 + core gate"]
     F --> V["Accepted staging candidate / actual cwd в report"]
     I -->|"conflict / scope violation"| C["BLOCKED_AMBIGUOUS: bounded conflict task"]
 ```

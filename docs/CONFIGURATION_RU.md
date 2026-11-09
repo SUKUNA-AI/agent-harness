@@ -1,6 +1,6 @@
 # Конфигурация Codex и контракт установщика
 
-Справочник релиза **1.5.1**, актуальность **2026-11-02**. Изменения harness
+Справочник релиза **1.6.0**, актуальность **2026-11-09**. Изменения harness
 определяет [installation.py](../src/agent_harness/installation.py), инвентаризацию
 источников — [diagnostics.py](../src/agent_harness/diagnostics.py).
 Синтаксис и runtime-приоритеты клиента сверяются с
@@ -13,6 +13,8 @@
 | Источник | Содержимое | Как используется |
 |---|---|---|
 | `$CODEX_HOME/config.toml` | Пользовательские параметры клиента, agent defaults, MCP | Базовая конфигурация выбранного локального профиля |
+| `$CODEX_HOME/hooks.json` | Управляемая SessionStart-группа и сохранённые foreign hooks | Определение hook для штатного trust и запуска новым клиентом |
+| `$CODEX_HOME/agent-harness-hook.py` | Owned launcher установленного session adapter | Установщик обновляет свой launcher; файл сам по себе не доказывает invocation |
 | Соседний `<name>.config.toml` | Объявленные параметры профиля | `doctor` перечисляет; выбранный `--profile` этой командой не наблюдается |
 | Старый `[profiles.<name>]` | Legacy inline profile values | `doctor` показывает как источник, не обещая поддержку формата клиентом |
 | `$CODEX_HOME/agents/*.toml` | Custom native-роли | Имя роли определяется полем `name`, а не только filename |
@@ -45,6 +47,7 @@ Malformed/duplicate/неподдерживаемая форма управляе
 | `model_context_window`, `tool_output_token_limit`, `service_tier` | Не задавать | Сохранить |
 | `approval_policy`, `sandbox_mode`, Windows sandbox | Не задавать | Сохранить |
 | MCP, plugins, аккаунты и credentials | Не подключать | Не переносить и не подменять |
+| SessionStart в `hooks.json` и owned launcher | Создать managed handler и launcher | Сохранить foreign hooks; duplicate/unmanaged conflict требует явного разбора/adoption |
 
 Если присутствуют оба cap keys, для обычной установки учитываются оба лимита
 и предпочтение overlay; затем legacy alias удаляется либо переименовывается.

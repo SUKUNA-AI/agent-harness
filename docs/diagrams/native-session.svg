@@ -1,0 +1,102 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="1200" height="1610" viewBox="0 0 1200 1610" role="img" aria-labelledby="title desc">
+  <title id="title">Native-сессия: bootstrap и продолжение</title>
+  <desc id="desc">Agent Harness 1.6.0. Текстовое описание и Mermaid находятся в связанном руководстве.</desc>
+  <rect width="1200" height="1610" fill="#FFFFFF" />
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#526A82" />
+    </marker>
+  </defs>
+  <text x="30" y="48" font-family="Arial, sans-serif" font-size="24" text-anchor="start" fill="#18324F" font-weight="bold">
+    <tspan x="30" y="48.0">Native-сессия: bootstrap и продолжение</tspan>
+  </text>
+  <polyline points="600.0,196 600.0,250" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <polyline points="460,305 270,305 270,420" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <rect x="345.0" y="287.0" width="40" height="20" fill="white" />
+  <text x="365.0" y="302.0" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" fill="#18324F">
+    <tspan x="365.0" y="302.0">Да</tspan>
+  </text>
+  <polyline points="740,305 930,305 930,420" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <rect x="773.0" y="287.0" width="124" height="20" fill="white" />
+  <text x="835.0" y="302.0" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" fill="#18324F">
+    <tspan x="835.0" y="302.0">Нет / degraded</tspan>
+  </text>
+  <polyline points="270,506 270,545 600,545 600,570" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <polyline points="930,506 930,545 600,545 600,570" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <polyline points="600.0,656 600.0,710" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <polyline points="600.0,796 600.0,850" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <polyline points="600.0,936 600.0,990" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <polyline points="600.0,1076 600.0,1130" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <polyline points="600.0,1216 600.0,1270" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <polyline points="460,1325 270,1325 270,1450" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <rect x="345.0" y="1307.0" width="40" height="20" fill="white" />
+  <text x="365.0" y="1322.0" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" fill="#18324F">
+    <tspan x="365.0" y="1322.0">Да</tspan>
+  </text>
+  <polyline points="740,1325 930,1325 930,1450" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <rect x="815.0" y="1307.0" width="40" height="20" fill="white" />
+  <text x="835.0" y="1322.0" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" fill="#18324F">
+    <tspan x="835.0" y="1322.0">Нет</tspan>
+  </text>
+  <rect x="450" y="110" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="600.0" y="158.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="158.0">Новая сессия: root / native ID</tspan>
+  </text>
+  <polygon points="600.0,250 740,305.0 600.0,360 460,305.0" fill="#FFF2CC" stroke="#54718E" stroke-width="1.5" />
+  <text x="600.0" y="310.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="301.0">Hook поддержан, доверен</tspan>
+    <tspan x="600.0" y="319.0">и успешно исполнился?</tspan>
+  </text>
+  <rect x="120" y="420" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="270.0" y="468.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="270.0" y="468.0">SessionStart → session adapter</tspan>
+  </text>
+  <rect x="780" y="420" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="930.0" y="468.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="930.0" y="468.0">Явный session start: fallback</tspan>
+  </text>
+  <rect x="450" y="570" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="600.0" y="618.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="609.0">Memory(enabled=True), recall,</tspan>
+    <tspan x="600.0" y="627.0">Ledger inform + reducer</tspan>
+  </text>
+  <rect x="450" y="710" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="600.0" y="758.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="749.0">Packet: required context,</tspan>
+    <tspan x="600.0" y="767.0">pointers / omissions / stale</tspan>
+  </text>
+  <rect x="450" y="850" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="600.0" y="898.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="889.0">Codex: текущая цель /</tspan>
+    <tspan x="600.0" y="907.0">разрешённая работа</tspan>
+  </text>
+  <rect x="450" y="990" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="600.0" y="1038.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="1029.0">Checkpoint + evidence SHA256;</tspan>
+    <tspan x="600.0" y="1047.0">явный goal update при изменении</tspan>
+  </text>
+  <rect x="450" y="1130" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="600.0" y="1178.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="1169.0">Resume / compact: bounded recall</tspan>
+    <tspan x="600.0" y="1187.0">в прежнем repository namespace</tspan>
+  </text>
+  <polygon points="600.0,1270 740,1325.0 600.0,1380 460,1325.0" fill="#FFF2CC" stroke="#54718E" stroke-width="1.5" />
+  <text x="600.0" y="1330.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="1321.0">Provenance / evidence</tspan>
+    <tspan x="600.0" y="1339.0">актуальны?</tspan>
+  </text>
+  <rect x="120" y="1450" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="270.0" y="1498.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="270.0" y="1489.0">Продолжить разрешённый шаг</tspan>
+    <tspan x="270.0" y="1507.0">по current evidence</tspan>
+  </text>
+  <rect x="780" y="1450" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="930.0" y="1498.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="930.0" y="1489.0">Retrieval и применимые проверки;</tspan>
+    <tspan x="930.0" y="1507.0">история не становится PASS</tspan>
+  </text>
+  <text x="30" y="1590" font-family="Arial, sans-serif" font-size="13" text-anchor="start" fill="#18324F">
+    <tspan x="30" y="1590.0">1.6.0 • обзор; required unknown/skipped не становятся PASS</tspan>
+  </text>
+</svg>

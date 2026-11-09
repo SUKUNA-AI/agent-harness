@@ -3,7 +3,7 @@
 Этот индекс разделяет актуальные инструкции, короткие процедуры для агента и
 снимки прошлых проверок. Начальная точка — [README](../README.md).
 
-Новые contracts correction candidate и ограничения приёмки:
+Контракты исполнения, включённые в 1.6.0, и границы приёмки:
 [Стабилизация исполнения](STABILIZATION_RU.md).
 
 ## Установить и настроить
@@ -13,17 +13,19 @@
 | [SETUP_RU](../SETUP_RU.md) | Первая установка, обновление, перенос, dry-run, rollback и recovery; POSIX/PowerShell |
 | [Конфигурация](CONFIGURATION_RU.md) | Источники настроек, модели/effort, child cap, 500000 и optional output budget |
 | [Автоподключение](AUTOLOAD_RU.md) | AGENTS/override, skills, новый чат и проверка реального клиента |
+| [Native-сессия](NATIVE_SESSION_RU.md) | Установленный SessionStart hook, короткий bootstrap, checkpoint и проверка свежести |
 | [Native bundles](../bin/README.md) | Готовый бинарник, сборка, version/hash mismatch и поддерживаемые платформы |
 
 ## Понять и применять
 
-Новый `work` namespace описан в следующих действующих руководствах:
+Команды `work` и проверяемая очередь описаны в следующих действующих руководствах:
 
 | Документ | Содержание |
 | --- | --- |
 | [Execution Supervisor](EXECUTION_SUPERVISOR_RU.md) | Start/status/watch/resume/stop/report, exact sessions, bounded repair |
 | [Memory и context](MEMORY_AND_CONTEXT_RU.md) | Ledger inform/govern, provenance, memory, reducer, четыре RepoMap query |
 | [Dynamic agents](DYNAMIC_AGENTS_RU.md) | Native/managed mode, global slots, DAG, staging integration |
+| [Verified task flow](VERIFIED_TASK_FLOW_RU.md) | Mission/plan v2, plan-quality gate, node acceptance, coverage и fresh review |
 | [State и migration](STATE_FORMATS_AND_MIGRATION_RU.md) | Strict YAML, схемы, journal и сохранение старых JSON |
 | [Performance/eval](PERFORMANCE_EVAL_RU.md) | Реальные usage, A/B, TOON eligibility и insufficient_data |
 | [Источники](SOURCES_AND_EVALS.md) | Перенесённые механизмы и границы научных claims |
@@ -31,9 +33,9 @@
 | Документ | Содержание |
 | --- | --- |
 | [Архитектура](ARCHITECTURE_RU.md) | Слои, границы Python/Rust/Codex, поток контекста и восстановление |
-| [Галерея draw.io](diagrams/README.md) | Редактируемые XML, реально экспортированные SVG, связи с Mermaid source и кодом |
+| [Галерея draw.io](diagrams/README.md) | Редактируемые XML, эквивалентные SVG, связи с Mermaid source и кодом |
 | [CLI reference](CLI_REFERENCE_RU.md) | Все маршруты, аргументы, defaults, единицы лимитов и exit codes |
-| [Эксплуатация](OPERATIONS.md) | Полный локальный пример managed run, status, attempt, checkpoint и resume |
+| [Эксплуатация](OPERATIONS.md) | Полный локальный пример совместимого ручного Run API: status, attempt, checkpoint и resume |
 | [Приёмка](ACCEPTANCE.md) | Evidence, receipts, freshness, gate и независимый evaluator |
 | [Координация](ORCHESTRATION_RU.md) | Делегация, DAG, slots, ownership, review и repair |
 | [Контекст и Rust](CONTEXT_AND_NATIVE_RU.md) | RepoMap, packets, excerpts, budgets, long-running tasks и производительность |

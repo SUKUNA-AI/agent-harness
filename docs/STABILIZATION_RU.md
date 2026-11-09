@@ -1,13 +1,16 @@
 # Стабилизация исполнения и native-контекста
 
-Это correction candidate относительно 1.5.1. Наличие изменений в ветке не
-означает прохождение platform/client/evaluation gates или выпуск новой версии.
+Эти контракты включены в опубликованный релиз **1.6.0** после линии 1.5.1.
+[Состав и результаты выпуска](RELEASE_NOTES_1.6.0.md) закреплены его тегом и
+отдельным `VERIFICATION.json`. Публикация пакета не подтверждает все
+platform/client/evaluation gates.
 Required skipped/not_run/unknown не равны PASS; baseline logs не принимают новый SHA.
 
 ## Исполнение
 
-Work-state v2 сохраняет полный persisted DAG и invocation/completion/integration
-receipts. Intent не доказывает dispatch; unknown outcome требует reconciliation.
+Work contract/plan v2 задаёт mission и проверяемые узлы. Новые managed runs
+используют work-state v3 с plan-quality assessment; совместимый state v2
+сохраняет persisted DAG и invocation/completion/integration receipts. Intent не доказывает dispatch; unknown outcome требует reconciliation.
 Usage v3 считает уникальные подтверждённые вызовы. Null и legacy не становятся
 нулём; token cap блокирует dispatch и приёмку при неизвестном покрытии.
 Backend hard cap без подтверждённой capability не объявляется.
@@ -17,16 +20,33 @@ Gate закрепляет транзитивную dependency closure, берё�
 исторический verdict, но делает current verification stale. Cooperative locks
 и worktree не являются OS sandbox.
 
+![Durable execution: intent, receipt и gate](diagrams/durable-execution.svg)
+
+[Редактировать в draw.io](diagrams/durable-execution.drawio) · [Все схемы](diagrams/README.md)
+
+<details>
+<summary>Mermaid source той же схемы</summary>
+
 ```mermaid
-flowchart LR
-  P[Persisted plan] --> I[Invocation intent]
-  I --> C[Completion receipt]
-  C --> U[Usage projection]
-  C --> T[Integration intent]
-  T --> R[Integration receipt]
-  R --> G[Checks and dependency generation guard]
-  G --> A[Accepted as of dependency vector]
+flowchart TD
+    P["Persisted plan"]
+    I["Invocation intent"]
+    C["Completion receipt"]
+    U["Usage projection: уникальные подтверждённые вызовы"]
+    T["Integration intent"]
+    R["Integration receipt"]
+    G["Checks + dependency generation guard"]
+    A["Accepted as of current dependency vector"]
+    P --> I
+    I --> C
+    C --> U
+    C --> T
+    T --> R
+    R --> G
+    G --> A
 ```
+
+</details>
 
 ## Контекст и native
 

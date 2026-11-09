@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<mxfile host="app.diagrams.net" agent="Native Agent Harness documentation" version="32.6.1">
+<mxfile host="app.diagrams.net" agent="Native Agent Harness documentation" version="32.6.1" modified="2026-11-09T09:01:17Z">
   <diagram id="lsp-rename" name="LSP rename: preview, apply и recovery">
     <mxGraphModel dx="1400" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1230" pageHeight="1430" math="0" shadow="0" background="#FFFFFF">
       <root>
@@ -146,7 +146,7 @@
         <mxCell id="failure" value="Условие: ошибка либо конкурентная правка" style="rounded=0;html=0;fillColor=none;dashed=1;strokeColor=#A48A33;align=left;verticalAlign=top;spacing=8;fontFamily=Arial;fontSize=13;fontColor=#7C651D;" parent="1" vertex="1">
           <mxGeometry x="25" y="970" width="1165" height="240" as="geometry" />
         </mxCell>
-        <mxCell id="footer" value="1.5.0 • LSP закрывается после preview; apply сверяет сохранённый plan" style="text;html=0;align=left;fontFamily=Arial;fontSize=13;fontColor=#526A82;" parent="1" vertex="1">
+        <mxCell id="footer" value="1.6.0 • LSP закрывается после preview; apply сверяет сохранённый plan" style="text;html=0;align=left;fontFamily=Arial;fontSize=13;fontColor=#526A82;" parent="1" vertex="1">
           <mxGeometry x="30" y="1380" width="1170" height="30" as="geometry" />
         </mxCell>
       </root>

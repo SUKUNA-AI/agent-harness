@@ -16,8 +16,10 @@ SessionStart hook к локальному профилю Codex. Операции
 Аккаунты, службы, БД и дополнительные Python-пакеты основной установке не нужны.
 MCP и plugin подключаются отдельно по конкретной задаче.
 
-Возьмите checkout либо полный релизный ZIP из
-[репозитория](https://github.com/SUKUNA-AI/agent-harness). Архив исходников GitHub
+Возьмите checkout либо
+[полный ZIP 1.6.0](https://github.com/SUKUNA-AI/agent-harness/releases/download/v1.6.0/agent-harness-1.6.0.zip).
+Сверьте `SHA256SUMS`, `release-manifest.json` и source revision из
+[описания выпуска](docs/RELEASE_NOTES_1.6.0.md). Архив исходников GitHub
 и релизный архив с native-бинарниками различаются. Сохраните распакованный пакет
 в постоянной папке: bootstrap, роли и skills ссылаются на его policy/workflows.
 Не устанавливайте из временной загрузки, которую затем удалите.
@@ -364,7 +366,7 @@ flowchart TD
     B --> C{"Конфликт или неподдержанные metadata?"}
     C -->|"Да"| D["Сохранить файлы и разобрать причину"]
     C -->|"Нет"| E["Apply: backups и install manifest"]
-    E --> F["Verify: структура, затем native input"]
+    E --> F["Verify: структура / native input; SessionStart trust — отдельно"]
     F --> G{"Результат подходит?"}
     G -->|"Да"| H["Новая сессия и проверка поведения"]
     G -->|"Нет"| I["Rollback plan или recovery journal"]

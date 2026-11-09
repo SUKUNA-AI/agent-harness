@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<mxfile host="app.diagrams.net" agent="Native Agent Harness documentation" version="32.6.1">
+<mxfile host="app.diagrams.net" agent="Native Agent Harness documentation" version="32.6.1" modified="2026-11-09T09:01:17Z">
   <diagram id="context-recovery" name="Checkpoint, handoff и свежесть">
     <mxGraphModel dx="1400" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1110" pageHeight="1624" math="0" shadow="0" background="#FFFFFF">
       <root>
@@ -32,10 +32,10 @@
         <mxCell id="Fresh" value="Evidence и входы актуальны?" style="rhombus;perimeter=rhombusPerimeter;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#FFF2CC;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="195" y="1136" width="300" height="112" as="geometry" />
         </mxCell>
-        <mxCell id="Continue" value="Продолжить конкретный следующий&#10;шаг" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+        <mxCell id="Continue" value="Продолжить разрешённый шаг&#10;по current evidence" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="465" y="1438" width="280" height="86" as="geometry" />
         </mxCell>
-        <mxCell id="Attempt" value="Новая attempt и нужные проверки" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+        <mxCell id="Attempt" value="Revalidation / repair:&#10;исходные attempts и deadline" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="800" y="1438" width="280" height="86" as="geometry" />
         </mxCell>
         <mxCell id="Verify" value="resume или verify-evidence" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
@@ -121,7 +121,7 @@
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="footer" value="1.5.0 • обзор; точные переходы и ограничения — в руководстве" style="text;html=0;align=left;fontFamily=Arial;fontSize=13;fontColor=#526A82;" parent="1" vertex="1">
+        <mxCell id="footer" value="1.6.0 • обзор; точные переходы и ограничения — в руководстве" style="text;html=0;align=left;fontFamily=Arial;fontSize=13;fontColor=#526A82;" parent="1" vertex="1">
           <mxGeometry x="30" y="1584" width="1050" height="30" as="geometry" />
         </mxCell>
       </root>

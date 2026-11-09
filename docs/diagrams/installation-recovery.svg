@@ -1,3 +1,202 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
-<svg xmlns="http://www.w3.org/2000/svg" style="background: #FFFFFF; background-color: #FFFFFF; color-scheme: light;" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" width="894px" height="1806px" viewBox="0 0 894 1806"><defs/><rect fill="#FFFFFF" width="100%" height="100%" x="0" y="0" style="fill: rgb(255, 255, 255);"/><g><g data-cell-id="0"><g data-cell-id="1"><g data-cell-id="title"><g><rect x="24" y="24" width="820" height="50" fill="none" stroke="none" pointer-events="all"/></g><g><g fill="#18324F" font-family="Arial" font-weight="bold" text-anchor="start" font-size="24px" style="fill: rgb(24, 50, 79);"><text x="26" y="60">Установка, проверка и откат</text></g></g></g><g data-cell-id="A"><g><rect x="124" y="122" width="280" height="86" rx="10.32" ry="10.32" fill="#edf3fa" stroke="#54718e" stroke-width="1.5" pointer-events="all" style="fill: rgb(237, 243, 250); stroke: rgb(84, 113, 142);"/></g><g><g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);"><text x="264" y="171.5">Doctor: профиль и источники</text></g></g></g><g data-cell-id="B"><g><rect x="124" y="293" width="280" height="86" rx="10.32" ry="10.32" fill="#edf3fa" stroke="#54718e" stroke-width="1.5" pointer-events="all" style="fill: rgb(237, 243, 250); stroke: rgb(84, 113, 142);"/></g><g><g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);"><text x="264" y="342.5">Dry-run: пути и адресный diff</text></g></g></g><g data-cell-id="C"><g><path d="M 264 464 L 414 520 L 264 576 L 114 520 Z" fill="#fff2cc" stroke="#54718e" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(255, 242, 204); stroke: rgb(84, 113, 142);"/></g><g><g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);"><text x="264" y="517.5">Конфликт или неподдержанные</text><text x="264" y="535.5">metadata?</text></g></g></g><g data-cell-id="D"><g><rect x="405.67" y="1581" width="280" height="86" rx="10.32" ry="10.32" fill="#edf3fa" stroke="#54718e" stroke-width="1.5" pointer-events="all" style="fill: rgb(237, 243, 250); stroke: rgb(84, 113, 142);"/></g><g><g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);"><text x="545.67" y="1621.5">Сохранить файлы и разобрать</text><text x="545.67" y="1639.5">причину</text></g></g></g><g data-cell-id="E"><g><rect x="74" y="766" width="280" height="86" rx="10.32" ry="10.32" fill="#edf3fa" stroke="#54718e" stroke-width="1.5" pointer-events="all" style="fill: rgb(237, 243, 250); stroke: rgb(84, 113, 142);"/></g><g><g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);"><text x="214" y="815.5">Apply: backups и install manifest</text></g></g></g><g data-cell-id="F"><g><rect x="74" y="937" width="280" height="86" rx="10.32" ry="10.32" fill="#edf3fa" stroke="#54718e" stroke-width="1.5" pointer-events="all" style="fill: rgb(237, 243, 250); stroke: rgb(84, 113, 142);"/></g><g><g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);"><text x="214" y="977.5">Verify: структура, затем native</text><text x="214" y="995.5">input</text></g></g></g><g data-cell-id="G"><g><path d="M 214 1108 L 364 1164 L 214 1220 L 64 1164 Z" fill="#fff2cc" stroke="#54718e" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(255, 242, 204); stroke: rgb(84, 113, 142);"/></g><g><g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);"><text x="214" y="1170.5">Результат подходит?</text></g></g></g><g data-cell-id="H"><g><rect x="24" y="1410" width="280" height="86" rx="10.32" ry="10.32" fill="#edf3fa" stroke="#54718e" stroke-width="1.5" pointer-events="all" style="fill: rgb(237, 243, 250); stroke: rgb(84, 113, 142);"/></g><g><g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);"><text x="164" y="1459.5">Новая сессия и проверка поведения</text></g></g></g><g data-cell-id="I"><g><rect x="359" y="1410" width="280" height="86" rx="10.32" ry="10.32" fill="#edf3fa" stroke="#54718e" stroke-width="1.5" pointer-events="all" style="fill: rgb(237, 243, 250); stroke: rgb(84, 113, 142);"/></g><g><g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);"><text x="499" y="1459.5">Rollback plan или recovery journal</text></g></g></g><g data-cell-id="e0"><g><path d="M 264 208 L 264 283.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);"/><path d="M 264 291.32 L 260.25 283.82 L 267.75 283.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);"/></g></g><g data-cell-id="e1"><g><path d="M 264 379 L 264 454.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);"/><path d="M 264 462.32 L 260.25 454.82 L 267.75 454.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);"/></g></g><g data-cell-id="e2"><g><path d="M 301.5 562 L 314 562 L 314 586 L 649 586 L 649 1506 L 592.3 1506 L 592.33 1571.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);"/><path d="M 592.34 1579.32 L 588.58 1571.82 L 596.08 1571.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);"/></g><g><g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="13px" style="fill: rgb(24, 50, 79);"><rect fill="#FFFFFF" stroke="none" x="641" y="919" width="18" height="17" stroke-width="0" style="fill: rgb(255, 255, 255);"/><text x="649" y="932">Да</text></g></g></g><g data-cell-id="e3"><g><path d="M 226.5 562 L 226.5 671 L 214 671 L 214 756.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);"/><path d="M 214 764.32 L 210.25 756.82 L 217.75 756.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);"/></g><g><g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="13px" style="fill: rgb(24, 50, 79);"><rect fill="#FFFFFF" stroke="none" x="215" y="663" width="24" height="17" stroke-width="0" style="fill: rgb(255, 255, 255);"/><text x="226.5" y="675.5">Нет</text></g></g></g><g data-cell-id="e4"><g><path d="M 214 852 L 214 927.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);"/><path d="M 214 935.32 L 210.25 927.82 L 217.75 927.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);"/></g></g><g data-cell-id="e5"><g><path d="M 214 1023 L 214 1098.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);"/><path d="M 214 1106.32 L 210.25 1098.82 L 217.75 1098.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);"/></g></g><g data-cell-id="e6"><g><path d="M 176.5 1206 L 176.5 1315 L 164 1315 L 164 1400.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);"/><path d="M 164 1408.32 L 160.25 1400.82 L 167.75 1400.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);"/></g><g><g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="13px" style="fill: rgb(24, 50, 79);"><rect fill="#FFFFFF" stroke="none" x="168" y="1307" width="18" height="17" stroke-width="0" style="fill: rgb(255, 255, 255);"/><text x="176.5" y="1319.5">Да</text></g></g></g><g data-cell-id="e7"><g><path d="M 251.5 1206 L 264 1206 L 264 1230 L 499 1230 L 499 1400.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);"/><path d="M 499 1408.32 L 495.25 1400.82 L 502.75 1400.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);"/></g><g><g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="13px" style="fill: rgb(24, 50, 79);"><rect fill="#FFFFFF" stroke="none" x="442" y="1223" width="24" height="17" stroke-width="0" style="fill: rgb(255, 255, 255);"/><text x="453.5" y="1235.5">Нет</text></g></g></g><g data-cell-id="e8"><g><path d="M 499 1496 L 499 1571.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);"/><path d="M 499 1579.32 L 495.25 1571.82 L 502.75 1571.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);"/></g></g><g data-cell-id="footer"><g><rect x="24" y="1727" width="820" height="30" fill="none" stroke="none" pointer-events="all"/></g><g><g fill="#526A82" font-family="Arial" text-anchor="start" font-size="13px" style="fill: rgb(82, 106, 130);"><text x="26" y="1746">1.5.0 • обзор; точные переходы и ограничения — в руководстве</text></g></g></g></g></g></g></svg>
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" style="background: #FFFFFF; background-color: #FFFFFF; color-scheme: light;" version="1.1" width="894px" height="1806px" viewBox="0 0 894 1806">
+  <defs />
+  <rect fill="#FFFFFF" width="100%" height="100%" x="0" y="0" style="fill: rgb(255, 255, 255);" />
+  <g>
+    <g data-cell-id="0">
+      <g data-cell-id="1">
+        <g data-cell-id="title">
+          <g>
+            <rect x="24" y="24" width="820" height="50" fill="none" stroke="none" pointer-events="all" />
+          </g>
+          <g>
+            <g fill="#18324F" font-family="Arial" font-weight="bold" text-anchor="start" font-size="24px" style="fill: rgb(24, 50, 79);">
+              <text x="26" y="60">Установка, проверка и откат</text>
+            </g>
+          </g>
+        </g>
+        <g data-cell-id="A">
+          <g>
+            <rect x="124" y="122" width="280" height="86" rx="10.32" ry="10.32" fill="#edf3fa" stroke="#54718e" stroke-width="1.5" pointer-events="all" style="fill: rgb(237, 243, 250); stroke: rgb(84, 113, 142);" />
+          </g>
+          <g>
+            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);">
+              <text x="264" y="171.5">Doctor: профиль и источники</text>
+            </g>
+          </g>
+        </g>
+        <g data-cell-id="B">
+          <g>
+            <rect x="124" y="293" width="280" height="86" rx="10.32" ry="10.32" fill="#edf3fa" stroke="#54718e" stroke-width="1.5" pointer-events="all" style="fill: rgb(237, 243, 250); stroke: rgb(84, 113, 142);" />
+          </g>
+          <g>
+            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);">
+              <text x="264" y="342.5">Dry-run: пути и адресный diff</text>
+            </g>
+          </g>
+        </g>
+        <g data-cell-id="C">
+          <g>
+            <path d="M 264 464 L 414 520 L 264 576 L 114 520 Z" fill="#fff2cc" stroke="#54718e" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(255, 242, 204); stroke: rgb(84, 113, 142);" />
+          </g>
+          <g>
+            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);">
+              <text x="264" y="517.5">Конфликт или неподдержанные</text>
+              <text x="264" y="535.5">metadata?</text>
+            </g>
+          </g>
+        </g>
+        <g data-cell-id="D">
+          <g>
+            <rect x="405.67" y="1581" width="280" height="86" rx="10.32" ry="10.32" fill="#edf3fa" stroke="#54718e" stroke-width="1.5" pointer-events="all" style="fill: rgb(237, 243, 250); stroke: rgb(84, 113, 142);" />
+          </g>
+          <g>
+            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);">
+              <text x="545.67" y="1621.5">Сохранить файлы и разобрать</text>
+              <text x="545.67" y="1639.5">причину</text>
+            </g>
+          </g>
+        </g>
+        <g data-cell-id="E">
+          <g>
+            <rect x="74" y="766" width="280" height="86" rx="10.32" ry="10.32" fill="#edf3fa" stroke="#54718e" stroke-width="1.5" pointer-events="all" style="fill: rgb(237, 243, 250); stroke: rgb(84, 113, 142);" />
+          </g>
+          <g>
+            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);">
+              <text x="214" y="815.5">Apply: backups и install manifest</text>
+            </g>
+          </g>
+        </g>
+        <g data-cell-id="F">
+          <g>
+            <rect x="74" y="937" width="280" height="86" rx="10.32" ry="10.32" fill="#edf3fa" stroke="#54718e" stroke-width="1.5" pointer-events="all" style="fill: rgb(237, 243, 250); stroke: rgb(84, 113, 142);" />
+          </g>
+          <g>
+            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);">
+              <text x="214" y="977.50">Verify: структура / native input;</text>
+              <text x="214" y="995.50">SessionStart trust — отдельно</text>
+            </g>
+          </g>
+        </g>
+        <g data-cell-id="G">
+          <g>
+            <path d="M 214 1108 L 364 1164 L 214 1220 L 64 1164 Z" fill="#fff2cc" stroke="#54718e" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(255, 242, 204); stroke: rgb(84, 113, 142);" />
+          </g>
+          <g>
+            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);">
+              <text x="214" y="1170.5">Результат подходит?</text>
+            </g>
+          </g>
+        </g>
+        <g data-cell-id="H">
+          <g>
+            <rect x="24" y="1410" width="280" height="86" rx="10.32" ry="10.32" fill="#edf3fa" stroke="#54718e" stroke-width="1.5" pointer-events="all" style="fill: rgb(237, 243, 250); stroke: rgb(84, 113, 142);" />
+          </g>
+          <g>
+            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);">
+              <text x="164" y="1459.5">Новая сессия и проверка поведения</text>
+            </g>
+          </g>
+        </g>
+        <g data-cell-id="I">
+          <g>
+            <rect x="359" y="1410" width="280" height="86" rx="10.32" ry="10.32" fill="#edf3fa" stroke="#54718e" stroke-width="1.5" pointer-events="all" style="fill: rgb(237, 243, 250); stroke: rgb(84, 113, 142);" />
+          </g>
+          <g>
+            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="15px" style="fill: rgb(24, 50, 79);">
+              <text x="499" y="1459.5">Rollback plan или recovery journal</text>
+            </g>
+          </g>
+        </g>
+        <g data-cell-id="e0">
+          <g>
+            <path d="M 264 208 L 264 283.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);" />
+            <path d="M 264 291.32 L 260.25 283.82 L 267.75 283.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);" />
+          </g>
+        </g>
+        <g data-cell-id="e1">
+          <g>
+            <path d="M 264 379 L 264 454.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);" />
+            <path d="M 264 462.32 L 260.25 454.82 L 267.75 454.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);" />
+          </g>
+        </g>
+        <g data-cell-id="e2">
+          <g>
+            <path d="M 301.5 562 L 314 562 L 314 586 L 649 586 L 649 1506 L 592.3 1506 L 592.33 1571.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);" />
+            <path d="M 592.34 1579.32 L 588.58 1571.82 L 596.08 1571.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);" />
+          </g>
+          <g>
+            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="13px" style="fill: rgb(24, 50, 79);">
+              <rect fill="#FFFFFF" stroke="none" x="641" y="919" width="18" height="17" stroke-width="0" style="fill: rgb(255, 255, 255);" />
+              <text x="649" y="932">Да</text>
+            </g>
+          </g>
+        </g>
+        <g data-cell-id="e3">
+          <g>
+            <path d="M 226.5 562 L 226.5 671 L 214 671 L 214 756.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);" />
+            <path d="M 214 764.32 L 210.25 756.82 L 217.75 756.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);" />
+          </g>
+          <g>
+            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="13px" style="fill: rgb(24, 50, 79);">
+              <rect fill="#FFFFFF" stroke="none" x="215" y="663" width="24" height="17" stroke-width="0" style="fill: rgb(255, 255, 255);" />
+              <text x="226.5" y="675.5">Нет</text>
+            </g>
+          </g>
+        </g>
+        <g data-cell-id="e4">
+          <g>
+            <path d="M 214 852 L 214 927.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);" />
+            <path d="M 214 935.32 L 210.25 927.82 L 217.75 927.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);" />
+          </g>
+        </g>
+        <g data-cell-id="e5">
+          <g>
+            <path d="M 214 1023 L 214 1098.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);" />
+            <path d="M 214 1106.32 L 210.25 1098.82 L 217.75 1098.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);" />
+          </g>
+        </g>
+        <g data-cell-id="e6">
+          <g>
+            <path d="M 176.5 1206 L 176.5 1315 L 164 1315 L 164 1400.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);" />
+            <path d="M 164 1408.32 L 160.25 1400.82 L 167.75 1400.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);" />
+          </g>
+          <g>
+            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="13px" style="fill: rgb(24, 50, 79);">
+              <rect fill="#FFFFFF" stroke="none" x="168" y="1307" width="18" height="17" stroke-width="0" style="fill: rgb(255, 255, 255);" />
+              <text x="176.5" y="1319.5">Да</text>
+            </g>
+          </g>
+        </g>
+        <g data-cell-id="e7">
+          <g>
+            <path d="M 251.5 1206 L 264 1206 L 264 1230 L 499 1230 L 499 1400.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);" />
+            <path d="M 499 1408.32 L 495.25 1400.82 L 502.75 1400.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);" />
+          </g>
+          <g>
+            <g fill="#18324F" font-family="Arial" text-anchor="middle" font-size="13px" style="fill: rgb(24, 50, 79);">
+              <rect fill="#FFFFFF" stroke="none" x="442" y="1223" width="24" height="17" stroke-width="0" style="fill: rgb(255, 255, 255);" />
+              <text x="453.5" y="1235.5">Нет</text>
+            </g>
+          </g>
+        </g>
+        <g data-cell-id="e8">
+          <g>
+            <path d="M 499 1496 L 499 1571.82" fill="none" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="stroke" style="stroke: rgb(82, 106, 130);" />
+            <path d="M 499 1579.32 L 495.25 1571.82 L 502.75 1571.82 Z" fill="#526a82" stroke="#526a82" stroke-width="1.5" stroke-miterlimit="10" pointer-events="all" style="fill: rgb(82, 106, 130); stroke: rgb(82, 106, 130);" />
+          </g>
+        </g>
+        <g data-cell-id="footer">
+          <g>
+            <rect x="24" y="1727" width="820" height="30" fill="none" stroke="none" pointer-events="all" />
+          </g>
+          <g>
+            <g fill="#526A82" font-family="Arial" text-anchor="start" font-size="13px" style="fill: rgb(82, 106, 130);">
+              <text x="26" y="1746.00">1.6.0 • обзор; точные переходы и ограничения — в руководстве</text>
+            </g>
+          </g>
+        </g>
+      </g>
+    </g>
+  </g>
+</svg>

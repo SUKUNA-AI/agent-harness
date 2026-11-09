@@ -1,4 +1,4 @@
-# Ledger, память и контекст — 1.5.1
+# Ledger, память и контекст — 1.6.0
 
 [Supervisor](EXECUTION_SUPERVISOR_RU.md) · [CLI](CLI_REFERENCE_RU.md) · [Оценка](PERFORMANCE_EVAL_RU.md)
 
@@ -18,7 +18,7 @@ vector DB, embeddings, listener и обязательный JS runtime отсу�
 flowchart TD
     C["Codex / checks: наблюдаемые события"] --> L["Immutable YAML Ledger events"]
     C --> R["Raw evidence: JSONL, receipts, logs"]
-    L --> M["Short-term / episodes / semantic records"]
+    L --> M["Memory: short-term / typed episodes / semantic records"]
     S["Текущие source и toolchain fingerprints"] --> V{"Provenance актуален?"}
     M --> V
     L --> V
@@ -173,8 +173,9 @@ packets и не перезаписывают прежние evidence.
 | Episodic | Problem signature, hypothesis/fix/root cause, observed outcome, symbols, receipt refs, trust и expiration | Source/toolchain плюс evidence bytes; default top-k=3, допустимо 1–3 |
 | Semantic | Architecture/decisions/conventions в YAML и derived Markdown, relation graph | Claim source, revision/digest, actor, confidence, last checked |
 
-Memory включается явно: `memory: true` в work contract. Без opt-in записи не
-создаются через API `Memory`. Search локален: signatures/tags/terms и bounded
+Default `memory` зависит от версии work contract: `false` для v1 и `true`
+для v2. Явное значение сохраняется; `memory: false` отключает записи через
+API `Memory`. Native session adapter отдельно вызывает `Memory(enabled=True)`. Search локален: signatures/tags/terms и bounded
 ranking; неподтверждённые идеи возвращаются отдельно как
 `historical_hypothesis`. Никакого автоматического cross-repo import нет.
 Semantic records создаются явным API; supervisor не выдумывает архитектурные
@@ -227,7 +228,7 @@ TOON остаётся optional input representation. Условия измере
 
 ## Разделение source, evidence и presentation
 
-Correction candidate проверяет полный snapshot до compact details. Source-current
+Версия 1.6.0 проверяет полный snapshot до compact details. Source-current
 self-report выдаётся как current observation, verified facts требуют allowlisted
 core verifier receipt и current evidence lifecycle. Typed namespace не выбирает
 первую запись при bare-ID collision. Corrupt optional foreign record изолируется;

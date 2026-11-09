@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<mxfile host="app.diagrams.net" agent="Native Agent Harness documentation" version="32.6.1">
+<mxfile host="app.diagrams.net" agent="Native Agent Harness documentation" version="32.6.1" modified="2026-11-09T09:01:17Z">
   <diagram id="instruction-discovery" name="Инструкции нового процесса Codex">
     <mxGraphModel dx="1400" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1010" pageHeight="1453" math="0" shadow="0" background="#FFFFFF">
       <root>
@@ -8,7 +8,7 @@
         <mxCell id="title" value="Инструкции нового процесса Codex" style="text;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=24;fontStyle=1;fontColor=#18324F;whiteSpace=nowrap;" parent="1" vertex="1">
           <mxGeometry x="30" y="12" width="950" height="50" as="geometry" />
         </mxCell>
-        <mxCell id="A" value="Новая сессия: выбранный Codex home" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+        <mxCell id="A" value="Новая сессия: Codex home / cwd" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="368.33" y="110" width="280" height="86" as="geometry" />
         </mxCell>
         <mxCell id="B" value="Глобальный override непустой?" style="rhombus;perimeter=rhombusPerimeter;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#FFF2CC;fontColor=#18324F;" parent="1" vertex="1">
@@ -29,13 +29,13 @@
         <mxCell id="G" value="Agent config: native-роли и&#10;defaults" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="700" y="925" width="280" height="86" as="geometry" />
         </mxCell>
-        <mxCell id="H" value="Model input нового процесса" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+        <mxCell id="H" value="Model input: инструкции +&#10;SessionStart additionalContext" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="365" y="1096" width="280" height="86" as="geometry" />
         </mxCell>
         <mxCell id="I" value="Skills catalog: процедуры по&#10;задаче" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="30" y="925" width="280" height="86" as="geometry" />
         </mxCell>
-        <mxCell id="J" value="Агент читает нужный workflow и&#10;evidence" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+        <mxCell id="J" value="Агент: checkpoint / govern,&#10;workflow и текущее evidence" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="365" y="1267" width="280" height="86" as="geometry" />
         </mxCell>
         <mxCell id="e0" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=1;" parent="1" edge="1" source="A" target="B">
@@ -88,7 +88,7 @@
         <mxCell id="e9" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="H" target="J">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="footer" value="1.5.0 • обзор; точные переходы и ограничения — в руководстве" style="text;html=0;align=left;fontFamily=Arial;fontSize=13;fontColor=#526A82;" parent="1" vertex="1">
+        <mxCell id="footer" value="1.6.0 • обзор; точные переходы и ограничения — в руководстве" style="text;html=0;align=left;fontFamily=Arial;fontSize=13;fontColor=#526A82;" parent="1" vertex="1">
           <mxGeometry x="30" y="1413" width="950" height="30" as="geometry" />
         </mxCell>
       </root>

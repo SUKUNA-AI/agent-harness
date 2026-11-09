@@ -37,11 +37,60 @@ agent-harness-session checkpoint --session <native-ID> --note 'Проверен�
 Для явно контролируемого вызова `govern --session <ID> --argv-json '["rg","symbol"]'
 --effect read_only` возвращает advisory-решение без исполнения команды.
 
+## Жизненный цикл native-сессии
+
+![Native-сессия: bootstrap и продолжение](diagrams/native-session.svg)
+
+[Редактировать в draw.io](diagrams/native-session.drawio) · [Все схемы](diagrams/README.md)
+
+<details>
+<summary>Mermaid source той же схемы</summary>
+
+```mermaid
+flowchart TD
+    Start["Новая сессия: root / native ID"]
+    Hook{"Hook поддержан, доверен и успешно исполнился?"}
+    Auto["SessionStart → session adapter"]
+    Explicit["Явный session start: fallback"]
+    Memory["Memory(enabled=True), recall, Ledger inform + reducer"]
+    Packet["Packet: required context, pointers / omissions / stale"]
+    Agent["Codex: текущая цель / разрешённая работа"]
+    Checkpoint["Checkpoint + evidence SHA256; явный goal update при изменении"]
+    Resume["Resume / compact: bounded recall в прежнем repository namespace"]
+    Fresh{"Provenance / evidence актуальны?"}
+    Continue["Продолжить разрешённый шаг по current evidence"]
+    Revalidate["Retrieval и применимые проверки; история не становится PASS"]
+    Start --> Hook
+    Hook -->|"Да"| Auto
+    Hook -->|"Нет / degraded"| Explicit
+    Auto --> Memory
+    Explicit --> Memory
+    Memory --> Packet
+    Packet --> Agent
+    Agent --> Checkpoint
+    Checkpoint --> Resume
+    Resume --> Fresh
+    Fresh -->|"Да"| Continue
+    Fresh -->|"Нет"| Revalidate
+```
+
+</details>
+
 ## Автоматический запуск в локальном Codex
 
-Поддержанный [SessionStart hook](https://learn.chatgpt.com/docs/hooks) запускает
-`tools/session.py hook` с JSON-событием на stdin. В пользовательском `hooks.json`
-рядом с активным `config.toml` добавьте следующую группу, сохранив чужие hooks:
+Штатный `install` создаёт управляемую группу SessionStart в `hooks.json`
+рядом с активным `config.toml` и owned launcher `agent-harness-hook.py`.
+Launcher запускает session adapter с JSON-событием на stdin. Не добавляйте
+вторую группу вручную после установки: duplicate handler вызывает конфликт.
+Порядок работы — install dry-run → install `--apply` → verify → `/hooks`,
+trust команды и новый процесс Codex. Existing foreign hooks сохраняются.
+
+Следующий JSON — **ручной fallback** для профиля без установленного managed
+handler, а не дополнительный шаг обычной установки. Перед последующим
+управляемым install стороннюю группу нужно явно принять через
+`--adopt-hook-sha256 SHA256`; смысл hash и dry-run описаны в
+[установке](../SETUP_RU.md#физические-границы-установки). Не создавайте
+дубликат существующей группы.
 
 ```json
 {
@@ -79,7 +128,7 @@ Hook получает только cwd/native session ID/source; цель bootst
 или чужое устройство. Уже открытый чат не доказывает загрузку новых hooks.
 Никакие model/provider/effort, permissions или compaction settings не меняются.
 
-## Native context contracts correction candidate
+## Контракты native-контекста в 1.6.0
 
 Generic hook сохраняет explicit active goal; отдельный `goal-update` требует
 expected generation. Checkpoint принимает устойчивый `--operation-id` для
@@ -110,6 +159,7 @@ session/root/evidence сохраняются. Если обязательная 
 Новые observer/operation/bridge receipts v2 содержат actual package build digest
 (Python, schemas, vendored runtime) и отдельный loaded producer digest. V1 readers
 сохраняют unknown; новый schema marker не повышает trust старой записи.
-`status --session ID --verify-evidence` сохраняет identity/coverage и recorded
+`agent-harness-session status --root ROOT --session ID --verify-evidence`
+сохраняет identity/coverage и recorded
 verdict при потере linked core run, выдавая current acceptance unknown и stable
 missing/unavailable reason вместо потери всего отчёта.

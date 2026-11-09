@@ -29,8 +29,10 @@ Author использует `harness-doc-author`, независимый assesso
 а ограничения — с фактическими отрицательными сценариями.
 
 Диаграммы находятся в [docs/diagrams](diagrams/README.md). При изменении flow
-обновите editable `.drawio`, его SVG через draw.io Desktop и соответствующий
-Mermaid block. Просмотрите экспорт и сохраните version/command/hashes в private
+обновите editable `.drawio`, эквивалентный SVG и соответствующий Mermaid block.
+SVG можно экспортировать через draw.io Desktop или подготовить как векторную
+версию той же модели графа; синхронизацию и render проверьте по галерее.
+Просмотрите результат и сохраните renderer/command/hashes в private
 evidence. Наличие XML или exit0 экспортера не заменяет visual review. Для чтения
 документации Node/draw.io не требуются; renderer — optional author tool.
 

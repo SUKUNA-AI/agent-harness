@@ -1,6 +1,6 @@
 # Автоподключение в новых чатах и проектах
 
-Текущий контракт релиза **1.5.1**, сверено **2026-11-02**. После установки в
+Текущий контракт релиза **1.6.0**, сверено **2026-11-09**. После установки в
 конкретный локальный профиль Codex managed bootstrap обнаруживается клиентом
 в новых сессиях. Команда «включи harness» для каждого проекта не требуется.
 Подробные workflows/skills агент читает, когда задача требует соответствующей
@@ -30,16 +30,16 @@
 
 ```mermaid
 flowchart TD
-    A["Новая сессия: выбранный Codex home"] --> B{"Глобальный override непустой?"}
+    A["Новая сессия: Codex home / cwd"] --> B{"Глобальный override непустой?"}
     B -->|"Да"| C["AGENTS.override.md с managed block"]
     B -->|"Нет"| D["AGENTS.md с managed block"]
     C --> E["Инструкции от project root к cwd"]
     D --> E
     E --> F["Более локальные правила и byte limit"]
-    G["Agent config: native-роли и defaults"] --> H["Model input нового процесса"]
+    G["Agent config: native-роли и defaults"] --> H["Model input: инструкции + SessionStart additionalContext"]
     F --> H
     I["Skills catalog: процедуры по задаче"] --> H
-    H --> J["Агент читает нужный workflow и evidence"]
+    H --> J["Агент: checkpoint / govern, workflow и текущее evidence"]
 ```
 
 </details>
@@ -50,10 +50,17 @@ Bootstrap содержит version marker (`HARNESS_POLICY_VERSION`) и ссыл
 роль задаёт native contract и effort, skill предоставляет повторяемую процедуру.
 Их наличие не означает обязательный spawn на короткой задаче.
 
-В 1.5.0 каталог включает `harness-doc-author` и `harness-doc-review`.
+Каталог 1.6.0 включает `harness-doc-author` и `harness-doc-review`.
 Skill выбирается по задаче; он не заменяет native-role TOML и не подтверждает
 переключение уже открытого чата на новую политику. Документация и draw.io assets
 читаются по ссылкам, а не вставляются в каждый model input.
+
+SessionStart-группу и owned launcher добавляет штатный installer. После
+установки проверьте handler и его trust через `/hooks`; ручная дополнительная
+группа не нужна. Короткий packet содержит memory/ledger/reducer context,
+а успешное `Harness bootstrap` даёт агенту session ID без повторного start.
+Формат packet, fallback и продолжение описаны в
+[native-сессии](NATIVE_SESSION_RU.md).
 
 ## Как подтвердить автоподключение
 

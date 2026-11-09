@@ -1,0 +1,134 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mxfile host="app.diagrams.net" modified="2026-11-09T09:01:17Z" type="device">
+  <diagram id="verified-task-flow" name="Managed v2: проверяемый план и исполнение">
+    <mxGraphModel dx="1200" dy="2050" grid="1" gridSize="10" page="1" pageWidth="1200" pageHeight="2050" background="#FFFFFF">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" value="Managed v2: проверяемый план и исполнение" style="text;html=0;align=left;fontFamily=Arial;fontSize=24;fontStyle=1;" parent="1" vertex="1">
+          <mxGeometry x="30" y="15" width="1140" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="e0" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Mission" target="Plan">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Plan" target="Quality">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="правки" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.0;exitY=0.5;entryX=1.0;entryY=0.5232558139534884;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Quality" target="Revision">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=0.0;entryX=0.0;entryY=0.5;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Revision" target="Plan">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="210" y="293" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e4" value="approved" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Quality" target="Worker">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Worker" target="Local">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" value="uncertain" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=1.0;exitY=0.5;entryX=0.0;entryY=0.5;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Worker" target="Unknown">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" value="failed" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=1.0;exitY=0.5;entryX=0.0;entryY=0.5232558139534884;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Local" target="Repair">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=0.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Repair" target="Worker">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1175" y="720" />
+              <mxPoint x="1175" y="530" />
+              <mxPoint x="600" y="530" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e9" value="passed" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Local" target="Integration">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Integration" target="Integrated">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" value="failed" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=1.0;exitY=0.5;entryX=1.0;entryY=0.5;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Integrated" target="Repair">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1185" y="1085" />
+              <mxPoint x="1185" y="763" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e12" value="passed" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Integrated" target="Node">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e13" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Node" target="Dependent">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e14" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Dependent" target="Coverage">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e15" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Coverage" target="Review">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e16" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Review" target="Gate">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e17" value="passed" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Gate" target="Accepted">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Mission" value="Исходная mission, constraints,&#10;requirements и frozen checks" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="450" y="110" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Plan" value="Plan v2: schema / semantic&#10;validation и coverage" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="450" y="250" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Quality" value="Plan-quality assessment&#10;прошёл?" style="rhombus;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#FFF2CC;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="460" y="390" width="280" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="Revision" value="Ограниченная ревизия плана;&#10;исходные planning budgets" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="60" y="400" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Worker" value="Worker: owned worktree,&#10;exact session и исходный budget" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="450" y="560" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Local" value="Local frozen checks&#10;прошли?" style="rhombus;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#FFF2CC;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="460" y="710" width="280" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="Repair" value="Bounded repair прежнего owner;&#10;прежние attempts / deadline" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="850" y="720" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Integration" value="Durable integration:&#10;patch + ownership + pre/post tree" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="450" y="880" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Integrated" value="Integrated checks&#10;прошли?" style="rhombus;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#FFF2CC;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="460" y="1030" width="280" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="Node" value="Current node acceptance receipt" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="450" y="1190" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Dependent" value="Открыть зависимую работу&#10;по current acceptance refs" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="450" y="1330" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Coverage" value="Итоговая original-request&#10;coverage на одном candidate" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="450" y="1470" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Review" value="Fresh final review v3:&#10;requirements + raw evidence" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="450" y="1610" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Gate" value="Общий core gate:&#10;все required final checks" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="450" y="1750" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Accepted" value="ACCEPTED при current evidence" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="450" y="1890" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Unknown" value="UNKNOWN_OUTCOME:&#10;сначала reconciliation" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="850" y="560" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="footer" value="1.6.0 • обзор; required unknown/skipped не становятся PASS" style="text;html=0;align=left;fontFamily=Arial;fontSize=13;fontColor=#526A82;" parent="1" vertex="1">
+          <mxGeometry x="30" y="2005" width="1140" height="30" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

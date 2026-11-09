@@ -1,0 +1,145 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="1200" height="2050" viewBox="0 0 1200 2050" role="img" aria-labelledby="title desc">
+  <title id="title">Managed v2: проверяемый план и исполнение</title>
+  <desc id="desc">Agent Harness 1.6.0. Текстовое описание и Mermaid находятся в связанном руководстве.</desc>
+  <rect width="1200" height="2050" fill="#FFFFFF" />
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#526A82" />
+    </marker>
+  </defs>
+  <text x="30" y="48" font-family="Arial, sans-serif" font-size="24" text-anchor="start" fill="#18324F" font-weight="bold">
+    <tspan x="30" y="48.0">Managed v2: проверяемый план и исполнение</tspan>
+  </text>
+  <polyline points="600.0,196 600.0,250" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <polyline points="600.0,336 600.0,390" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <polyline points="460,445 360,445" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <rect x="380.0" y="427.0" width="60" height="20" fill="white" />
+  <text x="410.0" y="442.0" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" fill="#18324F">
+    <tspan x="410.0" y="442.0">правки</tspan>
+  </text>
+  <polyline points="210,400 210,293 450,293" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <polyline points="600.0,500 600.0,560" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <rect x="562.0" y="512.0" width="76" height="20" fill="white" />
+  <text x="600.0" y="527.0" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="527.0">approved</tspan>
+  </text>
+  <polyline points="600.0,646 600.0,710" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <polyline points="750,603 850,603" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <rect x="758.0" y="585.0" width="84" height="20" fill="white" />
+  <text x="800.0" y="600.0" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" fill="#18324F">
+    <tspan x="800.0" y="600.0">uncertain</tspan>
+  </text>
+  <polyline points="740,765 850,765" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <rect x="765.0" y="747.0" width="60" height="20" fill="white" />
+  <text x="795.0" y="762.0" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" fill="#18324F">
+    <tspan x="795.0" y="762.0">failed</tspan>
+  </text>
+  <polyline points="1000,720 1175,720 1175,530 600,530 600,560" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <polyline points="600.0,820 600.0,880" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <rect x="570.0" y="832.0" width="60" height="20" fill="white" />
+  <text x="600.0" y="847.0" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="847.0">passed</tspan>
+  </text>
+  <polyline points="600.0,966 600.0,1030" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <polyline points="740,1085 1185,1085 1185,763 1150,763" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <rect x="932.5" y="1067.0" width="60" height="20" fill="white" />
+  <text x="962.5" y="1082.0" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" fill="#18324F">
+    <tspan x="962.5" y="1082.0">failed</tspan>
+  </text>
+  <polyline points="600.0,1140 600.0,1190" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <rect x="570.0" y="1147.0" width="60" height="20" fill="white" />
+  <text x="600.0" y="1162.0" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="1162.0">passed</tspan>
+  </text>
+  <polyline points="600.0,1276 600.0,1330" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <polyline points="600.0,1416 600.0,1470" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <polyline points="600.0,1556 600.0,1610" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <polyline points="600.0,1696 600.0,1750" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <polyline points="600.0,1836 600.0,1890" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <rect x="570.0" y="1845.0" width="60" height="20" fill="white" />
+  <text x="600.0" y="1860.0" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="1860.0">passed</tspan>
+  </text>
+  <rect x="450" y="110" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="600.0" y="158.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="149.0">Исходная mission, constraints,</tspan>
+    <tspan x="600.0" y="167.0">requirements и frozen checks</tspan>
+  </text>
+  <rect x="450" y="250" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="600.0" y="298.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="289.0">Plan v2: schema / semantic</tspan>
+    <tspan x="600.0" y="307.0">validation и coverage</tspan>
+  </text>
+  <polygon points="600.0,390 740,445.0 600.0,500 460,445.0" fill="#FFF2CC" stroke="#54718E" stroke-width="1.5" />
+  <text x="600.0" y="450.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="441.0">Plan-quality assessment</tspan>
+    <tspan x="600.0" y="459.0">прошёл?</tspan>
+  </text>
+  <rect x="60" y="400" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="210.0" y="448.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="210.0" y="439.0">Ограниченная ревизия плана;</tspan>
+    <tspan x="210.0" y="457.0">исходные planning budgets</tspan>
+  </text>
+  <rect x="450" y="560" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="600.0" y="608.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="599.0">Worker: owned worktree,</tspan>
+    <tspan x="600.0" y="617.0">exact session и исходный budget</tspan>
+  </text>
+  <polygon points="600.0,710 740,765.0 600.0,820 460,765.0" fill="#FFF2CC" stroke="#54718E" stroke-width="1.5" />
+  <text x="600.0" y="770.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="761.0">Local frozen checks</tspan>
+    <tspan x="600.0" y="779.0">прошли?</tspan>
+  </text>
+  <rect x="850" y="720" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="1000.0" y="768.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="1000.0" y="759.0">Bounded repair прежнего owner;</tspan>
+    <tspan x="1000.0" y="777.0">прежние attempts / deadline</tspan>
+  </text>
+  <rect x="450" y="880" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="600.0" y="928.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="919.0">Durable integration:</tspan>
+    <tspan x="600.0" y="937.0">patch + ownership + pre/post tree</tspan>
+  </text>
+  <polygon points="600.0,1030 740,1085.0 600.0,1140 460,1085.0" fill="#FFF2CC" stroke="#54718E" stroke-width="1.5" />
+  <text x="600.0" y="1090.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="1081.0">Integrated checks</tspan>
+    <tspan x="600.0" y="1099.0">прошли?</tspan>
+  </text>
+  <rect x="450" y="1190" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="600.0" y="1238.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="1238.0">Current node acceptance receipt</tspan>
+  </text>
+  <rect x="450" y="1330" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="600.0" y="1378.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="1369.0">Открыть зависимую работу</tspan>
+    <tspan x="600.0" y="1387.0">по current acceptance refs</tspan>
+  </text>
+  <rect x="450" y="1470" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="600.0" y="1518.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="1509.0">Итоговая original-request</tspan>
+    <tspan x="600.0" y="1527.0">coverage на одном candidate</tspan>
+  </text>
+  <rect x="450" y="1610" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="600.0" y="1658.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="1649.0">Fresh final review v3:</tspan>
+    <tspan x="600.0" y="1667.0">requirements + raw evidence</tspan>
+  </text>
+  <rect x="450" y="1750" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="600.0" y="1798.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="1789.0">Общий core gate:</tspan>
+    <tspan x="600.0" y="1807.0">все required final checks</tspan>
+  </text>
+  <rect x="450" y="1890" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="600.0" y="1938.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="600.0" y="1938.0">ACCEPTED при current evidence</tspan>
+  </text>
+  <rect x="850" y="560" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="1000.0" y="608.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="1000.0" y="599.0">UNKNOWN_OUTCOME:</tspan>
+    <tspan x="1000.0" y="617.0">сначала reconciliation</tspan>
+  </text>
+  <text x="30" y="2030" font-family="Arial, sans-serif" font-size="13" text-anchor="start" fill="#18324F">
+    <tspan x="30" y="2030.0">1.6.0 • обзор; required unknown/skipped не становятся PASS</tspan>
+  </text>
+</svg>

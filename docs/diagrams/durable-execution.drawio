@@ -1,0 +1,62 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mxfile host="app.diagrams.net" modified="2026-11-09T09:01:17Z" type="device">
+  <diagram id="durable-execution" name="Durable execution: intent, receipt и gate">
+    <mxGraphModel dx="1200" dy="1110" grid="1" gridSize="10" page="1" pageWidth="1200" pageHeight="1110" background="#FFFFFF">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" value="Durable execution: intent, receipt и gate" style="text;html=0;align=left;fontFamily=Arial;fontSize=24;fontStyle=1;" parent="1" vertex="1">
+          <mxGeometry x="30" y="15" width="1140" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="e0" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="P" target="I">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="I" target="C">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=1.0;exitY=0.5;entryX=0.0;entryY=0.5;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="C" target="U">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="C" target="T">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="T" target="R">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="R" target="G">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="G" target="A">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="P" value="Persisted plan" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="420" y="110" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="I" value="Invocation intent" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="420" y="250" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="C" value="Completion receipt" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="420" y="390" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="U" value="Usage projection:&#10;уникальные подтверждённые вызовы" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="820" y="390" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="T" value="Integration intent" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="420" y="530" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="R" value="Integration receipt" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="420" y="670" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="G" value="Checks + dependency&#10;generation guard" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="420" y="810" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="A" value="Accepted as of&#10;current dependency vector" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="420" y="950" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="footer" value="1.6.0 • обзор; required unknown/skipped не становятся PASS" style="text;html=0;align=left;fontFamily=Arial;fontSize=13;fontColor=#526A82;" parent="1" vertex="1">
+          <mxGeometry x="30" y="1065" width="1140" height="30" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

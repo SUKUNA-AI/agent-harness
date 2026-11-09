@@ -1,4 +1,4 @@
-# Источники и границы воспроизведения — 1.5.1
+# Источники и границы воспроизведения — 1.6.0
 
 Дата сверки первичных metadata: **2026-11-01**. Таблица связывает идеи с
 конкретными модулями. Это independent engineering implementation: наличие
@@ -44,11 +44,13 @@ GEPA/Deep Agents и другие перечисленные в design матер
 inference backend не заменяют Codex structured output или semantic/security
 validation; отдельный LLM backend в этом пакете не введён.
 
-Документационные `.drawio`/SVG созданы в этом проекте. Для экспорта используется
-[официальный draw.io Desktop](https://github.com/jgraph/drawio-desktop),
-version 32.6.1; его runtime не включён в harness. Публичная галерея содержит
-только собственные editable diagrams и их static exports. Author tooling не
-становится обязательной dependency CLI или Codex profile.
+Документационные `.drawio`/SVG созданы в этом проекте. Публичная галерея содержит
+собственные editable XML и эквивалентные самостоятельные SVG; Mermaid хранит
+тот же граф в руководстве. Для экспорта можно использовать
+[официальный draw.io Desktop](https://github.com/jgraph/drawio-desktop) либо
+подготовить native vector SVG из той же модели. Фактический renderer и visual
+review фиксируются отдельно. Runtime редактора и renderer не входят в harness
+и не становятся обязательной dependency CLI или Codex profile.
 
 ## Наши проверки
 

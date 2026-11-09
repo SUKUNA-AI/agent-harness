@@ -1,4 +1,4 @@
-# Архитектура Native Agent Harness 1.5.1
+# Архитектура Native Agent Harness 1.6.0
 
 [Индекс](INDEX.md) · [README](../README.md) · [CLI](CLI_REFERENCE_RU.md)
 
@@ -10,14 +10,17 @@ Harness сочетает штатное исполнение Codex с локал
 
 ## 1. Кто исполняет работу
 
-Версия 1.5.0 добавляет foreground control plane `supervisor.py`, транспорт
+В 1.6.0 foreground control plane включает `supervisor.py`, транспорт
 `codex_execution.py`, durable `supervisor_store.py` и `strict_yaml.py`.
+Native SessionStart работает отдельно через `native_session.py` и не
+запускает supervisor. Для managed contract v2 `plan_quality.py` проверяет
+план до worker dispatch; node и final acceptance связываются с одним candidate.
 Существующие `core.Run` и `runner` остаются механизмом snapshot/evidence/gate.
 Модельный inference остаётся в Codex. Полный FSM и diagram:
 [Execution Supervisor](EXECUTION_SUPERVISOR_RU.md). Ledger/memory/context:
 [Memory](MEMORY_AND_CONTEXT_RU.md); DAG/worktrees: [Dynamic](DYNAMIC_AGENTS_RU.md).
 
-![Слои исполнения 1.5.0](diagrams/runtime-architecture.svg)
+![Слои исполнения 1.6.0](diagrams/runtime-architecture.svg)
 
 [Редактировать в draw.io](diagrams/runtime-architecture.drawio) · [Все схемы](diagrams/README.md)
 
@@ -27,16 +30,16 @@ Harness сочетает штатное исполнение Codex с локал
 ```mermaid
 flowchart TD
     User["Пользователь: цель и действующие разрешения"] --> Codex["Codex: модель и основной агент"]
-    Bootstrap["Короткий bootstrap и выбранные skills"] --> Codex
+    Bootstrap["Bootstrap + SessionStart hook и выбранные skills"] --> Codex
     Codex --> NativeTools["Native tools: spawn, follow-up, browser, shell"]
     NativeTools --> Owners["Исполнители: отдельные scopes и worktrees"]
     Owners --> Candidate["Общий candidate и проверяемые результаты"]
     Codex --> CLI["Python CLI: contracts, checks, gate, installer"]
-    CLI --> Work["work: foreground supervisor и managed slots"]
-    Work --> Exec["Штатный Codex exec / exact resume"]
-    Exec --> Managed["Owned worktrees → staging candidate"]
+    CLI --> Work["work: plan quality / DAG и исходные budgets"]
+    Work --> Exec["Штатный Codex exec / exact-session repair"]
+    Exec --> Managed["Owned worktrees → node gates → staging candidate"]
     Managed --> Candidate
-    CLI --> State["Private files: manifests, records, receipts, backups"]
+    CLI --> State["Private state: journal, typed receipts, checkpoints и backups"]
     CLI --> Rust["Rust process: scanner, snapshot, RepoMap"]
     CLI --> LSP["Локальный language server на время команды"]
     Rust --> Source["Выбранные файлы проекта"]
@@ -66,6 +69,9 @@ CLI не содержит дополнительного LLM API client. `plan n
 | Контракт, state, snapshot, gate | `core.py`, `validation.py`, `runner.py` |
 | Совместимые native plans и briefs | `orchestration.py` |
 | Foreground edit/repair и managed DAG | `supervisor.py`, `work_contract.py`, `scheduling.py`, `managed_execution.py` |
+| Проверка плана и требований | `plan_quality.py`, `verified_flow.py`, `completion_eligibility.py` |
+| Подготовка root-вызова и восстановление | `root_preparation.py`, `execution_receipts.py`, `dependency_commit.py` |
+| SessionStart, checkpoint и native observations | `native_session.py`, `native_observability.py` |
 | Exact sessions и owned processes/worktrees | `codex_execution.py`, `agent_lifecycle.py` |
 | Strict YAML, journal и replay | `strict_yaml.py`, `supervisor_store.py` |
 | Provenance, память и reducer | `execution_ledger.py`, `memory.py`, `context_reducer.py` |
@@ -78,6 +84,12 @@ CLI не содержит дополнительного LLM API client. `plan n
 | Установка и наблюдение настроек | `installation.py`, `diagnostics.py`, `file_io.py` |
 
 Пути без префикса в таблице относятся к `src/agent_harness/`.
+
+На Windows root binding использует полный `VolumeSerialNumber` и opaque
+128-bit `FileId`, без fallback на усечённую `stat` identity. Перед чтением
+проверяются ancestors и reparse boundaries; сравнение aliases выполняется
+по физической идентичности. Совпадение строк пути не подменяет ownership и
+source proof. Python и Rust используют согласованную snapshot projection.
 
 ## 2. Как данные попадают в контекст
 
@@ -200,8 +212,8 @@ flowchart TD
     Handoff --> Compact["Native compaction или новая сессия Codex"]
     Compact --> Load["Восстановить цель, paths и ограничения"]
     Load --> Fresh{"Evidence и входы актуальны?"}
-    Fresh -->|"Да, проверено"| Continue["Продолжить конкретный следующий шаг"]
-    Fresh -->|"Нет"| Attempt["Новая attempt и нужные проверки"]
+    Fresh -->|"Да, проверено"| Continue["Продолжить разрешённый шаг по current evidence"]
+    Fresh -->|"Нет"| Attempt["Revalidation / repair: исходные attempts и deadline"]
     Fresh -->|"Не проверено"| Verify["resume или verify-evidence"]
     Verify --> Fresh
     Attempt --> Active
@@ -274,7 +286,8 @@ secret patterns помогает отсеять известные формы, �
 | Как проверяется и применяется rename | [LSP_RU](LSP_RU.md) |
 
 Все схемы доступны в [галерее draw.io](diagrams/README.md): `.drawio` содержит
-редактируемые узлы/связи, `.svg` — экспорт draw.io для просмотра. Mermaid source
+редактируемые узлы/связи, `.svg` — эквивалентная самостоятельная векторная версия
+для просмотра. Mermaid source
 сохранён рядом с объяснением в Markdown. Галерея связывает эти представления с
 модулями реализации. Private PNG для визуального review не входят в поставку.
 Редактирование диаграмм не требует изменений model/provider или runtime harness.

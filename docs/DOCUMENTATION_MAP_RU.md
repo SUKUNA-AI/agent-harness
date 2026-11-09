@@ -1,10 +1,10 @@
-# Карта документации 1.5.1
+# Карта документации 1.6.0
 
 [Индекс](INDEX.md) · [Диаграммы draw.io](diagrams/README.md)
 
 Эта карта отделяет действующие инструкции от датированных результатов.
 Документ описывает интерфейс; фактический outcome подтверждают test/evidence
-receipts конкретного commit, среды и candidate. Дата актуализации: 2026-11-02.
+receipts конкретного commit, среды и candidate. Дата актуализации: 2026-11-09.
 
 ## Действующие руководства
 
@@ -12,7 +12,7 @@ receipts конкретного commit, среды и candidate. Дата акт
 | --- | --- |
 | [README](../README.md) | Общие границы runtime, installer, CLI и release builder |
 | [SETUP](../SETUP_RU.md) | `installation.py`, `diagnostics.py`, templates установленных assets |
-| [CHANGELOG](../CHANGELOG.md), [Release notes](RELEASE_NOTES_1.5.1.md) | Исправления 1.5.1 и совместимость; не замена verification report |
+| [CHANGELOG](../CHANGELOG.md), [Release notes](RELEASE_NOTES_1.6.0.md) | Состав 1.6.0, source tag, assets и ограничения проверок |
 | [Архитектура](ARCHITECTURE_RU.md) | Границы Codex, supervisor, core runner, Rust и LSP |
 | [CLI](CLI_REFERENCE_RU.md) | `cli.py`, `work_cli.py`, nested dispatchers и актуальный `--help` |
 | [Supervisor](EXECUTION_SUPERVISOR_RU.md) | `supervisor.py`, `work_contract.py`, `failure_policy.py` |
@@ -23,6 +23,10 @@ receipts конкретного commit, среды и candidate. Дата акт
 | [Sources/evals](SOURCES_AND_EVALS.md) | Первичные источники идей, лицензии dependencies, границы воспроизведения |
 | [Конфигурация](CONFIGURATION_RU.md) | Адресные TOML changes установщика, default/explicit/role precedence |
 | [Autoload](AUTOLOAD_RU.md) | Managed bootstrap и native configuration discovery новым процессом |
+| [Native session](NATIVE_SESSION_RU.md) | `native_session.py`, `native_observability.py`, SessionStart и receipts |
+| [Verified task flow](VERIFIED_TASK_FLOW_RU.md) | `plan_quality.py`, `verified_flow.py`, `completion_eligibility.py` |
+| [Task preparation](TASK_FLOW_PREPARATION_RU.md) | `task_flow_experiment.py`, matched arms, frozen bank/assets и prepare/verify/aggregate без model calls |
+| [Stabilization](STABILIZATION_RU.md) | Durable receipts, dependency generations, migrations и границы 1.6.0 |
 | [Operations](OPERATIONS.md) | Совместимые `core.Run`/`runner` JSON contracts, воспроизводимый локальный пример |
 | [Acceptance](ACCEPTANCE.md) | Freeze/check/evidence/gate, свежесть и независимая приёмка |
 | [Orchestration](ORCHESTRATION_RU.md) | Native plan helpers в `orchestration.py`; separate managed mode — в Dynamic agents |
@@ -33,7 +37,7 @@ receipts конкретного commit, среды и candidate. Дата акт
 | [Security](SECURITY_RU.md) | Permissions, cooperating locks, typed IO и недоверенные данные |
 | [Development](DEVELOPMENT_RU.md) | Модули, проверки, author/reviewer workflow и release requirements |
 | [Selected patterns](SELECTED_PATTERNS_RU.md) | Реализованные механизмы и pinned provenance |
-| [Draw.io gallery](diagrams/README.md) | Все 13 editable XML, actual SVG exports и сохранённые Mermaid blocks |
+| [Draw.io gallery](diagrams/README.md) | Все 16 editable XML/SVG пар, Mermaid sources и ссылки на реализацию |
 
 Пути модулей относятся к `src/agent_harness/`. Optional reuse дополняет эту
 карту: `input_closure.py`, `check_cache.py` и `python_runtime.py` доказывают

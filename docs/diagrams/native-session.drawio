@@ -1,0 +1,115 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mxfile host="app.diagrams.net" modified="2026-11-09T09:01:17Z" type="device">
+  <diagram id="native-session" name="Native-сессия: bootstrap и продолжение">
+    <mxGraphModel dx="1200" dy="1610" grid="1" gridSize="10" page="1" pageWidth="1200" pageHeight="1610" background="#FFFFFF">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" value="Native-сессия: bootstrap и продолжение" style="text;html=0;align=left;fontFamily=Arial;fontSize=24;fontStyle=1;" parent="1" vertex="1">
+          <mxGeometry x="30" y="15" width="1140" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="e0" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Start" target="Hook">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" value="Да" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.0;exitY=0.5;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Hook" target="Auto">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="270" y="305" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e2" value="Нет / degraded" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=1.0;exitY=0.5;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Hook" target="Explicit">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="930" y="305" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Auto" target="Memory">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="270" y="545" />
+              <mxPoint x="600" y="545" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Explicit" target="Memory">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="930" y="545" />
+              <mxPoint x="600" y="545" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Memory" target="Packet">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Packet" target="Agent">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Agent" target="Checkpoint">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Checkpoint" target="Resume">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Resume" target="Fresh">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" value="Да" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=0.0;exitY=0.5;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Fresh" target="Continue">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="270" y="1325" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e11" value="Нет" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;labelBackgroundColor=#FFFFFF;exitX=1.0;exitY=0.5;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Fresh" target="Revalidate">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="930" y="1325" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Start" value="Новая сессия: root / native ID" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="450" y="110" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Hook" value="Hook поддержан, доверен&#10;и успешно исполнился?" style="rhombus;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#FFF2CC;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="460" y="250" width="280" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="Auto" value="SessionStart → session adapter" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="120" y="420" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Explicit" value="Явный session start: fallback" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="780" y="420" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Memory" value="Memory(enabled=True), recall,&#10;Ledger inform + reducer" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="450" y="570" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Packet" value="Packet: required context,&#10;pointers / omissions / stale" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="450" y="710" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Agent" value="Codex: текущая цель /&#10;разрешённая работа" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="450" y="850" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Checkpoint" value="Checkpoint + evidence SHA256;&#10;явный goal update при изменении" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="450" y="990" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Resume" value="Resume / compact: bounded recall&#10;в прежнем repository namespace" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="450" y="1130" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Fresh" value="Provenance / evidence&#10;актуальны?" style="rhombus;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#FFF2CC;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="460" y="1270" width="280" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="Continue" value="Продолжить разрешённый шаг&#10;по current evidence" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="120" y="1450" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="Revalidate" value="Retrieval и применимые проверки;&#10;история не становится PASS" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="780" y="1450" width="300" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="footer" value="1.6.0 • обзор; required unknown/skipped не становятся PASS" style="text;html=0;align=left;fontFamily=Arial;fontSize=13;fontColor=#526A82;" parent="1" vertex="1">
+          <mxGeometry x="30" y="1565" width="1140" height="30" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

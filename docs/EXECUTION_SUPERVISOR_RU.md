@@ -1,4 +1,4 @@
-# Execution Supervisor — 1.5.1
+# Execution Supervisor — 1.6.0
 
 [Индекс](INDEX.md) · [CLI](CLI_REFERENCE_RU.md) · [Форматы состояния](STATE_FORMATS_AND_MIGRATION_RU.md)
 
@@ -17,13 +17,13 @@ Supervisor выполняет локальный цикл «редактиров
 
 ```mermaid
 flowchart TD
-    N["NEW: contract и baseline"] --> P["PREFLIGHT: schema, scope, budgets"]
+    N["NEW: contract и baseline"] --> P["PREFLIGHT: scope, budgets; managed v2: plan quality"]
     P --> E["EXECUTING: codex exec --json"]
     E --> F["FREEZING: source и toolchain"]
-    F --> V["VERIFYING: существующие runner и gate"]
+    F --> V["VERIFYING: runner / core gate; v2: coverage + fresh review"]
     V -->|"все required evidence актуальны"| A["PASS → ACCEPTED"]
     V -->|"repairable failure"| R["FAILED_REPAIRABLE → REPAIRING"]
-    R --> X["exact session resume + failure packet"]
+    R --> X["Exact resume + failure packet; прежние attempts / deadline"]
     X --> E
     E -->|"обрыв / неизвестная запись"| U["UNKNOWN_OUTCOME"]
     U --> C["RECOVERY_REQUIRED: process и source reconcile"]
@@ -225,9 +225,12 @@ python tools/harness.py work resume --run-dir /absolute/private/run --repair-jou
 append: архив сохраняется, complete corrupt record не отбрасывается молча.
 
 `SupervisorStore` сохраняет в RAM только проверенный head: sequence, hash и число
-checkpoints. Append/commit повторно используют его под writer lock, если dev/inode,
-mode, nlink, size, mtime и ctime журнала не изменились. Смена stamp сбрасывает cache
-и требует полного bounded replay с проверкой schema/hash chain. Новый instance,
+checkpoints. Append/commit повторно используют его под writer lock после
+проверки dev/inode, mode, nlink, size, mtime и ctime. При каждом reuse полный
+bounded journal перечитывается и его SHA-256 сверяется с сохранённым hash state.
+Metadata hit недостаточен: cache экономит parsing/schema/hash-chain replay,
+а не чтение bytes. Смена stamp либо bytes сбрасывает cache и требует полного
+bounded replay с проверкой schema/hash chain. Новый instance,
 явный `events()` и `recover()` всегда читают весь журнал заново; persisted cache
 доверия нет. Cache не хранит растущую копию событий. Лимит журнала 64 MiB остаётся
 явным; recovery читает только этот bounded журнал и связанные checkpoints.
@@ -286,7 +289,7 @@ limit для скрытого inference внутри turn. Неизвестны�
 Дополнительные ограничения режима managed описаны в
 [Dynamic Agents](DYNAMIC_AGENTS_RU.md).
 
-## Durable execution correction candidate
+## Сохраняемое исполнение в 1.6.0
 
 Work-state v2 ввёл связь полного persisted plan с immutable invocation,
 completion и integration receipts. Текущий новый managed run с work-contract v2

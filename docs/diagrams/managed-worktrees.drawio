@@ -1,14 +1,14 @@
 <?xml version='1.0' encoding='utf-8'?>
-<mxfile host="app.diagrams.net" agent="Native Agent Harness documentation" version="32.6.1">
+<mxfile host="app.diagrams.net" agent="Native Agent Harness documentation" version="32.6.1" modified="2026-11-09T09:01:17Z">
   <diagram id="managed-worktrees" name="DAG, worktrees и единая приёмка">
     <mxGraphModel dx="1400" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1155" pageHeight="1427" math="0" shadow="0" background="#FFFFFF">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="title" value="DAG, worktrees и единая приёмка" style="text;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=24;fontStyle=1;fontColor=#18324F;whiteSpace=nowrap;" parent="1" vertex="1">
+        <mxCell id="title" value="Managed v2: DAG и единая приёмка" style="text;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=24;fontStyle=1;fontColor=#18324F;whiteSpace=nowrap;" parent="1" vertex="1">
           <mxGeometry x="30" y="12" width="1095" height="50" as="geometry" />
         </mxCell>
-        <mxCell id="P" value="Schema + semantic validation" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+        <mxCell id="P" value="Plan v2: schema / semantic&#10;validation + quality gate" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="200" y="110" width="280" height="86" as="geometry" />
         </mxCell>
         <mxCell id="Q" value="Ready set / critical-path&#10;heuristic" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
@@ -20,19 +20,19 @@
         <mxCell id="B" value="Codex B / owned worktree B" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="153.33" y="557" width="280" height="86" as="geometry" />
         </mxCell>
-        <mxCell id="PA" value="Scoped patch A + session /&#10;evidence pointers" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+        <mxCell id="PA" value="Worker A: local acceptance,&#10;patch + session / receipts" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="488.33" y="728" width="280" height="86" as="geometry" />
         </mxCell>
-        <mxCell id="PB" value="Scoped patch B + session /&#10;evidence pointers" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+        <mxCell id="PB" value="Worker B: local acceptance,&#10;patch + session / receipts" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="153.33" y="728" width="280" height="86" as="geometry" />
         </mxCell>
-        <mxCell id="I" value="Один staging integrator: apply&#10;--check, затем apply" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+        <mxCell id="I" value="Staging: durable integration&#10;+ integrated node checks" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="200" y="899" width="280" height="86" as="geometry" />
         </mxCell>
-        <mxCell id="D" value="Следующая DAG wave от новой&#10;staging base" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+        <mxCell id="D" value="Current node receipts:&#10;открыть зависимую работу" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="130" y="1070" width="280" height="86" as="geometry" />
         </mxCell>
-        <mxCell id="F" value="Unified source freeze + checks +&#10;gate" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+        <mxCell id="F" value="Один candidate: coverage,&#10;fresh review v3 + core gate" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="465" y="1070" width="280" height="86" as="geometry" />
         </mxCell>
         <mxCell id="V" value="Accepted staging candidate /&#10;actual cwd в report" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
@@ -103,7 +103,7 @@
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="footer" value="1.5.0 • обзор; точные переходы и ограничения — в руководстве" style="text;html=0;align=left;fontFamily=Arial;fontSize=13;fontColor=#526A82;" parent="1" vertex="1">
+        <mxCell id="footer" value="1.6.0 • обзор; точные переходы и ограничения — в руководстве" style="text;html=0;align=left;fontFamily=Arial;fontSize=13;fontColor=#526A82;" parent="1" vertex="1">
           <mxGeometry x="30" y="1387" width="1095" height="30" as="geometry" />
         </mxCell>
       </root>

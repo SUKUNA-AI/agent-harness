@@ -1,6 +1,6 @@
 # Необязательный Harness Assistant plugin
 
-Документация harness **1.5.1**, plugin **1.3.1**, сверено **2026-11-02**.
+Документация harness **1.6.0**, plugin **1.3.1**, сверено **2026-11-09**.
 Пакет находится в
 [`plugins/harness-assistant/`](../plugins/harness-assistant/). Он распространяет
 две процедуры как skills; основной local installer, глобальный policy bootstrap
@@ -22,7 +22,7 @@ Documentation Author/Reviewer входят в основные семь installe
 Обе формы manifest содержат пустые hooks. Plugin не содержит MCP config,
 install scripts, модельный routing или изменения permissions. Он не включает
 MCP автоматически и не заменяет [глобальную установку](../SETUP_RU.md).
-Номер plugin **1.3.1** независим от общего релиза harness **1.5.1** и читается
+Номер plugin **1.3.1** независим от общего релиза harness **1.6.0** и читается
 из обоих manifests. Обновление документации/checkout само по себе не обновляет
 уже установленную клиентом копию plugin; проверьте его фактическую версию и
 примените штатный update/install flow клиента.

@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<mxfile host="app.diagrams.net" agent="Native Agent Harness documentation" version="32.6.1">
+<mxfile host="app.diagrams.net" agent="Native Agent Harness documentation" version="32.6.1" modified="2026-11-09T09:01:17Z">
   <diagram id="acceptance-gate" name="Gate и повторная проверка evidence">
     <mxGraphModel dx="1400" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="880" pageHeight="1747" math="0" shadow="0" background="#FFFFFF">
       <root>
@@ -64,7 +64,7 @@
         <mxCell id="e7" value="Изменение inputs или receipts" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="H" target="I">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="footer" value="1.5.0 • обзор; точные переходы и ограничения — в руководстве" style="text;html=0;align=left;fontFamily=Arial;fontSize=13;fontColor=#526A82;" parent="1" vertex="1">
+        <mxCell id="footer" value="1.6.0 • обзор; точные переходы и ограничения — в руководстве" style="text;html=0;align=left;fontFamily=Arial;fontSize=13;fontColor=#526A82;" parent="1" vertex="1">
           <mxGeometry x="30" y="1707" width="820" height="30" as="geometry" />
         </mxCell>
       </root>

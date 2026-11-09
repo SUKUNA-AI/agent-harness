@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<mxfile host="app.diagrams.net" agent="Native Agent Harness documentation" version="32.6.1">
+<mxfile host="app.diagrams.net" agent="Native Agent Harness documentation" version="32.6.1" modified="2026-11-09T09:01:17Z">
   <diagram id="supervisor-repair" name="Supervisor: edit, verify, repair">
     <mxGraphModel dx="1400" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1231" pageHeight="2063" math="0" shadow="0" background="#FFFFFF">
       <root>
@@ -11,7 +11,7 @@
         <mxCell id="N" value="NEW: contract и baseline" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="321" y="110" width="280" height="86" as="geometry" />
         </mxCell>
-        <mxCell id="P" value="PREFLIGHT: schema, scope, budgets" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+        <mxCell id="P" value="PREFLIGHT: scope, budgets;&#10;managed v2: plan quality" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="321" y="281" width="280" height="86" as="geometry" />
         </mxCell>
         <mxCell id="E" value="EXECUTING: codex exec --json" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
@@ -20,7 +20,7 @@
         <mxCell id="F" value="FREEZING: source и toolchain" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="321" y="1070" width="280" height="86" as="geometry" />
         </mxCell>
-        <mxCell id="V" value="VERIFYING: существующие runner и&#10;gate" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+        <mxCell id="V" value="VERIFYING: runner / core gate;&#10;v2: coverage + fresh review" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="321" y="1241" width="280" height="86" as="geometry" />
         </mxCell>
         <mxCell id="A" value="PASS → ACCEPTED" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
@@ -29,7 +29,7 @@
         <mxCell id="R" value="FAILED_REPAIRABLE → REPAIRING" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="586" y="1535" width="280" height="86" as="geometry" />
         </mxCell>
-        <mxCell id="X" value="exact session resume + failure&#10;packet" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
+        <mxCell id="X" value="Exact resume + failure packet;&#10;прежние attempts / deadline" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="539.33" y="1706" width="280" height="86" as="geometry" />
         </mxCell>
         <mxCell id="U" value="UNKNOWN_OUTCOME" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
@@ -111,7 +111,7 @@
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="footer" value="1.5.0 • обзор; точные переходы и ограничения — в руководстве" style="text;html=0;align=left;fontFamily=Arial;fontSize=13;fontColor=#526A82;" parent="1" vertex="1">
+        <mxCell id="footer" value="1.6.0 • обзор; точные переходы и ограничения — в руководстве" style="text;html=0;align=left;fontFamily=Arial;fontSize=13;fontColor=#526A82;" parent="1" vertex="1">
           <mxGeometry x="30" y="2023" width="1171" height="30" as="geometry" />
         </mxCell>
       </root>

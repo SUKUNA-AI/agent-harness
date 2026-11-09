@@ -1,0 +1,59 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="1200" height="1110" viewBox="0 0 1200 1110" role="img" aria-labelledby="title desc">
+  <title id="title">Durable execution: intent, receipt и gate</title>
+  <desc id="desc">Agent Harness 1.6.0. Текстовое описание и Mermaid находятся в связанном руководстве.</desc>
+  <rect width="1200" height="1110" fill="#FFFFFF" />
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#526A82" />
+    </marker>
+  </defs>
+  <text x="30" y="48" font-family="Arial, sans-serif" font-size="24" text-anchor="start" fill="#18324F" font-weight="bold">
+    <tspan x="30" y="48.0">Durable execution: intent, receipt и gate</tspan>
+  </text>
+  <polyline points="570.0,196 570.0,250" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <polyline points="570.0,336 570.0,390" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <polyline points="720,433 820,433" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <polyline points="570.0,476 570.0,530" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <polyline points="570.0,616 570.0,670" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <polyline points="570.0,756 570.0,810" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <polyline points="570.0,896 570.0,950" fill="none" stroke="#526A82" stroke-width="1.5" marker-end="url(#arrow)" />
+  <rect x="420" y="110" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="570.0" y="158.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="570.0" y="158.0">Persisted plan</tspan>
+  </text>
+  <rect x="420" y="250" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="570.0" y="298.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="570.0" y="298.0">Invocation intent</tspan>
+  </text>
+  <rect x="420" y="390" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="570.0" y="438.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="570.0" y="438.0">Completion receipt</tspan>
+  </text>
+  <rect x="820" y="390" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="970.0" y="438.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="970.0" y="429.0">Usage projection:</tspan>
+    <tspan x="970.0" y="447.0">уникальные подтверждённые вызовы</tspan>
+  </text>
+  <rect x="420" y="530" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="570.0" y="578.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="570.0" y="578.0">Integration intent</tspan>
+  </text>
+  <rect x="420" y="670" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="570.0" y="718.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="570.0" y="718.0">Integration receipt</tspan>
+  </text>
+  <rect x="420" y="810" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="570.0" y="858.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="570.0" y="849.0">Checks + dependency</tspan>
+    <tspan x="570.0" y="867.0">generation guard</tspan>
+  </text>
+  <rect x="420" y="950" width="300" height="86" rx="12" fill="#EDF3FA" stroke="#54718E" stroke-width="1.5" />
+  <text x="570.0" y="998.0" font-family="Arial, sans-serif" font-size="15" text-anchor="middle" fill="#18324F">
+    <tspan x="570.0" y="989.0">Accepted as of</tspan>
+    <tspan x="570.0" y="1007.0">current dependency vector</tspan>
+  </text>
+  <text x="30" y="1090" font-family="Arial, sans-serif" font-size="13" text-anchor="start" fill="#18324F">
+    <tspan x="30" y="1090.0">1.6.0 • обзор; required unknown/skipped не становятся PASS</tspan>
+  </text>
+</svg>

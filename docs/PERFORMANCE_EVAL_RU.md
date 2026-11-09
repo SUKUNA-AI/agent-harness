@@ -1,4 +1,4 @@
-# Метрики и эксперименты — 1.5.1
+# Метрики и эксперименты — 1.6.0
 
 [Baseline](BASELINE_1_5_0.md) · [Источники](SOURCES_AND_EVALS.md) · [Memory/context](MEMORY_AND_CONTEXT_RU.md)
 
@@ -123,7 +123,7 @@ limitations. Required `not_run`, `skipped`, `unknown` не являются pass
 usage описывайте по актуальному runtime; не выдавайте schema field за
 гарантированный hard backend limit.
 
-## Applicability и portfolio correction candidate
+## Applicability и portfolio в 1.6.0
 
 Alias installed/null fingerprint не разрешает automatic TOON. Receipt v2
 связывает route/config, client binary/build, evaluator/template, data/shape и

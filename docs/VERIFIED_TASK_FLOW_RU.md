@@ -75,20 +75,52 @@ Packet construction и adapter argv preflight выполняются до model 
 
 ## Переходы и приёмка
 
+![Managed v2: проверяемый план и исполнение](diagrams/verified-task-flow.svg)
+
+[Редактировать в draw.io](diagrams/verified-task-flow.drawio) · [Все схемы](diagrams/README.md)
+
+<details>
+<summary>Mermaid source той же схемы</summary>
+
 ```mermaid
 flowchart TD
-  P[Prepared node] --> R[Worker running]
-  R --> L[Local frozen checks]
-  L -->|passed| I[Durable integration]
-  I --> G[Integrated frozen checks]
-  G -->|passed| V[Node acceptance receipt]
-  V --> N[Open dependents]
-  L -->|failed| B[Bounded node repair]
-  G -->|failed| B
-  B --> R
-  R -->|uncertain| U[Reconciliation required]
-  N --> C[Final original-request coverage and core gate]
+    Mission["Исходная mission, constraints, requirements и frozen checks"]
+    Plan["Plan v2: schema / semantic validation и coverage"]
+    Quality{"Plan-quality assessment прошёл?"}
+    Revision["Ограниченная ревизия плана; исходные planning budgets"]
+    Worker["Worker: owned worktree, exact session и исходный budget"]
+    Local{"Local frozen checks прошли?"}
+    Repair["Bounded repair прежнего owner; прежние attempts / deadline"]
+    Integration["Durable integration: patch + ownership + pre/post tree"]
+    Integrated{"Integrated checks прошли?"}
+    Node["Current node acceptance receipt"]
+    Dependent["Открыть зависимую работу по current acceptance refs"]
+    Coverage["Итоговая original-request coverage на одном candidate"]
+    Review["Fresh final review v3: requirements + raw evidence"]
+    Gate["Общий core gate: все required final checks"]
+    Accepted["ACCEPTED при current evidence"]
+    Unknown["UNKNOWN_OUTCOME: сначала reconciliation"]
+    Mission --> Plan
+    Plan --> Quality
+    Quality -->|"правки"| Revision
+    Revision --> Plan
+    Quality -->|"approved"| Worker
+    Worker --> Local
+    Worker -->|"uncertain"| Unknown
+    Local -->|"failed"| Repair
+    Repair --> Worker
+    Local -->|"passed"| Integration
+    Integration --> Integrated
+    Integrated -->|"failed"| Repair
+    Integrated -->|"passed"| Node
+    Node --> Dependent
+    Dependent --> Coverage
+    Coverage --> Review
+    Review --> Gate
+    Gate -->|"passed"| Accepted
 ```
+
+</details>
 
 Prepared agent projection сохраняется до wave publication. Recovery может
 восстановить отсутствующий never-dispatched projection из frozen plan только

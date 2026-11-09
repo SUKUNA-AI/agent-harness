@@ -6,7 +6,7 @@
 исполняет штатный `codex exec`; harness управляет процессами, памятью и независимой
 приёмкой. Сервер, daemon, SQLite/vector DB, дополнительный LLM API/key не нужны.
 
-[Новый execution loop](docs/EXECUTION_SUPERVISOR_RU.md) ·
+[Исполнение и восстановление](docs/EXECUTION_SUPERVISOR_RU.md) ·
 [Memory/context](docs/MEMORY_AND_CONTEXT_RU.md) ·
 [Managed agents](docs/DYNAMIC_AGENTS_RU.md) ·
 [Migration](docs/STATE_FORMATS_AND_MIGRATION_RU.md) ·
@@ -17,13 +17,23 @@
 и исполнения, миграцию состояния и исправления путей и журнала на Windows.
 Каждый архив выпуска связан с Git-тегом и коммитом исходников.
 
-## Новое в 1.5.0
+[Скачать полный ZIP 1.6.0](https://github.com/SUKUNA-AI/agent-harness/releases/download/v1.6.0/agent-harness-1.6.0.zip)
+содержит native bundles Linux/Windows x86_64. Целостность, совпадение двух
+сборок и установка/verify/reinstall/rollback проверены при упаковке. Полный
+Python CI имеет известные таймауты и не объявляется пройденным; результаты
+и source commit находятся в `VERIFICATION.json` и
+[описании выпуска](docs/RELEASE_NOTES_1.6.0.md).
+
+## Возможности 1.6.0
 
 | Возможность | Проверяемый механизм |
 | --- | --- |
-| Полный цикл | `work start`: preflight → Codex edit → freeze → checks → gate |
+| Native-сессия | Установленный SessionStart hook → memory/ledger/reducer packet → checkpoint |
+| Проверяемый план | Mission/plan v2; schema/semantic validation и plan-quality assessment |
+| Полный цикл | `work start`: plan → node checks → durable integration → coverage/review → core gate |
 | Автоматическое исправление | Компактный failure packet и exact `codex exec resume <ID>` |
-| Восстановление | Strict YAML checkpoints, hash-chained journal, PID + birth identity |
+| Восстановление | Strict YAML, hash-chained journal, PID + birth identity; исходные deadlines и счётчики |
+| Windows identity | Physical root binding, полный FileId, проверка aliases и reparse ancestors |
 | Актуальные факты | Ledger inform/advisory govern, version-bound opt-in memory |
 | Ограниченный контекст | Reducer, адресные pointers, явные omissions/stale warnings |
 | Навигация | `repomap related-tests/trace-to-code/change-impact/symbol-context` |
@@ -73,7 +83,8 @@ Worktree, hashes и cooperating locks не заменяют OS sandbox.
 turn. Неизвестный usage обозначается unavailable.
 
 **Совместимость.** Python3.11+, vendored PyYAML6.0.3 (MIT), Rust1.90.0 + C toolchain
-для сборки helper. Реальные проверки выполняются с Codex CLI0.166.0-alpha.5.1.
+для сборки helper. Исторические client receipts содержат конкретную версию Codex; они не
+квалифицируют автоматически другой установленный клиент.
 State/status/memory и fake-Codex проверки работают offline; модельный Codex может
 требовать сеть. Git checkout не включает готовые binaries: нужен проверенный
 bundle или `python tools/build_native.py`. Found version/hash mismatch — отказ.
@@ -113,9 +124,10 @@ Windows Python bundle. Обычные global/venv/POSIX interpreters и arbitrar
 сам Codex через свои штатные инструменты. Постоянная служба, БД, векторное
 хранилище и отдельный LLM API для базового комплекта не требуются.
 
-Версия **1.5.0** добавила Execution Supervisor, managed runtime, Strict YAML,
-Ledger, память и независимую приёмку; **1.5.1** закрепляет исправления A1–A11
-и Windows JSON-state replacement. Совместимые legacy APIs сохраняются.
+Версия **1.6.0** связывает короткий SessionStart bootstrap, проверяемый план,
+node/final acceptance и восстановление в пределах исходных budgets. Она включает
+исправления A1–A11 из 1.5.1 и последующую стабилизацию Windows IO и журнала.
+Совместимые legacy APIs сохраняются.
 Исправления всех R01–R14 из аудита включены в [1.4.1](docs/REVIEW_1_4_1.md).
 Существующие snapshot/runner/gate переиспользуются. Параметры моделей,
 provider, reasoning, permissions и порог compaction `500000` не меняются.
@@ -531,7 +543,7 @@ Claude-Mem, TokenEconomizer, Promptfoo, NVIDIA SkillEvaluator и Harbor не
 | `native/` | Rust scanner, snapshot, RepoMap, locked зависимости и notices |
 | `bin/` | В Git — инструкция; в релизном ZIP — проверенные native bundles |
 | `schemas/` | Закрытые schemas для Strict YAML work state и совместимых JSON contracts/records |
-| `docs/diagrams/` | Редактируемые draw.io XML и SVG-экспорты; Mermaid source остаётся в руководствах |
+| `docs/diagrams/` | Редактируемые draw.io XML и эквивалентные SVG; Mermaid source остаётся в руководствах |
 | `tools/`, `tests/`, `.github/workflows/` | Сборка, проверки и CI |
 | `integrations/`, `plugins/` | Опциональные adapters и standalone plugin |
 | `profiles/` | Примеры настроек, которые не заменяют пользовательский config |
