@@ -1,7 +1,6 @@
-# Native Agent Harness 1.5.1
+# Native Agent Harness 1.6.0
 
-Ветка стабилизации содержит [новые contracts и ограничения приёмки](docs/STABILIZATION_RU.md).
-Correction candidate не объявляется новым квалифицированным релизом по одному merge кода.
+[Контракты стабилизации и границы приёмки](docs/STABILIZATION_RU.md).
 
 Локальное расширение установленного Codex для длительных задач. Модельные заходы
 исполняет штатный `codex exec`; harness управляет процессами, памятью и независимой
@@ -11,13 +10,12 @@ Correction candidate не объявляется новым квалифицир
 [Memory/context](docs/MEMORY_AND_CONTEXT_RU.md) ·
 [Managed agents](docs/DYNAMIC_AGENTS_RU.md) ·
 [Migration](docs/STATE_FORMATS_AND_MIGRATION_RU.md) ·
-[Релиз 1.5.1](docs/RELEASE_NOTES_1.5.1.md) ·
+[Релиз 1.6.0](docs/RELEASE_NOTES_1.6.0.md) ·
 [Редактируемые схемы draw.io](docs/diagrams/README.md)
 
-В **1.5.1** включены все исправления независимого аудита A1–A11:
-[что изменилось и как проверяется](docs/AUDIT_FIXES_1_5.md). Старый релиз
-`v1.5.0` не перезаписан: ZIP 1.5.1 привязан к своему отдельному Git tag
-и проверяемому source commit.
+**1.6.0** добавляет короткий старт сессии Codex, проверяемый цикл плана
+и исполнения, миграцию состояния и исправления путей и журнала на Windows.
+Каждый архив выпуска связан с Git-тегом и коммитом исходников.
 
 ## Новое в 1.5.0
 
@@ -129,7 +127,7 @@ provider, reasoning, permissions и порог compaction `500000` не меня
 [Установка и обновление](SETUP_RU.md) · [Вся документация](docs/INDEX.md) ·
 [Архитектура с диаграммами](docs/ARCHITECTURE_RU.md) ·
 [Справочник CLI](docs/CLI_REFERENCE_RU.md) ·
-[Релиз 1.5.1](docs/RELEASE_NOTES_1.5.1.md) · [История изменений](CHANGELOG.md)
+[Релиз 1.6.0](docs/RELEASE_NOTES_1.6.0.md) · [История изменений](CHANGELOG.md)
 
 ## Навигация
 

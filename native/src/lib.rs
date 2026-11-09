@@ -33,7 +33,7 @@ mod tests {
     #[test]
     fn legacy_info_keeps_its_exact_shape() {
         assert_eq!(dispatch_legacy(&json!({"operation":"info"})).unwrap(),
-            json!({"schema_version":1,"protocol_version":1,"version":"1.5.1",
+            json!({"schema_version":1,"protocol_version":1,"version":env!("CARGO_PKG_VERSION"),
                 "operations":["snapshot","repomap"]}));
         assert_eq!(dispatch_legacy(&json!({"operation":"info","protocol_version":1})).unwrap(),
             dispatch_legacy(&json!({"operation":"info"})).unwrap());

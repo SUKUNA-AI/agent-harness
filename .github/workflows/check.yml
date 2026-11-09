@@ -11,6 +11,8 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-latest]
         python: ['3.11', '3.13']
+        # Keep the full suite on each platform below the hosted job time limit.
+        shard: [1, 2, 3, 4]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -21,7 +23,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python tools/release_check.py
-      - run: python tools/run_tests.py
+      - run: python tools/run_tests.py --shard ${{ matrix.shard }} --shards 4
       - run: python -m pip install --disable-pip-version-check "mcp==2.3.0"
       - run: python -I -B tools/check_mcp.py
   native:

@@ -20,7 +20,7 @@ fn executable_keeps_v1_info_and_explicitly_selects_v2() {
     let legacy = invoke(&[], br#"{"operation":"info"}"#);
     assert!(legacy.status.success()); assert!(legacy.stderr.is_empty());
     assert_eq!(serde_json::from_slice::<Value>(&legacy.stdout).unwrap(),
-        json!({"schema_version":1,"protocol_version":1,"version":"1.5.1","operations":["snapshot","repomap"]}));
+        json!({"schema_version":1,"protocol_version":1,"version":env!("CARGO_PKG_VERSION"),"operations":["snapshot","repomap"]}));
     let raw=serde_json::to_vec(&request()).unwrap();
     let wrong_mode=invoke(&[],&raw);
     assert!(!wrong_mode.status.success());

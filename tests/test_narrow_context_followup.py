@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from agent_harness import __version__
 from agent_harness.core import HarnessError, digest, now
 from agent_harness.checkpoint_index import CheckpointIndex, configure, settings
 from agent_harness.execution_ledger import repository_identity
@@ -230,7 +231,7 @@ class NarrowContextFollowup(unittest.TestCase):
         result = observe(self.state, self.event(client_version="invented", prompt="private-canary"))
         record = load(result["path"], OBSERVER_SCHEMA)
         self.assertEqual(record["schema_version"], 2)
-        self.assertEqual(record["harness_version"], "1.5.1")
+        self.assertEqual(record["harness_version"], __version__)
         self.assertIsNone(record["client_version"])
         self.assertIsNone(record["capability_receipt_ref"])
         self.assertIsNone(record["invocation_id"])
