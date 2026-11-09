@@ -13,6 +13,7 @@ from pathlib import Path
 import platform
 import re
 import shutil
+import shlex
 import stat
 import subprocess
 import sys
@@ -20,9 +21,9 @@ import tempfile
 import tomllib
 import uuid
 
-from .file_io import FileReadError, read_regular_file, _stamp
+from .file_io import FileReadError, read_regular_file, _stamp, ParentDirectory, parent_binding, verify_parent_binding
 
-VERSION = "1.5.1"
+VERSION = "1.6.0"
 START = "<!-- agent-harness:begin -->"
 END = "<!-- agent-harness:end -->"
 AUTO_COMPACT_TOKEN_LIMIT = 500000
@@ -71,7 +72,7 @@ def encode_like(text: str, original: bytes | None) -> bytes:
     return text.encode("utf-8-sig" if original and original.startswith(b"\xef\xbb\xbf") else "utf-8")
 
 
-def regular_target(path: Path) -> None:
+def _regular_target_leaf(path: Path) -> None:
     """Never replace a link/special file with a regular file byte backup.
 
     lstat also detects dangling links. Windows reparse attributes cover junctions
@@ -86,6 +87,21 @@ def regular_target(path: Path) -> None:
     if not stat.S_ISREG(observed.st_mode):
         raise InstallError(f"Installation target is not a regular file: {path}")
 
+
+
+def regular_target(path: Path) -> None:
+    try:
+        parent_binding(path)
+        _regular_target_leaf(path)
+    except FileReadError as error:
+        raise InstallError(str(error)) from error
+
+
+def _bound_path(parent, name):
+    if sys.platform.startswith("linux") and parent.fd is not None:
+        # Kernel-owned descriptor alias; never constructed from user input.
+        return Path(f"/proc/self/fd/{parent.fd}") / name
+    return parent.path.parent / name
 
 def windows_helper(name: str, *args, **kwargs):
     from . import rename
@@ -123,13 +139,13 @@ def windows_owner_group(path: Path) -> dict:
     return result
 
 
-def metadata(path: Path) -> dict | None:
+def _metadata(path: Path) -> dict | None:
     """Capture replaceable security metadata, refusing unsupported preservation.
 
     Content timestamps intentionally change on an edit. Identity timestamps are
     used only to detect concurrent changes, not restored on the replacement.
     """
-    regular_target(path)
+    _regular_target_leaf(path)
     try:
         before = path.lstat()
     except FileNotFoundError:
@@ -179,7 +195,7 @@ def metadata(path: Path) -> dict | None:
             os.close(fd)
     else:
         raise InstallError("Installation metadata preservation supports Linux and Windows only")
-    regular_target(path)
+    _regular_target_leaf(path)
     last = path.lstat()
     if _stamp(before) != _stamp(last):
         raise InstallError(f"Concurrent metadata change: {path}")
@@ -189,6 +205,19 @@ def metadata(path: Path) -> dict | None:
             or windows_owner_group(path) != security["owner_group"]):
         raise InstallError(f"Concurrent Windows security metadata change: {path}")
     return {"identity": _stamp(last), "security": security}
+
+
+
+def metadata(path: Path) -> dict | None:
+    try:
+        with ParentDirectory(path) as parent:
+            value = _metadata(_bound_path(parent, parent.path.name))
+            parent.check()
+            return value
+    except FileNotFoundError:
+        return None
+    except FileReadError as error:
+        raise InstallError(str(error)) from error
 
 
 def copy_metadata(path: Path, original: dict | None) -> None:
@@ -204,17 +233,25 @@ def copy_metadata(path: Path, original: dict | None) -> None:
             windows_helper("_windows_set_dacl", path, desired, expected=expected)
         os.chmod(path, value["mode"])
     else:
-        observed = path.stat()
-        if (observed.st_uid, observed.st_gid) != (value["uid"], value["gid"]):
-            os.chown(path, value["uid"], value["gid"], follow_symlinks=False)
-        os.chmod(path, value["mode"], follow_symlinks=False)
-        # A staging file may inherit its own parent ACL; copy the exact source
-        # set, including deleting attributes not present on the original.
-        for name in set(os.listxattr(path, follow_symlinks=False)) - value["xattrs"].keys():
-            os.removexattr(path, name, follow_symlinks=False)
-        for name, data in value["xattrs"].items():
-            os.setxattr(path, name, bytes.fromhex(data), follow_symlinks=False)
-    actual = metadata(path)["security"]
+        # Metadata writes use the opened staging inode, never a raced leaf link.
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            observed = os.fstat(fd)
+            if not stat.S_ISREG(observed.st_mode):
+                raise InstallError("Staging metadata target is not a regular file")
+            if (observed.st_uid, observed.st_gid) != (value["uid"], value["gid"]):
+                os.fchown(fd, value["uid"], value["gid"])
+            os.fchmod(fd, value["mode"])
+            for name in set(os.listxattr(fd)) - value["xattrs"].keys():
+                os.removexattr(fd, name)
+            for name, data in value["xattrs"].items():
+                os.setxattr(fd, name, bytes.fromhex(data))
+            actual_metadata = _metadata(path)
+            if actual_metadata["identity"][:2] != _stamp(os.fstat(fd))[:2]:
+                raise InstallError("Staging metadata target changed")
+        finally:
+            os.close(fd)
+    actual = _metadata(path)["security"]
     # Windows ReplaceFileW carries original attributes onto the final file;
     # temporary-file attributes need not match before that replacement.
     if {k: v for k, v in actual.items() if k != "attributes"} != {k: v for k, v in value.items() if k != "attributes"}:
@@ -224,6 +261,13 @@ def copy_metadata(path: Path, original: dict | None) -> None:
 def preflight_metadata(plans: list[dict]) -> None:
     """Prove every metadata set can be staged before changing any target."""
     for p in plans:
+        if "_parent_binding" in p:
+            try:
+                verify_parent_binding(p["path"], p["_parent_binding"])
+            except FileReadError as error:
+                raise InstallError(str(error)) from error
+        else:
+            p["_parent_binding"] = parent_binding(p["path"])
         observed = metadata(p["path"])
         if "_metadata" in p and observed != p["_metadata"]:
             raise InstallError(f"Concurrent metadata edit before transaction: {p['path']}")
@@ -233,58 +277,99 @@ def preflight_metadata(plans: list[dict]) -> None:
     for p in plans:
         if p["_metadata"] is None or p["after"] is None:
             continue
-        fd, name = tempfile.mkstemp(prefix=".harness-metadata-", dir=p["path"].parent)
-        os.close(fd)
-        try:
-            copy_metadata(Path(name), p["_metadata"])
-        finally:
-            os.unlink(name)
+        with ParentDirectory(p["path"]) as parent:
+            name = ".harness-metadata-" + uuid.uuid4().hex
+            os.close(parent.open(os.O_WRONLY | os.O_CREAT | os.O_EXCL, name=name))
+            try:
+                copy_metadata(_bound_path(parent, name), p["_metadata"])
+                parent.check()
+            finally:
+                if parent.fd is not None:
+                    os.unlink(name, dir_fd=parent.fd)
+                else:
+                    parent.unlink(name)
+
 
 
 def check_planned_metadata(p: dict) -> None:
+    if "_parent_binding" in p:
+        try:
+            verify_parent_binding(p["path"], p["_parent_binding"])
+        except FileReadError as error:
+            raise InstallError(str(error)) from error
     if metadata(p["path"]) != p["_metadata"]:
         raise InstallError(f"Concurrent metadata edit; user edit preserved: {p['path']}")
 
 
 def atomic(path: Path, data: bytes) -> dict:
-    original = metadata(path)
-    restore = _RESTORE_METADATA.get()
-    desired = restore[1] if restore is not None and restore[0] == path else original
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, name = tempfile.mkstemp(prefix=".harness-", dir=path.parent)
     try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
-            f.flush()
-            os.fsync(f.fileno())
-        copy_metadata(Path(name), desired)
-        staged = metadata(Path(name))
-        receipt = {"identity": staged["identity"][:-1],
-                   "security": desired["security"] if desired is not None else staged["security"]}
-        if metadata(path) != original:
-            raise InstallError(f"Concurrent metadata edit before replacement: {path}")
-        # Retain the exact staged receipt even if a replacement commits and its
-        # wrapper subsequently raises. Post-write observations never establish
-        # ownership of security metadata introduced by another writer.
-        publication = _PUBLICATION.get()
-        if publication is not None and publication["path"] == path:
-            publication["_applied_metadata"] = receipt
-        if os.name == "nt" and original is not None:
-            windows_helper("_windows_replace", path, Path(name))
-        else:
-            os.replace(name, path)
-        if not matches_receipt(path, receipt):
-            raise InstallError(f"Published installation metadata changed; user edit preserved: {path}")
-        return receipt
-    finally:
-        if os.path.exists(name):
-            os.unlink(name)
+        with ParentDirectory(path, create=True) as parent:
+            original = metadata(path)
+            restore = _RESTORE_METADATA.get()
+            desired = restore[1] if restore is not None and restore[0] == path else original
+            name = ".harness-" + uuid.uuid4().hex
+            fd = parent.open(os.O_WRONLY | os.O_CREAT | os.O_EXCL, name=name)
+            try:
+                with os.fdopen(fd, "wb") as output:
+                    output.write(data)
+                    output.flush()
+                    os.fsync(output.fileno())
+                    staged_path = _bound_path(parent, name)
+                    written_identity = _stamp(os.fstat(output.fileno()))[:2]
+                    copy_metadata(staged_path, desired)
+                    # Windows FlushFileBuffers requires GENERIC_WRITE. Keep the
+                    # original writable descriptor across metadata preservation;
+                    # a preserved DACL/mode may forbid reopening it for writing.
+                    os.fsync(output.fileno())
+                    if _stamp(os.fstat(output.fileno()))[:2] != written_identity:
+                        raise InstallError("Staging identity changed before publication")
+                # Windows finalizes last-write timestamps on writer close. Bind
+                # the receipt afterwards, still requiring the inode we wrote.
+                staged = _metadata(staged_path)
+                if staged is None or staged["identity"][:2] != written_identity:
+                    raise InstallError("Staging identity changed before publication")
+                receipt = {"identity": staged["identity"][:-1],
+                           "security": desired["security"] if desired is not None else staged["security"]}
+                if metadata(path) != original:
+                    raise InstallError(f"Concurrent metadata edit before replacement: {path}")
+                publication = _PUBLICATION.get()
+                if publication is not None and publication["path"] == path:
+                    publication["_applied_metadata"] = receipt
+                    # Persist staging identity before the irreversible replace.
+                    # A hard exit after replace can then be reconciled without
+                    # adopting a user's same-content replacement or chmod.
+                    if "_before_publish" in publication:
+                        publication["_before_publish"](receipt)
+                        if metadata(path) != original:
+                            raise InstallError(f"Concurrent metadata edit during publication preparation: {path}")
+                if os.name == "nt" and original is not None:
+                    parent.check()
+                    windows_helper("_windows_replace", path, staged_path)
+                    parent.check()
+                else:
+                    parent.replace(name)
+                if not matches_receipt(path, receipt):
+                    raise InstallError(f"Published installation metadata changed; user edit preserved: {path}")
+                return receipt
+            finally:
+                # Cleanup uses the original directory descriptor even after a
+                # retarget; never delete a same-named file in a new directory.
+                try:
+                    if parent.fd is not None:
+                        os.unlink(name, dir_fd=parent.fd)
+                    else:
+                        parent.unlink(name, missing_ok=True)
+                except FileNotFoundError:
+                    pass
+    except FileReadError as error:
+        raise InstallError(str(error)) from error
 
 
 def restore_target(path: Path, data: bytes | None, original: dict | None) -> None:
     """Restore deleted files with their captured ACLs before publication."""
     if data is None:
-        path.unlink(missing_ok=True)
+        with ParentDirectory(path) as parent:
+            parent.unlink(missing_ok=True)
         return
     token = _RESTORE_METADATA.set((path, original))
     try:
@@ -299,7 +384,7 @@ def matches_receipt(path: Path, receipt: dict | None) -> bool:
         return current is None and receipt is None
     # Publication changes inode ctime. All other identity fields and the exact
     # security set must match the verified staging inode, never a fresh target.
-    return (current["identity"][:-1] == receipt["identity"]
+    return (current["identity"][:-1] == tuple(receipt["identity"])
             and current["security"] == receipt["security"])
 
 
@@ -313,7 +398,8 @@ def publish_target(p: dict) -> None:
     try:
         if p["after"] is None:
             p["_applied_metadata"] = None
-            p["path"].unlink(missing_ok=True)
+            with ParentDirectory(p["path"]) as parent:
+                parent.unlink(missing_ok=True)
         else:
             atomic(p["path"], p["after"])
         if not owns_applied_metadata(p):
@@ -335,18 +421,23 @@ def canonical(value: object) -> bytes:
 
 @contextlib.contextmanager
 def lock(state: Path):
-    state.mkdir(parents=True, exist_ok=True)
     path = state / "install.lock"
     try:
-        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError:
-        raise InstallError(f"Installation writer lock exists: {path}. Inspect its owner; no automatic removal.")
-    try:
-        os.write(fd, canonical({"pid": os.getpid(), "created": dt.datetime.now(dt.timezone.utc).isoformat()}))
-        os.close(fd)
-        yield
-    finally:
-        path.unlink(missing_ok=True)
+        with ParentDirectory(path, create=True) as parent:
+            try:
+                fd = parent.open(os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                raise InstallError(f"Installation writer lock exists: {path}. Inspect its owner; no automatic removal.")
+            try:
+                with os.fdopen(fd, "wb") as output:
+                    output.write(canonical({"pid": os.getpid(), "created": dt.datetime.now(dt.timezone.utc).isoformat()}))
+                    output.flush()
+                    os.fsync(output.fileno())
+                yield
+            finally:
+                parent.unlink(missing_ok=True)
+    except FileReadError as error:
+        raise InstallError(str(error)) from error
 
 
 def selected_instructions(home: Path) -> Path:
@@ -639,6 +730,17 @@ def redacted_diff(path: Path, old: bytes | None, new: bytes) -> str:
     return "\n".join("<redacted sensitive line>" if SENSITIVE.search(line) and not line.startswith(("---", "+++")) else line for line in lines)
 
 
+def _supported_install_manifest(value):
+    if not isinstance(value, dict) or type(value.get("schema_version")) is not int or value["schema_version"] not in {1, 2, 3}:
+        return False
+    if value["schema_version"] == 3:
+        keys = {"schema_version", "policy_version", "package_root", "install_id", "created", "files",
+            "previous_manifest", "status", "boundary_protocol", "commit_protocol"}
+        return (set(value) == keys and value["commit_protocol"] == "active-binding-v1"
+            and value["boundary_protocol"] == "physical-parent-v2")
+    return True
+
+
 def active_manifest(state: Path) -> dict | None:
     p = state / "active.json"
     if not p.exists():
@@ -650,7 +752,7 @@ def active_manifest(state: Path) -> dict | None:
     if not target.is_file() or digest(required_read(target)) != ref["sha256"]:
         raise InstallError("Active installation manifest is missing or modified")
     manifest = json.loads(decode(required_read(target)))
-    if not isinstance(manifest, dict) or manifest.get("schema_version") != 1 or manifest.get("status") != "written_pending_native_verification":
+    if not _supported_install_manifest(manifest) or manifest.get("status") != "written_pending_native_verification":
         raise InstallError("Active installation manifest is not a committed installation")
     return manifest
 
@@ -659,6 +761,8 @@ def manifest_chain(manifest: dict | None) -> list[dict]:
     chain = []
     seen = set()
     while manifest:
+        if not _supported_install_manifest(manifest):
+            raise InstallError("Unsupported installation manifest version")
         identity = manifest["install_id"]
         if identity in seen:
             raise InstallError("Installation history contains a cycle")
@@ -674,7 +778,76 @@ def manifest_chain(manifest: dict | None) -> list[dict]:
     return chain
 
 
-def plan(package: Path, home: Path, skills: Path, state: Path, overlay: Path, max_child_threads: int | None = None) -> list[dict]:
+
+def hook_payload(package, home):
+    """A static launcher inherits stdin; event fields never become shell code."""
+    script = package / "tools/session.py"
+    if not script.is_file():
+        raise InstallError("Native SessionStart entrypoint missing from package")
+    launcher = home / "agent-harness-hook.py"
+    interpreter = str(Path(sys.executable).absolute())
+    argv = [interpreter, str(launcher)]
+    if os.name == "nt":
+        if any(re.search(r'[%%!&|<>^\r\n]', argument) for argument in argv):
+            raise InstallError("Hook launcher path has unsupported Windows shell metacharacters")
+        command = subprocess.list2cmdline(argv)
+    else:
+        command = shlex.join(argv)
+    payload = ("# Generated Agent Harness SessionStart launcher; stdin is inherited.\n"
+               f"# Entrypoint sha256: {digest(required_read(script))}\n"
+               "import runpy, sys\n"
+               f"sys.argv = [{str(script)!r}, 'hook']\n"
+               f"runpy.run_path({str(script)!r}, run_name='__main__')\n").encode("utf-8")
+    handler = {"matcher": "^(startup|resume|clear|compact|fork)$", "hooks": [
+        {"type": "command", "command": command, "timeout": 30, "additionalContextLimit": 5000}]}
+    return launcher, payload, handler
+
+
+def _harness_commands(value):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if key == "command" and isinstance(child, str) and (
+                    "agent-harness-hook" in child or "session.py" in child and "hook" in child):
+                yield child
+            yield from _harness_commands(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _harness_commands(child)
+
+
+def _hook_document(raw):
+    from .validation import _json_report
+    if raw is None:
+        return {"hooks": {}}
+    try:
+        value = _json_report(raw)
+    except ValueError as error:
+        raise InstallError("Invalid bounded hooks.json") from error
+    if not isinstance(value, dict) or not isinstance(value.get("hooks", {}), dict):
+        raise InstallError("hooks.json must contain a hooks object")
+    value.setdefault("hooks", {})
+    return value
+
+
+def _revert_hooks(current, meta):
+    value = _hook_document(current)
+    groups = value["hooks"].get("SessionStart", [])
+    if not isinstance(groups, list) or groups.count(meta["handler_after"]) != 1:
+        raise InstallError("Managed hook changed or duplicated; user hooks preserved")
+    index = groups.index(meta["handler_after"])
+    if meta["handler_before"] is None:
+        groups.pop(index)
+    else:
+        groups[index] = meta["handler_before"]
+    if not groups:
+        value["hooks"].pop("SessionStart", None)
+    return value
+
+
+def plan(package: Path, home: Path, skills: Path, state: Path, overlay: Path, max_child_threads: int | None = None, adopt_hook_sha256: str | None = None) -> list[dict]:
+    if adopt_hook_sha256 is not None:
+        if not isinstance(adopt_hook_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", adopt_hook_sha256):
+            raise InstallError("--adopt-hook-sha256 requires a lowercase SHA-256 of one canonical SessionStart group")
     if not (package / "policies/global.md").is_file() or not (package / "tools/harness.py").is_file():
         raise InstallError("Package policy or executable entrypoint missing")
     for target in (home / "config.toml", selected_instructions(home), overlay, state / "active.json"):
@@ -692,21 +865,29 @@ def plan(package: Path, home: Path, skills: Path, state: Path, overlay: Path, ma
     preferred_cap = positive_cap(max_child_threads if max_child_threads is not None else (existing_machine or {}).get("preferred_native_child_cap", DEFAULT_CHILD_CAP))
     plans = []
     desired = set()
-    def add(path: Path, new: bytes, kind: str, meta: dict | None = None):
+    def add(path: Path, new: bytes, kind: str, meta: dict | None = None, *, force_record=False, expected_before=...):
         regular_target(path)
         desired.add(str(path))
         original_metadata = metadata(path)
+        prior_target = owned.get(str(path))
+        if prior_target and "parent_binding" in prior_target:
+            try:
+                verify_parent_binding(path, prior_target["parent_binding"])
+            except FileReadError as error:
+                raise InstallError(str(error)) from error
         old = read(path)
+        if expected_before is not ... and old != expected_before:
+            raise InstallError(f"Concurrent edit while planning approved target: {path}")
         if metadata(path) != original_metadata:
             raise InstallError(f"Concurrent metadata edit while planning: {path}")
         if kind == "owned" and old is not None:
             prior = owned.get(str(path))
             if not prior or digest(old) != prior["after_sha256"]:
                 raise InstallError(f"Existing or manually edited file conflicts: {path}")
-        if old == new:
+        if old == new and not force_record:
             return
         plans.append({"path": path, "before": old, "after": new, "kind": kind,
-                      "meta": meta or {}, "_metadata": original_metadata})
+                      "meta": meta or {}, "_metadata": original_metadata, "_parent_binding": parent_binding(path)})
     instruction = selected_instructions(home)
     text = decode(read(instruction))
     template = decode(required_read(package / "adapters/codex/bootstrap.md"))
@@ -733,6 +914,69 @@ def plan(package: Path, home: Path, skills: Path, state: Path, overlay: Path, ma
     add(config_path, encode_like(config, read(config_path)), "config", config_meta)
     pointer = {"schema_version": 1, "policy_version": VERSION, "package_root": str(package), "machine_overlay": str(overlay), "installation_state": str(state)}
     add(home / "harness-machine.json", canonical(pointer), "owned")
+    launcher, launcher_bytes, handler = hook_payload(package, home)
+    config_hooks = tomllib.loads(old_config).get("hooks", {})
+    # hooks.state records are client trust state, not source definitions.
+    if isinstance(config_hooks, dict):
+        config_hooks = {key: value for key, value in config_hooks.items() if key != "state"}
+    if list(_harness_commands(config_hooks)):
+        raise InstallError("Harness hook is also defined in config.toml; resolve duplicate effective source")
+    hook_path = home / "hooks.json"
+    regular_target(hook_path)
+    hook_original = read(hook_path)
+    hooks = _hook_document(hook_original)
+    groups = hooks["hooks"].setdefault("SessionStart", [])
+    if not isinstance(groups, list):
+        raise InstallError("SessionStart hook groups must be an array")
+    prior = owned.get(str(hook_path))
+    prior_handler = prior.get("meta", {}).get("handler_after") if prior else None
+    managed = [index for index, group in enumerate(groups) if list(_harness_commands(group))]
+    if len(managed) > 1:
+        raise InstallError("Duplicate harness SessionStart handlers; no user hooks changed")
+    previous_handler = None
+    adopted_now = False
+    adopted_digest = prior.get("meta", {}).get("adopted_group_digest") if prior else None
+    if managed:
+        index = managed[0]
+        existing = groups[index]
+        existing_digest = digest(canonical(existing))
+        already_owned = prior_handler is not None and existing == prior_handler
+        if already_owned:
+            # Replaying an explicit installation command may keep its original
+            # consent digest, but only while the exact current owned handler and
+            # its immutable adoption receipt still agree.
+            if (adopt_hook_sha256 is not None
+                    and adopt_hook_sha256 not in {existing_digest, adopted_digest}):
+                raise InstallError("Hook adoption digest mismatch; no targets changed")
+        elif adopt_hook_sha256 is not None:
+            entries = existing.get("hooks")
+            if (not isinstance(entries, list) or len(entries) != 1
+                    or not isinstance(entries[0], dict) or entries[0].get("type") != "command"):
+                raise InstallError("Hook adoption requires exactly one command handler; separate mixed groups before review")
+            if existing_digest != adopt_hook_sha256:
+                raise InstallError("Hook adoption digest mismatch; no targets changed")
+            adopted_digest = existing_digest
+            adopted_now = True
+        else:
+            raise InstallError("Existing unmanaged or edited harness hook conflicts; review hooks.json")
+        previous_handler = existing
+        groups[index] = handler
+    else:
+        if adopt_hook_sha256 is not None:
+            raise InstallError("Hook adoption requires exactly one existing harness SessionStart group")
+        groups.append(handler)
+    # The launcher enters the same plan and ownership rules as roles/skills.
+    add(launcher, launcher_bytes, "owned")
+    hook_meta = {"handler_before": previous_handler, "handler_after": handler,
+        "handler_digest": digest(canonical(handler)), "launcher_digest": digest(launcher_bytes),
+        "trust": "requires_client_review", "runtime_qualification": "not_tested"}
+    if adopted_digest is not None:
+        hook_meta["adopted_group_digest"] = adopted_digest
+    # Explicit adoption needs an ownership receipt even when old bytes happen
+    # to equal the desired payload; subsequent default reinstall must be safe.
+    add(hook_path, canonical(hooks), "hooks", hook_meta, force_record=adopted_now,
+        expected_before=hook_original)
+
     for role in ("delivery_owner", "delivery_helper", "delivery_reviewer"):
         source = decode(required_read(package / f"adapters/codex/agents/{role}.toml"))
         source = source.replace("{{POLICY_PATH}}", (package / "policies/global.md").as_posix()).replace("{{MACHINE_POINTER}}", (home / "harness-machine.json").as_posix())
@@ -796,7 +1040,8 @@ def apply_plan(plans: list[dict], state: Path, package: Path) -> dict:
     preflight_metadata([*plans, pointer_plan])
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
     transaction = state / "installs" / stamp
-    transaction.mkdir(parents=True)
+    with ParentDirectory(transaction / "manifest.json", create=True):
+        pass
     files = []
     for i, p in enumerate(plans):
         regular_target(p["path"])
@@ -807,10 +1052,16 @@ def apply_plan(plans: list[dict], state: Path, package: Path) -> dict:
         if p["before"] is not None:
             atomic(backup, p["before"])
         atomic(installed, p["after"])
-        files.append({"path": str(p["path"]), "before_sha256": digest(p["before"]) if p["before"] is not None else None, "after_sha256": digest(p["after"]), "backup": str(backup) if p["before"] is not None else None, "installed_copy": str(installed), "kind": p["kind"], "meta": p["meta"], "metadata_before": p["_metadata"]["security"] if p["_metadata"] else None})
-    manifest = {"schema_version": 1, "policy_version": VERSION, "package_root": str(package), "install_id": stamp, "created": dt.datetime.now(dt.timezone.utc).isoformat(), "files": files, "previous_manifest": json.loads(previous_ref) if previous_ref else None, "status": "prepared"}
+        files.append({"path": str(p["path"]), "before_sha256": digest(p["before"]) if p["before"] is not None else None, "after_sha256": digest(p["after"]), "backup": str(backup) if p["before"] is not None else None, "installed_copy": str(installed), "kind": p["kind"], "meta": p["meta"], "metadata_before": p["_metadata"]["security"] if p["_metadata"] else None,
+                      "parent_binding": p["_parent_binding"], "target_before": p["_metadata"], "progress": "pending"})
+    manifest = {"schema_version": 3, "policy_version": VERSION, "package_root": str(package), "install_id": stamp, "created": dt.datetime.now(dt.timezone.utc).isoformat(), "files": files, "previous_manifest": json.loads(previous_ref) if previous_ref else None, "status": "prepared", "boundary_protocol": "physical-parent-v2", "commit_protocol": "active-binding-v1"}
     manifest_path = transaction / "manifest.json"
     atomic(manifest_path, canonical(manifest))
+    def preparing(index, receipt):
+        row = files[index]
+        row.update(metadata_after=receipt["security"], publication_identity=receipt["identity"],
+                   parent_binding=parent_binding(plans[index]["path"]), progress="publishing")
+        atomic(manifest_path, canonical(manifest))
     written = []
     new_ref = None
     try:
@@ -821,8 +1072,16 @@ def apply_plan(plans: list[dict], state: Path, package: Path) -> dict:
                 raise InstallError(f"Concurrent edit while installing: {p['path']}")
             # Track even an atomic implementation which commits then raises.
             written.append(p)
-            publish_target(p)
+            p["_before_publish"] = lambda receipt, index=i: preparing(index, receipt)
+            try:
+                publish_target(p)
+            finally:
+                p.pop("_before_publish", None)
             files[i]["metadata_after"] = p["_applied_metadata"]["security"]
+            files[i]["parent_binding"] = parent_binding(p["path"])
+            files[i]["publication_identity"] = p["_applied_metadata"]["identity"]
+            files[i]["progress"] = "applied"
+            atomic(manifest_path, canonical(manifest))
         manifest["status"] = "written_pending_native_verification"
         atomic(manifest_path, canonical(manifest))
         if read(state / "active.json") != previous_ref:
@@ -857,9 +1116,18 @@ def apply_plan(plans: list[dict], state: Path, package: Path) -> dict:
                     recovery_errors.append(str(p["path"]) + " (concurrent edit preserved)")
             except (OSError, InstallError):
                 recovery_errors.append(str(p["path"]))
-        manifest["status"] = "failed_recovery_required" if recovery_errors else "failed_restored_unchanged_targets"
+        failure_status = "failed_recovery_required" if recovery_errors else "failed_restored_unchanged_targets"
         try:
-            atomic(manifest_path, canonical(manifest))
+            if "_applied_metadata" in pointer_plan:
+                # Once active publication may have happened, its referenced
+                # manifest is immutable, even if compensation restored active.
+                atomic(transaction / "recovery.json", canonical({"schema_version": 1,
+                    "record_type": "installation_recovery", "status": failure_status,
+                    "manifest": {"manifest": str(manifest_path), "sha256": digest(required_read(manifest_path))},
+                    "error": str(original_error), "unrestored": recovery_errors}))
+            else:
+                manifest["status"] = failure_status
+                atomic(manifest_path, canonical(manifest))
         except (OSError, InstallError):
             recovery_errors.append("transaction status")
         if recovery_errors:
@@ -868,14 +1136,133 @@ def apply_plan(plans: list[dict], state: Path, package: Path) -> dict:
                 "Unrestored or unrecorded targets: " + ", ".join(recovery_errors)
             ) from original_error
         raise
-    return {"status": manifest["status"], "manifest": str(manifest_path), "files_changed": len(files), "policy_version": VERSION}
+    # The active binding is the commit point, not native verification and not
+    # this extra historical proof. Failure here must not roll back or rewrite
+    # the manifest already selected by active.json.
+    _retain_install_commit(state, manifest_path, manifest, new_ref, pointer_plan)
+    return {"status": manifest["status"], "manifest": str(manifest_path), "files_changed": len(files), "policy_version": VERSION,
+            "hook_status": "configured_trust_and_runtime_pending",
+            "next_step": "Open a fresh Codex process, inspect /hooks and trust the exact handler in the client; verify a new session. Trust state is not edited."}
+
+
+def _retain_install_commit(state, manifest_path, manifest, active_bytes, pointer_plan):
+    from .supervisor_store import atomic_write
+    from .core import HarnessError
+    pointer = state / "active.json"
+    if read(pointer) != active_bytes or not owns_applied_metadata(pointer_plan):
+        raise InstallError("Installation published; commit observation changed; recovery_required, preserve targets and manifest")
+    value = {"schema_version": 1, "record_type": "installation_commit",
+        "install_id": manifest["install_id"], "manifest": json.loads(active_bytes),
+        "active_pointer": str(pointer), "parent_binding": parent_binding(pointer),
+        "publication": pointer_plan["_applied_metadata"]}
+    value["record_digest"] = digest(canonical(value))
+    path = manifest_path.parent / "commit.json"
+    raw = canonical(value)
+    previous = read(path)
+    if previous is not None:
+        if previous != raw:
+            raise InstallError("Installation commit receipt integrity conflict; recovery_required")
+        return
+    try:
+        atomic_write(path, raw, exclusive=True)
+    except (OSError, ValueError, HarnessError) as error:
+        raise InstallError("Installation committed; commit receipt publication incomplete; preserve active binding and recover") from error
+
+
+def _installation_committed(manifest, *, state=None, source_ref=None):
+    """Verify current/historical commit proof, without trusting a status label.
+
+    Legacy unbound manifests retain their existing targeted rollback policy;
+    they are not upgraded into physical-parent-v2 ownership evidence.
+    """
+    if not _supported_install_manifest(manifest):
+        raise InstallError("Unsupported installation manifest version or commit protocol")
+    if manifest.get("boundary_protocol") != "physical-parent-v2" and "install_id" not in manifest:
+        if manifest.get("status") == "prepared" or any("progress" in row for row in manifest.get("files", [])):
+            raise InstallError("Legacy interrupted installation ownership is unavailable; recovery_required")
+        return None
+    rows = manifest.get("files", [])
+    if not rows or not isinstance(manifest.get("install_id"), str):
+        raise InstallError("Installation manifest binding is incomplete")
+    transaction = Path(rows[0]["installed_copy"]).parent
+    inferred_state = transaction.parent.parent
+    if transaction.name != manifest["install_id"] or transaction.parent.name != "installs":
+        raise InstallError("Installation transaction path binding conflict")
+    if state is not None and Path(state) != inferred_state:
+        raise InstallError("Installation state binding conflict")
+    state = inferred_state
+    if any(Path(row["installed_copy"]).parent != transaction or
+           row.get("backup") and Path(row["backup"]).parent != transaction for row in rows):
+        raise InstallError("Installation backup path binding conflict")
+    path = transaction / "manifest.json"
+    raw = required_read(path)
+    if canonical(json.loads(raw)) != canonical(manifest):
+        raise InstallError("Installation immutable manifest binding conflict")
+    expected_ref = {"manifest": str(path), "sha256": digest(raw)}
+    if source_ref is not None and source_ref != expected_ref:
+        raise InstallError("Installation source manifest binding conflict")
+    retained = read(transaction / "commit.json")
+    committed = False
+    if retained is not None:
+        try:
+            def unique(items):
+                value = {}
+                for key, item in items:
+                    if key in value:
+                        raise ValueError("duplicate installation commit key")
+                    value[key] = item
+                return value
+            def finite(value):
+                raise ValueError("non-finite installation commit value")
+            value = json.loads(retained, object_pairs_hook=unique, parse_constant=finite)
+            keys = {"schema_version", "record_type", "install_id", "manifest", "active_pointer", "parent_binding", "publication", "record_digest"}
+            if (not isinstance(value, dict) or set(value) != keys or type(value["schema_version"]) is not int
+                    or value["schema_version"] != 1 or value["record_type"] != "installation_commit"
+                    or value["install_id"] != manifest["install_id"] or value["manifest"] != expected_ref
+                    or value["active_pointer"] != str(state / "active.json")
+                    or not isinstance(value["publication"], dict)
+                    or set(value["publication"]) != {"identity", "security"}
+                    or not isinstance(value["publication"]["identity"], list)
+                    or len(value["publication"]["identity"]) != 8
+                    or any(type(item) is not int for item in value["publication"]["identity"])
+                    or not isinstance(value["publication"]["security"], dict)
+                    or not isinstance(value["parent_binding"], list) or not value["parent_binding"]
+                    or value["record_digest"] != digest(canonical({k: v for k, v in value.items() if k != "record_digest"}))):
+                raise ValueError("invalid commit receipt")
+            verify_parent_binding(state / "active.json", value["parent_binding"])
+            committed = True
+        except (ValueError, TypeError, KeyError, RecursionError, FileReadError) as error:
+            raise InstallError("Installation commit receipt integrity conflict; recovery_required") from error
+    active = active_manifest(state)
+    for current in manifest_chain(active):
+        if current.get("install_id") == manifest["install_id"]:
+            if canonical(current) != canonical(manifest):
+                raise InstallError("Installation committed manifest integrity conflict")
+            return True
+    if committed:
+        return True
+    active_ref = read(state / "active.json")
+    previous = manifest.get("previous_manifest")
+    if active_ref is not None and json.loads(active_ref) != previous:
+        raise InstallError("Installation commit evidence ambiguous; recovery_required, no targets changed")
+    return False
 
 
 def rollback_plan(manifest: dict, current_files: dict | None = None) -> list[dict]:
+    if not _supported_install_manifest(manifest):
+        raise InstallError("Unsupported installation manifest version")
+    committed = _installation_committed(manifest)
     plans = []
     for p in reversed(manifest["files"]):
         path = Path(p["path"])
         regular_target(path)
+        if manifest.get("boundary_protocol") == "physical-parent-v2":
+            if "parent_binding" not in p:
+                raise InstallError(f"Incomplete installation parent binding: {path}")
+            try:
+                verify_parent_binding(path, p["parent_binding"])
+            except FileReadError as error:
+                raise InstallError(str(error)) from error
         original_metadata = metadata(path)
         current = current_files[str(path)] if current_files is not None and str(path) in current_files else read(path)
         if metadata(path) != original_metadata:
@@ -886,6 +1273,10 @@ def rollback_plan(manifest: dict, current_files: dict | None = None) -> list[dic
             raise InstallError(f"Backup integrity error: {path}")
         if current == before:
             continue
+        if committed is False:
+            receipt = {"identity": p.get("publication_identity"), "security": p.get("metadata_after")}
+            if p["progress"] not in {"publishing", "applied"} or receipt["identity"] is None or not matches_receipt(path, receipt):
+                raise InstallError(f"Interrupted installation conflict; user edit preserved: {path}")
         if current == installed:
             new = before
         elif p["kind"] == "instructions" and current is not None:
@@ -894,6 +1285,8 @@ def rollback_plan(manifest: dict, current_files: dict | None = None) -> list[dic
                 raise InstallError(f"Rollback conflict in managed instructions: {path}")
             new_text = text.replace(p["meta"]["block_after"], p["meta"]["block_before"] or "", 1)
             new = encode_like(new_text, current)
+        elif p["kind"] == "hooks" and current is not None:
+            new = canonical(_revert_hooks(current, p["meta"]))
         elif p["kind"] == "config" and current is not None:
             new = encode_like(revert_config(decode(before), decode(installed), decode(current), p["meta"]), current)
         elif p["kind"] == "json_fields" and current is not None:
@@ -914,7 +1307,7 @@ def rollback_plan(manifest: dict, current_files: dict | None = None) -> list[dic
             if ((known is not None and security != known)
                     or (known is None and not ordinary_legacy_metadata(security))):
                 raise InstallError(f"Rollback would remove user metadata/ACLs; file preserved: {path}")
-        plans.append({"path": path, "before": current, "after": new, "kind": p["kind"], "_metadata": original_metadata})
+        plans.append({"path": path, "before": current, "after": new, "kind": p["kind"], "_metadata": original_metadata, "_parent_binding": parent_binding(path)})
     return plans
 
 
@@ -943,7 +1336,8 @@ def apply_rollback(plans: list[dict], state: Path, manifest: dict, source_ref: d
 
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
     transaction = state / "rollbacks" / stamp
-    transaction.mkdir(parents=True)
+    with ParentDirectory(transaction / "manifest.json", create=True):
+        pass
     rows = []
     for i, p in enumerate(changes):
         row = {"path": str(p["path"]), "kind": p.get("kind", "target"), "progress": "pending",
@@ -1036,6 +1430,8 @@ def verify(package: Path, home: Path, skills: Path, state: Path, native: bool = 
         else:
             for manifest in manifest_chain(active):
                 for entry in manifest["files"]:
+                    if "parent_binding" in entry:
+                        verify_parent_binding(Path(entry["path"]), entry["parent_binding"])
                     installed = required_read(Path(entry["installed_copy"]))
                     if digest(installed) != entry["after_sha256"]:
                         raise InstallError("Installed backup integrity error")
@@ -1074,6 +1470,16 @@ def verify(package: Path, home: Path, skills: Path, state: Path, native: bool = 
     except (ValueError, TypeError) as ex:
         agents = {}
         errors.append(str(ex))
+    try:
+        _, launcher_bytes, handler = hook_payload(package, home)
+        hook_doc = _hook_document(read(home / "hooks.json"))
+        if hook_doc["hooks"].get("SessionStart", []).count(handler) != 1:
+            errors.append("managed SessionStart hook missing or duplicated")
+        if read(home / "agent-harness-hook.py") != launcher_bytes:
+            errors.append("managed SessionStart launcher missing or modified")
+        warnings.append("hook trust and actual fresh-client lifecycle are not verified by structural checks")
+    except (OSError, ValueError) as error:
+        errors.append("native hook definition invalid: " + type(error).__name__)
     for name in ("delivery_owner", "delivery_helper", "delivery_reviewer"):
         try:
             role = tomllib.loads(decode(required_read(home / f"agents/{name}.toml")))
@@ -1186,23 +1592,26 @@ def dispatch(command: str, argv: list[str]) -> int:
     parser.add_argument("--cwd", type=Path)
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--max-child-threads", type=int, help="Explicitly authorize a positive native child cap, persisted in machine overlay; independent of the number of logical lanes")
+    parser.add_argument("--adopt-hook-sha256", help="Install only: explicitly adopt one existing harness SessionStart group matching its canonical SHA-256; preserve it for rollback")
     args = parser.parse_args(argv)
-    package, home, skills = args.package_root.resolve(), args.codex_home.resolve(), args.skills_home.resolve()
+    package, home, skills = args.package_root.resolve(), Path(os.path.abspath(args.codex_home)), Path(os.path.abspath(args.skills_home))
     try:
+        if args.adopt_hook_sha256 is not None and command != "install":
+            raise InstallError("--adopt-hook-sha256 is valid only for install")
         if args.max_child_threads is not None:
             positive_cap(args.max_child_threads)
             if command != "install":
                 raise InstallError("--max-child-threads is valid only for install")
         discovered_state, discovered_overlay = installed_locations(package, home)
-        state = (args.state_dir or discovered_state).resolve()
-        overlay = (args.machine_overlay or (state / "machine.json" if args.state_dir else discovered_overlay)).resolve()
+        state = Path(os.path.abspath(args.state_dir or discovered_state))
+        overlay = Path(os.path.abspath(args.machine_overlay or (state / "machine.json" if args.state_dir else discovered_overlay)))
         if command == "doctor":
             result = doctor(package, home, skills, state)
         elif command == "verify":
             result = verify(package, home, skills, state, args.native, args.cwd)
         elif command == "install":
             with lock(state):
-                planned = plan(package, home, skills, state, overlay, args.max_child_threads)
+                planned = plan(package, home, skills, state, overlay, args.max_child_threads, args.adopt_hook_sha256)
                 preview = {"status": "dry_run", "policy_version": VERSION, "changes": [{"path": str(p["path"]), "before_sha256": digest(p["before"]) if p["before"] is not None else None, "after_sha256": digest(p["after"]), "diff": redacted_diff(p["path"], p["before"], p["after"])} for p in planned]}
                 result = apply_plan(planned, state, package) if args.apply else preview
         elif command in ("rollback", "uninstall"):
@@ -1221,6 +1630,7 @@ def dispatch(command: str, argv: list[str]) -> int:
                     raise InstallError("No active installation manifest; nothing removed")
                 if read(state / "active.json") != active_before:
                     raise InstallError("Concurrent edit to the active installation reference while planning rollback")
+                _installation_committed(manifest, state=state, source_ref=source_ref)
                 planned = rollback_plan(manifest)
                 if command == "uninstall":
                     virtual = {}

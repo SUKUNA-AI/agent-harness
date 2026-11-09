@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "native-verification-bridge-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "record_type": {
+      "const": "native_verification_bridge"
+    },
+    "session_id": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "execution_owner": {
+      "const": "codex_native"
+    },
+    "verification": {
+      "const": "core_gate"
+    },
+    "acceptance": {
+      "const": "accepted"
+    },
+    "candidate_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "native_source_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "transfer_projection_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "transfer_policy": {
+      "const": "native-isolated-content-v1"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "task_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "attempt_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "contract_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "verdict_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "run_dir": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "created_at": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "scheduler_history": {
+      "const": "not_claimed"
+    }
+  },
+  "required": [
+    "schema_version",
+    "record_type",
+    "session_id",
+    "execution_owner",
+    "verification",
+    "acceptance",
+    "candidate_digest",
+    "native_source_digest",
+    "transfer_projection_digest",
+    "transfer_policy",
+    "run_id",
+    "task_id",
+    "attempt_id",
+    "contract_digest",
+    "verdict_digest",
+    "run_dir",
+    "created_at",
+    "scheduler_history"
+  ]
+}

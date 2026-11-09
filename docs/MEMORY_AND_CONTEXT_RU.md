@@ -33,6 +33,13 @@ flowchart TD
 
 </details>
 
+Для локального native-чата доступен [компактный session adapter и SessionStart hook](NATIVE_SESSION_RU.md).
+Hook упаковывает уже полученный reducer packet в поддержанный клиентом JSON
+`hookSpecificOutput.additionalContext`. Полный serialized UTF-8 budget включает
+escaping и CRLF; optional omissions ведут к сохранённому пакету, обязательная
+часть не обрезается. Bootstrap scope обычного SessionStart без agent-полей
+не меняет исходную unknown/unbound identity observer.
+
 ## Provenance и свежесть
 
 Запись связана с local repository identity, revision, whole-tree snapshot,
@@ -217,3 +224,84 @@ heuristic fallback. Stale line ranges не являются основанием
 TOON остаётся optional input representation. Условия измерения и fallback
 описаны в [Performance Eval](PERFORMANCE_EVAL_RU.md). Пользовательский
 `model_auto_compact_token_limit=500000` эти механизмы не уменьшают.
+
+## Разделение source, evidence и presentation
+
+Correction candidate проверяет полный snapshot до compact details. Source-current
+self-report выдаётся как current observation, verified facts требуют allowlisted
+core verifier receipt и current evidence lifecycle. Typed namespace не выбирает
+первую запись при bare-ID collision. Corrupt optional foreign record изолируется;
+corrupt required own checkpoint блокирует recovery. Packets удерживают immutable
+recordsets для omitted items, queries используют snapshot inventory и LF lines.
+[Стабилизация](STABILIZATION_RU.md) · [CLI](CLI_REFERENCE_RU.md).
+
+`Memory.record_file_fact` и `record_symbol_fact` используют закрытые deterministic
+builders: physical root/project, reader policy, один полный ordinary file и
+проверяемые negative dependencies. Symbol builder фиксирует Python parser version
+и уникальность декларации. Изменение чужого файла не инвалидирует такой узкий
+факт; его собственного input или parser policy — инвалидирует. Это не closure
+поведения приложения. Facts читаются через typed kind `fact`.
+
+Derived checkpoint index имеет scan/byte/deadline/returned/inventory caps,
+generation-bound continuation и проверяет actual selected bytes. Corrupt index
+перестраивается ограниченно, partial scan не называется complete inventory.
+Private limits настраиваются явным CAS через `context-config`; реальные scan
+metrics сохраняются в retrieval receipt. Default не обещает hard OS syscall latency.
+
+Native handoff всегда удерживает текущие `goal`, `goal_digest`,
+`goal_generation` и `constraints` в indivisible `required`, независимо от
+source/evidence freshness. Digest — SHA256 точных UTF-8 bytes цели; session ID
+связывает её с текущей задачей. Это advisory контекст, не новая authority.
+Если обязательные данные с outer envelope не помещаются, операция явно
+возвращает `BUDGET_TOO_SMALL`; увеличьте `--max-bytes`. Значение 2048 — допустимая
+нижняя граница запроса, а не гарантия вместимости длинных целей и путей.
+
+Session публикация сохраняет immutable `generation-N-DIGEST.json` с metadata и
+checkpoint, затем durable `pending-generation.json`, checkpoint mirror и
+committed head `session.json`. Head проверяет digest собственного checkpoint,
+его goal generation и immutable generation bytes. Прерывание после pending
+даёт `SESSION_RECOVERY_REQUIRED`, включая случай уже опубликованного head:
+сохраните marker, generation и прежние records для диагностики и repair;
+не удаляйте marker и не повторяйте side effects вслепую. Автоматический repair
+этого состояния пока не предоставлен. `goal-update --operation-id ID` позволяет
+повторить завершённую CAS операцию с исходным expected generation; новые входы
+с тем же ID отклоняются. Replay также проверяет обязательный собственный checkpoint.
+Replay допустим только при совпадении текущего source snapshot и сохранённого
+полного post-commit proof Memory/Ledger/own/foreign observations; измеренное время
+scan не является input. Изменение или incomplete proof даёт
+`STALE_OPERATION_REPLAY`, сохраняя исходный receipt. Для актуального контекста
+запросите новый handoff без старого operation ID. Старые receipts без полного
+proof остаются immutable history и не переиспользуются как текущий handoff.
+Memory proof требует явного списка ровно трёх уникальных scan observers:
+`episodes`, `semantic`, `facts`, каждый с `complete=true`. Отсутствие, пустой
+список, duplicate/unknown group или malformed observer не доказывает полноту.
+Каждый replay также заново проверяет полный outer UTF-8 envelope по запрошенному
+`--max-bytes`, включая вызов Python API; меньший бюджет не переписывает receipt.
+
+Для отдельного разрешённого repair reconcile выполняется под `session.lock`:
+сначала сверяются marker/generation digest и session/project binding, затем
+head и checkpoint mirror с immutable committed generation. Если head остался
+прежним, единственный rollback input — его immutable checkpoint; если head уже
+новый, оба файла должны совпасть с pending generation. Любое третье состояние
+или отсутствие bytes сохраняет блокировку. До снятия marker также проверяется
+исход completed operation receipt и Ledger: неизвестную операцию не исполняют
+повторно. Обычный resume эти repair writes не выполняет; без отдельного repair
+допустима новая сессия с заново указанной разрешённой целью и сохранением всех
+старых recovery records. Память сама не разрешает повтор неизвестных side effects.
+
+Ledger проверяет exact uniqueness/membership derived index и filename/event-ID
+binding всех authoritative events. Rebuild ограничен 10000 events, 32 MiB actual
+read bytes и cooperative deadline 5 s на scan/read phase; corrupt authoritative
+event даёт `LEDGER_EVENT_CORRUPT`, превышение — `LEDGER_SCAN_BOUND`.
+Python symbol verifier обходит AST итеративно (100000 nodes); optional parser
+или verifier failure даёт unknown и никогда verified fact.
+Core executable identity использует общий с runner streaming `file_hash`,
+без отдельного лимита 16 MiB, с повторной проверкой фактических bytes.
+
+RepoMap fallback без `rg` отражает пропущенные source bytes/encoding/reads в
+typed `skipped_sources`, `truncation_reasons`, `results_complete=false` и
+`total_results=null`. Source bound — 262144 bytes; counts относятся к увиденным
+результатам, не к неизвестному полному множеству. POSIX snapshot явно отклоняет
+`//...` root как `UNSUPPORTED_ROOT_SPELLING` до выбора backend/inventory;
+используйте один начальный slash. Windows UNC spelling сохраняется; no-follow
+граница не заменяется разрешением symlinks.

@@ -26,6 +26,9 @@ if '--version' in args: print('regression-fake 1.0'); raise SystemExit
 if '--help' in args: print('exec resume SESSION_ID --json --output-schema'); raise SystemExit
 def event(kind, **values): print(json.dumps(dict(type=kind, **values)), flush=True)
 event('thread.started',thread_id='regression-session');event('turn.started')
+if 'HARNESS_FINAL_REVIEW' in args[-1]:
+ event('item.completed',item={'type':'agent_message','text':json.dumps({'schema_version':1,'verdict':'approved','findings':[]})})
+ event('turn.completed',usage={'input_tokens':1,'output_tokens':1});raise SystemExit
 ACTION
 '''
 
@@ -168,6 +171,7 @@ class ExecutionAuditTests(unittest.TestCase):
         # A complete old aggregate is indistinguishable from one containing
         # an earlier empty usage object. Do not invent a historical receipt.
         supervisor.state["metrics"].pop("usage_accounting_version")
+        supervisor.state["schema_version"] = 1  # Real legacy state has no receipt-complete writer marker.
         supervisor._save("fixture legacy usage aggregate")
         result = supervisor.status(verify=True)
         self.assertEqual(result["status"], "STALE")
@@ -196,7 +200,8 @@ class ExecutionAuditTests(unittest.TestCase):
     def test_a5_resolved_managed_environment_reenters_preflight(self):
         supervisor = self.create("pathlib.Path('value.txt').write_text('after');event('turn.completed',usage={'input_tokens':1,'output_tokens':1})", managed=True, cap=2)
         self.assertEqual(supervisor.start()["status"], "BLOCKED_ENVIRONMENT")
-        supervisor.adapter.capabilities = lambda: {"status": "observed", "native_children_disabled": True}
+        capabilities = supervisor.adapter.capabilities()
+        supervisor.adapter.capabilities = lambda: {**capabilities, "native_children_disabled": True}
         recovered = Supervisor(supervisor.path, adapter=supervisor.adapter)
         self.plan(recovered)
         result = recovered.resume()
@@ -286,19 +291,19 @@ class ExecutionAuditTests(unittest.TestCase):
 
     def test_managed_shared_parent_creation_race_rechecks_the_winning_type(self):
         from agent_harness.supervisor_store import _mkdir
-        original = Path.mkdir
+        original = os.mkdir
         for ordinary in (True, False):
             with self.subTest(ordinary=ordinary):
                 target = self.root / ("directory" if ordinary else "file")
                 def concurrent_create(path, *args, **kwargs):
-                    if path == target:
+                    if Path(path).name == target.name:
                         if ordinary:
                             original(path, *args, **kwargs)
                         else:
-                            path.write_text("not a directory")
+                            target.write_text("not a directory")
                         raise FileExistsError(path)
                     return original(path, *args, **kwargs)
-                with patch.object(Path, "mkdir", concurrent_create):
+                with patch.object(os, "mkdir", concurrent_create):
                     if ordinary:
                         _mkdir(target)
                         self.assertTrue(target.is_dir())

@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "memory-checkpoint-index v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "project_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "index_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "limits_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "inventory_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "inventory": {
+      "type": "object",
+      "maxProperties": 1024,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "device": {
+            "type": "integer"
+          },
+          "inode": {
+            "type": "integer"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "mtime_ns": {
+            "type": "integer"
+          },
+          "ctime_ns": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "device",
+          "inode",
+          "size",
+          "mtime_ns",
+          "ctime_ns"
+        ]
+      }
+    },
+    "inventory_complete": {
+      "type": "boolean"
+    },
+    "scan_complete": {
+      "type": "boolean"
+    },
+    "next_position": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "entries": {
+      "type": "array",
+      "maxItems": 1024,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+          },
+          "reference": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "project_id": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "kind": {
+                "const": "short_term"
+              },
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+              },
+              "generation": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "content_digest": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": [
+              "project_id",
+              "kind",
+              "id",
+              "generation",
+              "content_digest"
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "content_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "file_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "goal_generation": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "id",
+          "reference",
+          "updated_at",
+          "content_digest",
+          "file_sha256",
+          "goal_generation"
+        ]
+      }
+    },
+    "invalid_records": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "schema_version",
+    "project_id",
+    "generation",
+    "index_digest",
+    "limits_digest",
+    "inventory_digest",
+    "inventory",
+    "inventory_complete",
+    "scan_complete",
+    "next_position",
+    "entries",
+    "invalid_records"
+  ]
+}

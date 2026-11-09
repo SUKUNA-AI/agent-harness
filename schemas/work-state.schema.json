@@ -3,7 +3,10 @@
   "additionalProperties": false,
   "properties": {
     "schema_version": {
-      "const": 1
+      "enum": [
+        1,
+        2
+      ]
     },
     "run_id": {
       "type": "string",
@@ -168,6 +171,10 @@
           "attempt": {
             "type": "integer",
             "minimum": 0
+          },
+          "completion_ref": {
+            "type": "string",
+            "maxLength": 128
           }
         },
         "required": [
@@ -327,7 +334,10 @@
           "minimum": 0
         },
         "usage_accounting_version": {
-          "const": 2
+          "enum": [
+            2,
+            3
+          ]
         },
         "reported_usage_turns": {
           "type": "integer",
@@ -355,6 +365,91 @@
         },
         "worktree_seconds": {
           "type": "number",
+          "minimum": 0
+        },
+        "covered_invocation_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 16384
+          },
+          "maxItems": 10000
+        },
+        "unknown_invocation_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 16384
+          },
+          "maxItems": 10000
+        },
+        "usage_sources_digest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 16384
+        },
+        "coverage_status": {
+          "enum": [
+            "complete",
+            "partial",
+            "unverified_legacy"
+          ]
+        },
+        "known_lower_bound_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "input_available": {
+          "type": "boolean"
+        },
+        "output_available": {
+          "type": "boolean"
+        },
+        "model_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "context_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "check_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "snapshot_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "slot_wait_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "recovery_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "legacy_history_unverified": {
+          "type": "boolean"
+        },
+        "receipt_input_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "receipt_output_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "receipt_model_invocations": {
+          "type": "integer",
           "minimum": 0
         }
       },
@@ -439,6 +534,35 @@
     "state_dir": {
       "type": "string",
       "maxLength": 16384
+    },
+    "migration": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "committed"
+          ]
+        },
+        "plan_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "operation_id",
+        "status",
+        "plan_digest"
+      ]
+    },
+    "contract_path": {
+      "type": "string",
+      "maxLength": 16384
     }
   },
   "required": [
@@ -475,5 +599,5 @@
     "state_dir"
   ],
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Supervisor state v1"
+  "title": "work-state v1 legacy / v2 receipt-bound writer barrier"
 }

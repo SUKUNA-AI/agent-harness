@@ -1,0 +1,46 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "record_type": {
+      "const": "benchmark_root_policy"
+    },
+    "model": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "provider": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "client_version": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "reasoning_effort": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "max_tokens": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "max_compaction_tokens": {
+      "type": "integer",
+      "minimum": 1
+    }
+  },
+  "required": [
+    "schema_version",
+    "record_type",
+    "model",
+    "provider",
+    "client_version",
+    "reasoning_effort",
+    "max_tokens",
+    "max_compaction_tokens"
+  ]
+}

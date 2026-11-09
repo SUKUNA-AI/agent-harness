@@ -26,6 +26,80 @@ LEASE_SCHEMA = {"type": "object", "additionalProperties": False,
                 "required": ["schema_version", "run_id", "task_id", "role", "identity", "created_at", "lease_id", "status", "child_identity"]}
 
 
+class InvocationUnresolved(HarnessError):
+    """A persisted invocation cannot authorize a dependent action or release."""
+
+
+class SlotCapacityUnavailable(HarnessError):
+    """The bounded global-slot scan found no available model lease."""
+
+
+class SlotWaitCancelled(HarnessError):
+    """A persisted cancellation stopped global-slot admission."""
+
+
+def post_invocation_guard(intent, completion, accounting):
+    """One strict receipt/accounting predicate for all managed v2 roles.
+
+    A known failed invocation is resolved, never a successful task or plan.
+    The caller's original bounded failure policy decides whether to retry it.
+    """
+    from .execution_receipts import validate_record
+    try:
+        validate_record(intent)
+        validate_record(completion)
+        for record in (intent, completion):
+            if record["payload_digest"] != digest({key: value for key, value in record.items() if key != "payload_digest"}):
+                raise InvocationUnresolved("Invocation receipt content digest is not exact")
+        invocation = intent["invocation_id"]
+        if (intent["record_type"] != "invocation_intent" or completion["record_type"] != "completion"
+                or accounting["intents"].get(invocation) != intent
+                or accounting["completions"].get(invocation) != completion
+                or any(completion[key] != intent[key] for key in
+                    ("project_id", "run_id", "task_id", "node_id", "attempt_id", "invocation_id", "plan_digest", "input_refs"))
+                or completion["payload"]["intent_ref"] != intent["record_id"]):
+            raise InvocationUnresolved("Invocation subject/accounting is not exact")
+        value = completion["payload"]
+        if value["outcome"] not in {"completed", "failed", "cancelled", "timed_out"} or value["process_tree_stopped"] is not True:
+            raise InvocationUnresolved("Invocation terminal outcome or owned process-tree cleanup is unknown")
+        if value["dispatch_state"] == "not_dispatched_proven":
+            if (value["outcome"] == "completed" or value["turn_started"] is not False
+                    or value["usage_status"] != "not_applicable"
+                    or any(value[key] is not None for key in
+                        ("input_tokens", "output_tokens", "cached_input_tokens", "reasoning_tokens"))):
+                raise InvocationUnresolved("Contradictory no-dispatch invocation evidence")
+        elif value["dispatch_state"] != "finished_observed" or value["usage_status"] == "not_applicable":
+            raise InvocationUnresolved("Invocation dispatch/accounting outcome is unresolved")
+        return value["outcome"]
+    except InvocationUnresolved:
+        raise
+    except (HarnessError, ValueError, KeyError, TypeError) as error:
+        raise InvocationUnresolved("Invalid invocation cleanup/subject evidence") from error
+
+
+def guard_invocations(supervisor, *, accounting=None, node_ids=None):
+    """Reconcile before admitting dependent work; other runs keep free slots."""
+    accounting = accounting if accounting is not None else supervisor.receipts().reconcile_usage()
+    if supervisor.contract["schema_version"] == 1:
+        return accounting  # Preserve the frozen legacy admission policy.
+    for invocation, intent in accounting["intents"].items():
+        if node_ids is None or intent["node_id"] in node_ids:
+            completion = accounting["completions"].get(invocation)
+            if completion is None:
+                raise InvocationUnresolved("Invocation may have dispatched without a completion: " + intent["node_id"])
+            post_invocation_guard(intent, completion, accounting)
+    return accounting
+
+
+def invocation_timeout(supervisor, role, *, node_remaining=None):
+    limits = [supervisor.remaining(), supervisor.contract["budgets"]["turn_timeout_seconds"]]
+    if role == "planner":
+        limits.append(300)
+    if node_remaining is not None:
+        limits.append(node_remaining)
+    return min(limits)
+
+
 class ModelLease:
     def __init__(self, store, name, value):
         self.store, self.name, self.value = store, name, value
@@ -78,6 +152,66 @@ class GlobalSlots:
                          "unresolved": value["status"] != "released"})
         return rows
 
+    def reconcile(self, run_id, accounting):
+        """Release only a receipt-proven finished invocation under its slot lock."""
+        if self.store is None:
+            return
+        by_lease = {r["payload"]["owner_id"]: invocation for invocation, r in accounting["intents"].items()}
+        for row in self.inventory(run_id):
+            invocation = by_lease.get(row["lease_id"])
+            completion = accounting["completions"].get(invocation)
+            if not row["unresolved"] or completion is None or row["child_alive"]:
+                continue
+            try:
+                post_invocation_guard(accounting["intents"][invocation], completion, accounting)
+            except InvocationUnresolved:
+                continue
+            if row.get("tree_cleanup_required") and completion["payload"]["process_tree_stopped"] is not True:
+                continue
+            name = "slot-" + str(row["slot"]) + ".yaml"
+            with _os_lock(self.store.root / ("slot-" + str(row["slot"]) + ".guard")):
+                value = self.store.read(name, LEASE_SCHEMA)
+                if value["lease_id"] != row["lease_id"] or identity_alive(value["child_identity"]):
+                    raise HarnessError("Model slot changed during completion reconciliation")
+                value["status"] = "released"
+                self.store.write(name, value, LEASE_SCHEMA)
+
+    def reconcile_root_reservation(self, proof):
+        """Cancel only an exact journal-proven root binding before its intent."""
+        from .root_preparation import RootReservationProof, fail
+        if type(proof) is not RootReservationProof or self.store is None:
+            fail('INTEGRITY', 'reservation_recovery', 'Exact root reservation authority/registry required')
+        supervisor = proof.supervisor
+        if self.directory != Path(supervisor.state_dir) / 'global-model-slots':
+            fail('INTEGRITY', 'reservation_recovery', 'Root reservation registry differs')
+        name = proof.bound['slot_name']
+        with supervisor.mutex:
+            proof.validate()
+            prior = proof.authorization()
+            observed = self.store.read(name, LEASE_SCHEMA)
+            if prior is not None and observed['lease_id'] != proof.bound['lease']['lease_id']:
+                # No foreign guard is needed: cancellation is irrevocable and
+                # this path neither mutates nor reclaims the independent row.
+                return proof.acknowledge(prior, 'reused')
+            with _os_lock(self.directory / (Path(name).stem + '.guard')):
+                row = self.store.read(name, LEASE_SCHEMA)
+                stamp = self.store._journal_stamp(self.store.path(name))
+                prior = proof.authorization()
+                if prior is not None and row['lease_id'] != proof.bound['lease']['lease_id']:
+                    # Durable cancellation already prohibited old dispatch.
+                    # An independent run's reused row is never modified.
+                    return proof.acknowledge(prior, 'reused')
+                authorization = proof.authorize(row, stamp)
+                expected = dict(proof.bound['lease'], status='released')
+                if row == expected:
+                    return proof.acknowledge(authorization, 'exact')
+                if row != proof.bound['lease'] or list(stamp) != proof.bound['slot_identity']:
+                    fail('INTEGRITY', 'reservation_recovery', 'Authorized old lease is active or changed')
+                proof.validate()
+                row['status'] = 'released'
+                self.store.write(name, row, LEASE_SCHEMA)
+                return proof.acknowledge(authorization, 'exact')
+
     @contextmanager
     def acquire(self, run_id, task_id, role, *, cancel_file=None, timeout=60):
         from .strict_yaml import dump
@@ -87,7 +221,7 @@ class GlobalSlots:
         start = time.monotonic()
         while True:
             if cancel_file and Path(cancel_file).exists():
-                raise HarnessError("Cancelled while waiting for a global model slot")
+                raise SlotWaitCancelled("Cancelled while waiting for a global model slot")
             for slot in range(5):
                 # Exclusive OS leases, no PID-only slot release or mutable active=false.
                 guard = self.store.root / ("slot-" + str(slot) + ".guard")
@@ -118,6 +252,7 @@ class GlobalSlots:
                          "created_at": now(), "lease_id": uuid.uuid4().hex,
                          "status": "reserved", "child_identity": None}
                 ownership = ModelLease(self.store, name, lease)
+                ownership.wait_seconds = time.monotonic() - start
                 try:
                     self.store.write(name, lease, LEASE_SCHEMA)
                     yield ownership
@@ -129,13 +264,13 @@ class GlobalSlots:
                     finally:
                         context.__exit__(None, None, None)
             if time.monotonic() - start >= timeout:
-                raise HarnessError("All five global model slots are busy")
+                raise SlotCapacityUnavailable("All five global model slots are busy")
             time.sleep(0.1)
 
 
-def git(cwd, *args, input_bytes=None, timeout=30):
+def git(cwd, *args, input_bytes=None, timeout=30, env=None):
     result = subprocess.run(["git", *args], cwd=cwd, input=input_bytes,
-                            capture_output=True, timeout=timeout, shell=False)
+                            capture_output=True, timeout=timeout, shell=False, env=env)
     if result.returncode:
         from .runner import redact
         raise HarnessError("Git operation failed: " + redact(result.stderr.decode("utf-8", errors="replace"))[:2048])
@@ -231,6 +366,23 @@ class Worktrees:
             return {"status": "reconciled_already_applied", "patch_digest": __import__("hashlib").sha256(patch).hexdigest()}
         git(target, "apply", "--binary", "-", input_bytes=patch)
         return {"status": "integrated", "patch_digest": __import__("hashlib").sha256(patch).hexdigest()}
+
+    def tree(self, staging, *, patch=None):
+        """Compute exact current/expected Git tree using an isolated index.
+
+        No mutation of the checkout/index or hooks is needed to prepare the
+        postcondition. The temporary index is private and removed on failure.
+        """
+        import tempfile
+        path = self.validate(staging, expected_id="integration", expected_role="integrator", integrated=True)
+        with tempfile.TemporaryDirectory(prefix="integration-index-", dir=self.directory.parent) as temp:
+            env = dict(os.environ, GIT_INDEX_FILE=str(Path(temp) / "index"))
+            git(path, "read-tree", "HEAD", env=env)
+            if patch is None:
+                git(path, "add", "--all", env=env)
+            elif patch:
+                git(path, "apply", "--cached", "--binary", "-", input_bytes=patch, env=env)
+            return git(path, "write-tree", env=env).decode().strip()
 
 
 WORKTREE_SCHEMA = {"type": "object", "additionalProperties": False, "properties": {

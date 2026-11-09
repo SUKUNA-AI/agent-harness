@@ -1,0 +1,205 @@
+name: Publish Native Agent Harness 1.6.0
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/release-1.6.0.yml]
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: release-1.6.0
+  cancel-in-progress: false
+jobs:
+  release:
+    if: github.repository == 'SUKUNA-AI/agent-harness' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.13'
+      - name: Build, verify and publish portable release
+        shell: python {0}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AGENT_HARNESS_BACKEND: python
+        run: |
+          import hashlib
+          import json
+          import os
+          from pathlib import Path, PurePosixPath
+          import stat
+          import subprocess
+          import sys
+          import tomllib
+          import zipfile
+          
+          REPO = "SUKUNA-AI/agent-harness"
+          VERSION = "1.6.0"
+          TAG = "v" + VERSION
+          BASE = "c7dad06e66cd8ee520bf664d2a229ffe74b144c5"
+          RUN = 42571184286
+          WORKFLOW = ".github/workflows/release-1.6.0.yml"
+          root = Path.cwd()
+          work = Path(os.environ["RUNNER_TEMP"]) / "harness-release-1.6.0"
+          work.mkdir()
+          out = work / "dist"
+          
+          def command(argv, **options):
+              print("+ " + " ".join(map(str, argv)), flush=True)
+              return subprocess.run(list(map(str, argv)), check=True, **options)
+          
+          def capture(argv):
+              return command(argv, capture_output=True, text=True, encoding="utf-8").stdout
+          
+          def api(path):
+              return json.loads(capture(["gh", "api", "repos/" + REPO + "/" + path]))
+          
+          def sha(path):
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+          
+          revision = capture(["git", "rev-parse", "HEAD"]).strip()
+          assert revision == os.environ["GITHUB_SHA"], "Checkout differs from triggering commit"
+          changes = capture(["git", "diff", "--name-only", BASE, revision]).splitlines()
+          assert changes == [WORKFLOW], "Application sources differ from native CI candidate"
+          assert tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"] == VERSION
+          
+          existing = subprocess.run(["gh", "api", "repos/" + REPO + "/releases/tags/" + TAG],
+              capture_output=True, text=True)
+          if existing.returncode == 0:
+              raise RuntimeError("Release already exists; preserve it and inspect before a retry")
+          if "HTTP 404" not in existing.stderr:
+              raise RuntimeError("Cannot establish whether the release already exists: " + existing.stderr)
+          
+          jobs = api("actions/runs/" + str(RUN) + "/jobs?per_page=100")
+          assert jobs["total_count"] == len(jobs["jobs"]), "Incomplete CI job inventory"
+          artifacts = [
+              (13653189413, "native-Linux-3.13", "linux-x86_64",
+               "827395c9a18762a744ecd649a0ba71afaf4c97bd1f464f8e28ca7dafdd5df394",
+               "native (ubuntu-latest, 3.13)"),
+              (13653932486, "native-Windows-3.13", "windows-x86_64",
+               "71516025fd227d695b40add0f82ab9ddffe3a0fa27a06bd97f79347ede487f8c",
+               "native (windows-latest, 3.13)"),
+          ]
+          artifact_proofs = []
+          for artifact_id, name, platform, expected, job_name in artifacts:
+              assert any(j["name"] == job_name and j["conclusion"] == "success" for j in jobs["jobs"])
+              metadata = api("actions/artifacts/" + str(artifact_id))
+              assert metadata["name"] == name and not metadata["expired"]
+              assert metadata["workflow_run"]["head_sha"] == BASE
+              assert metadata["digest"] == "sha256:" + expected
+              archive = work / (platform + ".zip")
+              with archive.open("xb") as stream:
+                  command(["gh", "api", "repos/" + REPO + "/actions/artifacts/" + str(artifact_id) + "/zip"],
+                      stdout=stream)
+              assert sha(archive) == expected, "Downloaded artifact digest mismatch"
+              with zipfile.ZipFile(archive) as bundle:
+                  members = bundle.infolist()
+                  assert len(members) <= 5000 and sum(m.file_size for m in members) <= 64 * 1024 * 1024
+                  names = set()
+                  for member in members:
+                      path = PurePosixPath(member.filename)
+                      assert not path.is_absolute() and "\\" not in member.filename
+                      assert all(p not in ("", ".", "..") for p in path.parts)
+                      assert not stat.S_ISLNK(member.external_attr >> 16)
+                      assert member.filename not in names
+                      names.add(member.filename)
+                      if member.filename == "README.md":
+                          continue
+                      assert path.parts[0] == platform, "Unexpected artifact root"
+                      target = root / "bin" / path
+                      if member.is_dir():
+                          target.mkdir(parents=True, exist_ok=True)
+                      else:
+                          target.parent.mkdir(parents=True, exist_ok=True)
+                          with target.open("xb") as stream:
+                              stream.write(bundle.read(member))
+              artifact_proofs.append({"id": artifact_id, "name": name, "sha256": expected,
+                  "source_revision": BASE, "platform": platform})
+          (root / "bin/linux-x86_64/harness-native").chmod(0o755)
+          command([sys.executable, "tools/release_check.py"])
+          command([sys.executable, "tools/check_native.py"],
+              env={**os.environ, "AGENT_HARNESS_BACKEND": "native"})
+          build_args = [sys.executable, "tools/build_release.py",
+              "--require-platform", "linux-x86_64", "--require-platform", "windows-x86_64"]
+          build = json.loads(capture([*build_args, "--output-dir", out]))
+          repeat = json.loads(capture([*build_args, "--output-dir", work / "repeat", "--skip-smoke"]))
+          assert build["source_revision"] == revision and build["version"] == VERSION
+          assert build["extracted_install_smoke"]["status"] == "passed"
+          assert build["sha256"] == repeat["sha256"], "Independent ZIP builds differ"
+          package = Path(build["archive"])
+          with zipfile.ZipFile(package) as archive:
+              manifest = archive.read("agent-harness-" + VERSION + "/release-manifest.json")
+          (out / "release-manifest.json").write_bytes(manifest)
+          source_run = api("actions/runs/" + str(RUN))
+          jobs = api("actions/runs/" + str(RUN) + "/jobs?per_page=100")
+          assert jobs["total_count"] == len(jobs["jobs"])
+          assert source_run["head_sha"] == BASE
+          job_rows = [{"id": j["id"], "name": j["name"], "status": j["status"],
+              "conclusion": j["conclusion"], "url": j["html_url"]} for j in jobs["jobs"]]
+          counts = {kind: sum(j["conclusion"] == kind for j in job_rows) for kind in ("success", "failure", "cancelled")}
+          counts["unfinished"] = sum(j["status"] != "completed" for j in job_rows)
+          report = {
+              "schema_version": 1, "version": VERSION, "source_revision": revision,
+              "source_tree": capture(["git", "rev-parse", "HEAD^{tree}"]).strip(),
+              "native_artifacts": artifact_proofs,
+              "application_sources_match_ci_revision": BASE,
+              "difference_from_ci_candidate": [WORKFLOW],
+              "release_checks": {
+                  "source_release_check": "passed", "linux_native_check": "passed",
+                  "archive_integrity": "passed", "deterministic_double_build": "passed",
+                  "extracted_install_smoke": build["extracted_install_smoke"]},
+              "archive": {"name": package.name, "sha256": build["sha256"], "bytes": build["bytes"]},
+              "full_suite": {"status": source_run["status"], "conclusion": source_run["conclusion"],
+                  "source_revision": BASE, "url": source_run["html_url"], "counts": counts, "jobs": job_rows},
+              "limitations": [
+                  "Full Python CI suite has known timeout failures; it is not reported as passed.",
+                  "No fresh real-model work start/resume qualification was performed for this release.",
+                  "Windows native binaries use the successful source-bound CI job; extracted installer smoke ran on Linux."
+              ]}
+          (out / "VERIFICATION.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          assets = [package, out / "release-manifest.json", out / "VERIFICATION.json"]
+          (out / "SHA256SUMS").write_text("".join(sha(p) + "  " + p.name + "\n" for p in assets), encoding="utf-8")
+          assets.append(out / "SHA256SUMS")
+          notes = (root / "docs/RELEASE_NOTES_1.6.0.md").read_text(encoding="utf-8").rstrip()
+          notes += "\n\n## Проверки и ограничения выпуска\n\n"
+          notes += "- Полный ZIP содержит native bundles Linux и Windows x86_64 из успешных CI jobs.\n"
+          notes += "- Проверены целостность, совпадение двух сборок ZIP и установка/verify/повторная установка/rollback в изолированном Linux-профиле.\n"
+          notes += "- Полный Python CI не прошёл: есть таймауты сценариев исполнения и восстановления. Это известное ограничение выпуска; полный PASS не заявляется.\n"
+          notes += "- Новая проверка work start/resume с реальной моделью для этого выпуска не выполнялась.\n"
+          notes += "- [Исходный CI](" + source_run["html_url"] + "): " + json.dumps(counts) + ". Подробности — VERIFICATION.json.\n"
+          notes += "\nSource commit: [\x60" + revision + "\x60](https://github.com/" + REPO + "/commit/" + revision + ").\n"
+          notes += "\nСкачайте \x60" + package.name + "\x60; встроенные native bundles отсутствуют в автоматическом Source code ZIP.\n"
+          notes_path = work / "release-notes.md"
+          notes_path.write_text(notes, encoding="utf-8")
+          tag_probe = subprocess.run(["gh", "api", "repos/" + REPO + "/git/ref/tags/" + TAG],
+              capture_output=True, text=True)
+          if tag_probe.returncode:
+              if "HTTP 404" not in tag_probe.stderr:
+                  raise RuntimeError("Cannot inspect release tag: " + tag_probe.stderr)
+              command(["gh", "api", "--method", "POST", "repos/" + REPO + "/git/refs",
+                  "-f", "ref=refs/tags/" + TAG, "-f", "sha=" + revision])
+          else:
+              tag = json.loads(tag_probe.stdout)
+              assert tag["object"]["type"] == "commit" and tag["object"]["sha"] == revision
+          tag = api("git/ref/tags/" + TAG)
+          assert tag["object"]["type"] == "commit" and tag["object"]["sha"] == revision
+          command(["gh", "release", "create", TAG, *assets, "--repo", REPO, "--target", revision,
+              "--title", "Native Agent Harness " + VERSION, "--notes-file", notes_path, "--draft"])
+          download = work / "uploaded"
+          command(["gh", "release", "download", TAG, "--repo", REPO, "--dir", download])
+          for asset in assets:
+              assert sha(download / asset.name) == sha(asset), "Uploaded asset differs: " + asset.name
+          draft = api("releases/tags/" + TAG)
+          assert draft["draft"] and {a["name"] for a in draft["assets"]} == {a.name for a in assets}
+          command(["gh", "release", "edit", TAG, "--repo", REPO, "--draft=false", "--latest"])
+          published = api("releases/tags/" + TAG)
+          assert not published["draft"] and not published["prerelease"]
+          assert api("releases/latest")["id"] == published["id"]
+          print(json.dumps({"status": "published", "release": published["html_url"],
+              "source_revision": revision, "assets": [a.name for a in assets]}, indent=2))

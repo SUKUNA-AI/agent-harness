@@ -2,7 +2,31 @@
 from __future__ import annotations
 
 import re
-from .core import digest
+from .core import HarnessError, digest
+
+
+PREPARATION_TARGETS = {
+    "NO_PROGRESS": "NO_PROGRESS", "ATTEMPT_BUDGET": "FAILED_TERMINAL",
+    "TOKEN_BUDGET": "FAILED_TERMINAL", "DEADLINE": "TIMED_OUT",
+    "ENVIRONMENT": "BLOCKED_ENVIRONMENT", "APPROVAL": "BLOCKED_APPROVAL",
+    "INTEGRITY": "UNKNOWN_OUTCOME", "AMBIGUOUS": "BLOCKED_AMBIGUOUS",
+    "INTERNAL": "UNKNOWN_OUTCOME", "USAGE_UNVERIFIED": "BLOCKED_ENVIRONMENT",
+    "CANCELLED": "CANCELLED",
+}
+PREPARATION_CONTEXTS = {"core_bootstrap", "core_prepare", "root_preflight",
+    "reservation_recovery", "invocation_boundary", "failure_publication"}
+
+
+class PreparationFailure(HarnessError):
+    """Controller facts select the outcome; exception text is diagnostic only."""
+    def __init__(self, reason_code, context, detail, *, proof=None):
+        if reason_code not in PREPARATION_TARGETS or context not in PREPARATION_CONTEXTS:
+            raise ValueError("Unsupported preparation reason/context")
+        if not isinstance(detail, str) or not detail or proof is not None and type(proof) is not dict:
+            raise ValueError("Preparation failure needs a safe diagnostic and structured proof")
+        super().__init__(detail)
+        self.reason_code, self.context, self.proof = reason_code, context, proof
+        self.target = PREPARATION_TARGETS[reason_code]
 
 
 def classify(value):

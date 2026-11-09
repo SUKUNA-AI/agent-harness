@@ -1,0 +1,140 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "record_type": {
+      "const": "benchmark_candidate_transfer"
+    },
+    "declared_capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "path",
+        "sha256"
+      ]
+    },
+    "destination": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "record_type": {
+          "const": "benchmark_candidate_capture"
+        },
+        "candidate_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "candidate_scheme": {
+          "const": "ordinary-tree-no-git-v1"
+        },
+        "projection": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "schema_version": {
+              "const": 1
+            },
+            "record_type": {
+              "const": "benchmark_candidate_projection"
+            },
+            "scheme": {
+              "const": "ordinary-tree-no-git-v1"
+            },
+            "files": {
+              "type": "array",
+              "maxItems": 10000,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "bytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "mode": {
+                    "enum": [
+                      "100644",
+                      "100755"
+                    ]
+                  }
+                },
+                "required": [
+                  "path",
+                  "sha256",
+                  "bytes",
+                  "mode"
+                ]
+              }
+            }
+          },
+          "required": [
+            "schema_version",
+            "record_type",
+            "scheme",
+            "files"
+          ]
+        },
+        "physical": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "root": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "snapshot_digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "snapshot_scheme": {
+              "const": 2
+            }
+          },
+          "required": [
+            "root",
+            "snapshot_digest",
+            "snapshot_scheme"
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "record_type",
+        "candidate_digest",
+        "candidate_scheme",
+        "projection",
+        "physical"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "record_type",
+    "declared_capture",
+    "destination"
+  ]
+}

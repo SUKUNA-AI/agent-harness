@@ -18,19 +18,21 @@ from .supervisor_store import SupervisorStore, atomic_write
 from .work_contract import load_contract, legacy_contract, deadline_for, source_revision
 from . import telemetry
 from .failure_policy import classify, repair_decision
+from .task_packets import compile_packet, preflight, invoke, NotDispatched
+from .file_io import canonical_directory, same_directory
 
 TERMINAL = {"ACCEPTED", "CANCELLED", "TIMED_OUT", "NO_PROGRESS", "FAILED_TERMINAL"}
 BLOCKED = {"BLOCKED_APPROVAL", "BLOCKED_AMBIGUOUS", "BLOCKED_ENVIRONMENT"}
 TRANSITIONS = {
     "NEW": {"PREFLIGHT"},
     "PREFLIGHT": {"PLANNING", "EXECUTING", "FREEZING"},
-    "PLANNING": {"EXECUTING"},
+    "PLANNING": {"EXECUTING", "FAILED_REPAIRABLE"},
     "EXECUTING": {"FREEZING", "FAILED_REPAIRABLE"},
     "FREEZING": {"VERIFYING"},
     "VERIFYING": {"PASS", "FAILED_REPAIRABLE"},
     "PASS": {"ACCEPTED"},
     "FAILED_REPAIRABLE": {"REPAIRING", "NO_PROGRESS", "FAILED_TERMINAL"},
-    "REPAIRING": {"EXECUTING"},
+    "REPAIRING": {"EXECUTING", "NO_PROGRESS"},
     "UNKNOWN_OUTCOME": {"RECOVERY_REQUIRED"},
     "RECOVERY_REQUIRED": {"FREEZING", "PREFLIGHT", "PLANNING"},
     "CANCEL_REQUESTED": {"CANCELLED", "UNKNOWN_OUTCOME"},
@@ -41,10 +43,11 @@ INTERRUPTS = BLOCKED | {"CANCEL_REQUESTED", "CANCELLED", "TIMED_OUT", "UNKNOWN_O
 
 class Supervisor:
     def __init__(self, run_dir, *, adapter=None, state_dir=None):
-        self.path = Path(run_dir).absolute()
-        self.store = SupervisorStore(self.path, "work-state.schema.json")
+        self.path = canonical_directory(run_dir)
+        from .plan_quality import STATE_SCHEMA
+        self.store = SupervisorStore(self.path, STATE_SCHEMA)
         self.adapter = adapter
-        self.state_dir = Path(state_dir).absolute() if state_dir else self.path.parent.parent
+        self.state_dir = canonical_directory(state_dir) if state_dir else self.path.parent.parent
         self._state_dir_explicit = state_dir is not None
         self.mutex = threading.RLock()
         self.state = None
@@ -63,6 +66,10 @@ class Supervisor:
             previous = self.state["status"]
             if target == previous:
                 return
+            if previous == "REPAIRING" and target == "NO_PROGRESS":
+                from .root_preparation import no_progress_proof
+                if not no_progress_proof(self, getattr(self, "_preparation_no_progress_proof", None)):
+                    raise HarnessError("REPAIRING -> NO_PROGRESS requires exact unchanged-failure proof")
             if previous in TERMINAL or (target not in TRANSITIONS.get(previous, set()) and target not in INTERRUPTS):
                 raise HarnessError("Illegal supervisor transition: " + previous + " -> " + target)
             event = {"schema_version": 1, "kind": "state_transition", "event_id": uuid.uuid4().hex,
@@ -76,19 +83,24 @@ class Supervisor:
             self._save(reason)
 
     @classmethod
-    def create(cls, contract_path, *, run_dir, cwd, adapter=None, state_dir=None):
+    def create(cls, contract_path, *, run_dir, cwd, adapter=None, state_dir=None, max_planning_rounds=None):
         contract = load_contract(contract_path)
-        cwd = Path(cwd).absolute()
+        if max_planning_rounds is not None and (contract["schema_version"] != 2 or contract["mode"] != "managed"):
+            raise HarnessError("Planning round policy requires a new managed contract v2 run")
+        cwd = canonical_directory(cwd)
         if not cwd.is_dir() or cwd.is_symlink():
             raise HarnessError("Work cwd must be an existing ordinary directory")
-        path = Path(run_dir).absolute()
+        path = canonical_directory(run_dir)
         if path == cwd or cwd in path.parents:
             raise HarnessError("Private run must be outside the source workspace")
-        if (path / "contract.yaml").exists() or (path / "state.yaml").exists():
-            raise HarnessError("Work run already exists; use status/resume")
         supervisor = cls(path, adapter=adapter, state_dir=state_dir)
         supervisor.contract = contract
         with supervisor.store.lease("initialize work"):
+            from . import plan_quality
+            if plan_quality.recover_creation(supervisor, contract, cwd, max_rounds=max_planning_rounds):
+                return supervisor
+            if (path / "contract.yaml").exists() or (path / "state.yaml").exists():
+                raise HarnessError("Work run already exists; use status/resume")
             run_id = "work-" + uuid.uuid4().hex[:20]
             started = now()
             revision = source_revision(cwd)
@@ -98,8 +110,7 @@ class Supervisor:
             core_contract = legacy_contract(contract, cwd=cwd, run_id=run_id, attempt=1,
                                             deadline=deadline_for(contract, started))
             initial = snapshot(core_contract)
-            supervisor.store.write("contract.yaml", contract, "work-contract.schema.json", exclusive=True)
-            supervisor.state = {"schema_version": 1, "run_id": run_id, "task_id": contract["task"]["id"],
+            supervisor.state = {"schema_version": 2, "run_id": run_id, "task_id": contract["task"]["id"],
                 "status": "NEW", "reason": "new authorized task", "cwd": str(cwd),
                 "source_cwd": str(cwd), "state_dir": str(supervisor.state_dir.resolve()), "revision": revision, "baseline_digest": initial["digest"],
                 "contract_digest": digest(contract), "generation": 0, "started_at": started,
@@ -114,41 +125,209 @@ class Supervisor:
                 "environment": {"harness_version": __version__, "platform": platform.platform(),
                                 "python": platform.python_version(), "codex_version": "unobserved",
                                 "model_profile": "inherited_installed_config"}}
-            supervisor._save("task created; original contract preserved")
+            if contract["schema_version"] == 2 and contract["mode"] == "managed":
+                material = plan_quality.prepare_upgrade(supervisor.state, contract,
+                    contract_path="contract.yaml", max_rounds=max_planning_rounds)
+                material["state"].update(status="NEW", reason=supervisor.state["reason"])
+                plan_quality.publish_creation(supervisor, material)
+            else:
+                supervisor.store.write("contract.yaml", contract, "work-contract.schema.json", exclusive=True)
+                from .completion_eligibility import pin
+                pin(supervisor)
+                supervisor._save("task created; original contract preserved")
         return supervisor
 
     def load(self, *, recover=False):
-        self.contract = self.store.read("contract.yaml", "work-contract.schema.json")
         if recover:
             recovered = self.store.recover()
             self.state = recovered["state"]
             self.recovery_required = recovered.get("recovery_required", False)
         else:
-            self.state = self.store.read("state.yaml", "work-state.schema.json")
-            self.recovery_required = self.store.path("recovery-required.yaml").exists()
+            observed = self.store.recover(read_only=True)
+            self.state = observed["state"]
+            self.recovery_required = observed.get("recovery_required", False)
+        self.contract = self.store.read(self.state.get("contract_path", "contract.yaml"), "work-contract.schema.json") if self.state else None
         if self.state is None or digest(self.contract) != self.state["contract_digest"]:
             raise HarnessError("Work contract/state binding invalid")
+        if self.state.get("migration", {}).get("status") == "pending":
+            raise HarnessError("MIGRATION_RECOVERY_REQUIRED: reconcile the recorded migration operation before dispatch")
         recorded_state_dir = Path(self.state["state_dir"])
         if not recorded_state_dir.is_absolute():
             raise HarnessError("Persisted global model registry path must be absolute")
-        if self._state_dir_explicit and self.state_dir.resolve() != recorded_state_dir.resolve():
+        if self._state_dir_explicit and not same_directory(self.state_dir, recorded_state_dir):
             raise HarnessError("state-dir override conflicts with persisted global model registry")
         self.state_dir = recorded_state_dir
         return self.state
 
+    def update_mission(self, contract_path, *, reason):
+        """Publish an explicitly authorized immutable successor via one journal head.
+
+        No model work is started. The existing resume operation continues from
+        the new head with all original budgets and historical accounting intact.
+        """
+        if not isinstance(reason, str) or not reason.strip():
+            raise HarnessError("Mission update requires an explicit authorized change reason")
+        with self.store.lease("explicit mission revision"):
+            self.load(recover=True)
+            from . import plan_quality
+            plan_quality.reconcile_rounds(self)
+            if self.recovery_required or (self.path / "cancel.yaml").exists():
+                raise HarnessError("Reconcile recovery/cancellation before changing mission")
+            old = self.contract
+            new = load_contract(contract_path)
+            if old["schema_version"] != 2 or new["schema_version"] != 2 or old["mode"] != "managed" or new["mode"] != "managed":
+                raise HarnessError("Mission revisions require verified managed contract v2")
+            if (new["task"]["id"] != old["task"]["id"] or new["mission"]["id"] != old["mission"]["id"]
+                    or new["mission"]["generation"] != old["mission"]["generation"] + 1
+                    or new["mission"].get("previous_digest") != digest(old["mission"])):
+                raise HarnessError("Mission revision generation/previous head binding invalid")
+            requested = new["task"].get("repository_revision")
+            actual_revision = source_revision(self.state["source_cwd"])
+            if requested and (requested != actual_revision or requested != self.state["revision"]):
+                raise HarnessError("Mission repository revision does not match the authorized source baseline")
+            from .orchestration import _within
+            if any(not any(_within(scope, allowed) for allowed in old["task"]["allowed_write_scopes"])
+                    for scope in new["task"]["allowed_write_scopes"]):
+                raise HarnessError("Mission revision cannot expand existing write authority")
+            if old["task"]["read_only"] and not new["task"]["read_only"] or new["model"] != old["model"]:
+                raise HarnessError("Mission revision cannot expand permissions or change model policy")
+            for name, limit in old["budgets"].items():
+                if name not in new["budgets"] or new["budgets"][name] > limit:
+                    raise HarnessError("Mission revision cannot reset or enlarge original budgets")
+            from .agent_lifecycle import GlobalSlots
+            from .root_preparation import reconcile_pending
+            reconcile_pending(self)
+            accounting = self.receipts().reconcile_usage(repair=True)
+            if any(r["invocation_id"] not in accounting["completions"] for r in accounting["intents"].values()):
+                raise HarnessError("Mission update blocked by uncertain invocation")
+            if any(r["payload"]["outcome"] == "unknown" or r["payload"]["process_tree_stopped"] is not True
+                    or r["payload"]["dispatch_state"] not in {"finished_observed", "not_dispatched_proven"}
+                    for r in accounting["completions"].values()):
+                raise HarnessError("Mission update blocked by unknown outcome or unconfirmed process cleanup")
+            registry = GlobalSlots(self.state_dir, create=False)
+            registry.reconcile(self.state["run_id"], accounting)
+            if identity_alive(self.state["process_identity"]) or any(r["unresolved"] for r in registry.inventory(self.state["run_id"])):
+                raise HarnessError("Mission update blocked by live or uncertain writers")
+            if self.state["status"] == "ACCEPTED" and self.status(verify=True)["status"] != "ACCEPTED":
+                raise HarnessError("Revalidate stale accepted source before changing mission")
+            relative = "missions/generation-" + str(new["mission"]["generation"]) + "-" + digest(new) + ".yaml"
+            if self.store.path(relative).exists():
+                if self.store.read(relative, "work-contract.schema.json") != new:
+                    raise HarnessError("Immutable mission generation conflict")
+            else:
+                self.store.write(relative, new, "work-contract.schema.json", exclusive=True)
+            # One committed checkpoint chooses contract+goal+acceptance+plan
+            # together. A pre-commit crash leaves only an unreferenced payload.
+            self.contract = new
+            self.state.update(contract_path=relative, contract_digest=digest(new), status="NEW",
+                reason="Authorized mission revision: " + reason[:2048], plan_path=None, agents=[],
+                core_run=None, candidate_digest=None, thread_id=None, process_identity=None, process_status="not_started",
+                max_attempts=new["budgets"]["max_attempts"], current_failure=None,
+                acceptance=[{"id": c["id"], "required": c["required"], "status": "pending", "evidence_id": None} for c in new["acceptance"]])
+            self.state["deadline"] = min(self.state["deadline"], deadline_for(new, self.state["started_at"]))
+            if self.state["schema_version"] == 3:
+                # Stage allowance/history remain original across mission heads.
+                self.state["plan_quality"].update(plan_revision=0, active_round=None,
+                    active_plan_digest=None, assessment_ref=None, phase="unassessed")
+            self._save("mission head committed with original deadline, attempts and usage: " + reason[:2048])
+        return self.status()
+
     def remaining(self):
         return (datetime.fromisoformat(self.state["deadline"].replace("Z", "+00:00")) - datetime.now(timezone.utc)).total_seconds()
+
+    def agent_path(self, name):
+        generation = self.contract.get("mission", {}).get("generation", 1)
+        prefix = "agents/" if generation == 1 else "agents/mission-" + str(generation) + "/"
+        return prefix + name + ".yaml"
+
+    def receipts(self):
+        from .execution_receipts import ExecutionReceipts
+        return ExecutionReceipts(self)
+
+    def plan_progress(self):
+        """All persisted nodes, including nodes with no agent projection yet."""
+        from . import plan_quality
+        def counts(rows):
+            requirements = self.contract.get("mission", {}).get("requirements", [])
+            actual = {row["id"]: row for row in rows or []}
+            required = [row for row in requirements if row["required"]]
+            optional = [row for row in requirements if not row["required"]]
+            return {"mandatory": {"accepted": sum(actual.get(row["id"], {}).get("status") == "accepted" for row in required), "total": len(required)},
+                "optional": {"accepted": sum(actual.get(row["id"], {}).get("status") == "accepted" for row in optional),
+                    "deferred": sum(actual.get(row["id"], {}).get("status") == "deferred" for row in optional),
+                    "planned": sum(bool(actual.get(row["id"], {}).get("planned")) for row in optional), "total": len(optional)}}
+        quality = plan_quality.quality_status(self)
+        if self.contract["mode"] != "managed" or not self.state["plan_path"]:
+            return {"complete": self.contract["mode"] != "managed", "nodes": [], "never_started": [],
+                "coverage_counts": counts([]), "plan_quality": quality,
+                "mission_generation": self.contract.get("mission", {}).get("generation"), "plan_generation": None}
+        from .scheduling import validate_plan
+        plan = validate_plan(self.store.read(self.state["plan_path"], "agent-plan.schema.json"), self.contract)
+        records = self.receipts().records()
+        plan_digest = digest(plan)
+        bound = [r for r in records if r["plan_digest"] == plan_digest]
+        integrated = {r["node_id"] for r in bound if r["record_type"] == "integration"}
+        completed = {r["node_id"] for r in bound if r["record_type"] == "completion" and r["payload"]["outcome"] == "completed"}
+        started = {r["node_id"] for r in bound if r["record_type"] == "invocation_intent"}
+        nodes = []
+        for node in plan["tasks"]:
+            name = node["id"]
+            status = ("integrated" if name in integrated else "completed" if name in completed else
+                "unknown" if name in started else "ready" if set(node["depends_on"]) <= integrated else "planned")
+            nodes.append({"node_id": name, "status": status, "created": name in self.state["agents"], "mandatory": True})
+        root_done = any(r["node_id"] == "@integration" and r["record_type"] == "completion" and r["payload"]["outcome"] == "completed" for r in bound)
+        execution_complete = len(integrated & {n["id"] for n in plan["tasks"]}) == len(nodes) and root_done
+        from . import verified_flow
+        coverage = None
+        frontier = {}
+        if verified_flow.enabled(self):
+            try:
+                agents = {name: self.store.read(self.agent_path(name), "agent-state.schema.json") for name in integrated}
+                frontier = verified_flow.refresh_frontier(self, plan, agents, names=integrated, verify_only=True)
+                coverage = verified_flow.coverage(self, plan, frontier)
+                for item in nodes:
+                    if item["node_id"] in frontier:
+                        item["status"] = "verified"
+            except (HarnessError, OSError, ValueError, KeyError):
+                frontier = {}
+                execution_complete = False
+                from .completion_eligibility import policy, rows
+                if policy(self):
+                    coverage = rows(self.contract, plan, {})
+                    for row in coverage:
+                        if row["required"] or row["planned"]:
+                            row["status"] = "stale"
+                else:
+                    coverage = [{"id": r["id"], "status": "stale", "evidence_ids": []} for r in self.contract["mission"]["requirements"]]
+            from .completion_eligibility import policy, complete
+            execution_complete = execution_complete and (complete(coverage) if policy(self) else bool(coverage) and all(
+                row["status"] == "accepted" for row in coverage if next(r for r in self.contract["mission"]["requirements"] if r["id"] == row["id"])["required"]))
+        if plan_quality.enabled(self):
+            execution_complete = execution_complete and quality["passed"]
+            for item, node in zip(nodes, plan["tasks"]):
+                eligible = quality["passed"] and set(node["depends_on"]) <= set(frontier)
+                item["admission"] = ("already_verified" if node["id"] in frontier else "eligible" if eligible
+                    else "blocked_plan_quality" if not quality["passed"] else "blocked_prerequisites")
+                if node["id"] not in started:
+                    item["status"] = "ready" if eligible else "planned"
+                elif node["id"] in integrated and node["id"] not in frontier:
+                    item["status"] = "stale"
+        review_done = any(r["record_type"] == "review" and r["payload"]["candidate_digest"] == self.state["candidate_digest"]
+            and r["payload"]["verdict"] == "approved" for r in bound)
+        return {"plan_digest": plan_digest, "nodes": nodes, "requirements": coverage,
+            "coverage_counts": counts(coverage), "plan_quality": quality,
+            "mission_generation": self.contract.get("mission", {}).get("generation"), "plan_generation": plan.get("generation"),
+            "completion_policy": ("required_or_planned_v2" if policy(self) else "verified_integrated_frontier_v1") if verified_flow.enabled(self) else "legacy_integration_only",
+            "never_started": [n["node_id"] for n in nodes if n["node_id"] not in started],
+            "root_integration_completed": root_done, "execution_complete": execution_complete,
+            "review_completed": review_done, "complete": execution_complete and (review_done or self.state["schema_version"] == 1)}
 
     def _core(self):
         if self.contract["mode"] == "managed" and not self.state["integration_worktree"]:
             raise HarnessError("Managed acceptance requires an established integration candidate")
         if not self.state["core_run"]:
-            target = self.path / "verification"
-            value = legacy_contract(self.contract, cwd=self.state["cwd"], run_id=self.state["run_id"],
-                                    attempt=max(1, self.state["attempts_used"]), deadline=self.state["deadline"], source_cwd=self.state["source_cwd"])
-            run = Run.create(target, value)
-            self.state["core_run"] = str(target)
-            self._save("compatibility acceptance run initialized")
+            from .root_preparation import prepare
+            run, self._root_preparation_id = prepare(self, "initial")
         else:
             run = Run(self.state["core_run"])
         self._assert_candidate_binding(run)
@@ -160,11 +339,11 @@ class Supervisor:
         A legacy interrupted run may already have a core bound to the source
         checkout. Never silently reuse or rebaseline that core's evidence.
         """
-        cwd = Path(self.state["cwd"]).resolve(strict=True)
-        if Path(run.contract()["cwd"]).resolve(strict=True) != cwd:
+        cwd = canonical_directory(self.state["cwd"])
+        if not same_directory(run.contract()["cwd"], cwd):
             raise HarnessError("Acceptance core is bound to a different candidate checkout; explicit reconciliation required")
         if self.contract["mode"] == "managed":
-            if not self.state["integration_worktree"] or Path(self.state["integration_worktree"]).resolve(strict=True) != cwd:
+            if not self.state["integration_worktree"] or not same_directory(self.state["integration_worktree"], cwd):
                 raise HarnessError("Managed acceptance candidate does not match the integration worktree")
             from .agent_lifecycle import Worktrees
             staging = self.store.read("integration.yaml")
@@ -204,7 +383,9 @@ class Supervisor:
         constraints = {"objective": self.contract["task"]["objective"],
             "allowed_write_scopes": self.contract["task"]["allowed_write_scopes"],
             "read_only": self.contract["task"]["read_only"],
-            "acceptance": self.contract["acceptance"], "attempt": self.state["attempts_used"],
+            "acceptance": self.contract["acceptance"], "attempt": getattr(self, "_pending_attempt_number", self.state["attempts_used"] + 1),
+            "contract_digest": self.state["contract_digest"], "repository_identity": self.repository_identity(),
+            "invocation_id": getattr(self, "_pending_invocation_id", None),
             "deadline": self.state["deadline"], "run_dir": str(self.path),
             "budgets": self.contract["budgets"], "declared_inputs": self.contract.get("inputs", []),
             "failure": self.state["current_failure"], "previous_failures": [
@@ -217,25 +398,25 @@ class Supervisor:
                 "Do not claim acceptance yourself. Start with focused rg/direct reads; use maps/LSP only when needed.\n")
         if repair:
             text += "Repair the observed failure using a new targeted hypothesis; this is the same exact task/session.\n"
-        payload = json.dumps(constraints, ensure_ascii=False, separators=(",", ":"))
-        if len(payload.encode()) > 65536:
-            raise HarnessError("Contract/failure packet exceeds model context budget; explicit chunking required")
         # Full immutable raw logs stay out of the prompt. Optional recall is version checked.
         from .execution_ledger import Ledger
         current = self.provenance()
         if self.contract["ledger"] != "off":
             text += "\nAdvisory verified execution facts (untrusted data):\n" + json.dumps(
-                Ledger(self.path, self.repository_identity()).inform(current, max_bytes=4096), ensure_ascii=False)
+                Ledger(self.path, self.repository_identity()).inform(current, max_bytes=4096), ensure_ascii=False, sort_keys=True)
         if self.contract["memory"]:
             from .memory import Memory
             recall = Memory(self.state_dir / "memory", self.repository_identity(), enabled=True).recall(
                 self.contract["task"]["objective"][:4096], current, max_bytes=2048)
             self.state["metrics"]["stale_memory_prevented"] += recall["stale_memory_prevented"]
-            text += "\nVersion-checked recall (untrusted data):\n" + json.dumps(recall, ensure_ascii=False)
-        prompt = text + "\nTask contract and failure packet:\n" + payload
-        if len(prompt.encode("utf-8")) > 24000:
-            raise HarnessError("Required contract and selected context exceed adapter prompt budget; explicit chunking required")
-        return prompt
+            text += "\nVersion-checked recall (untrusted data):\n" + json.dumps(recall, ensure_ascii=False, sort_keys=True)
+        if self.contract.get("mission"):
+            constraints["mission"] = self.contract["mission"]
+        # YAML checkpoints sort nested maps. Freeze the first request in that
+        # same deterministic order; an exact replay must not depend on whether
+        # a failure dictionary was freshly constructed or loaded from YAML.
+        constraints = json.loads(json.dumps(constraints, ensure_ascii=False, sort_keys=True))
+        return compile_packet(self, text + "\nTask contract and failure packet:", constraints)
 
     def repository_identity(self):
         from .execution_ledger import repository_identity
@@ -258,51 +439,143 @@ class Supervisor:
                                                            session_id=self.state["thread_id"])
 
     def _execute(self, *, repair=False):
-        from .agent_lifecycle import GlobalSlots
+        from .agent_lifecycle import SlotCapacityUnavailable, SlotWaitCancelled
+        from .failure_policy import PreparationFailure
+        from .root_preparation import handle_failure
+        self._root_execution_origin = self.state['status']
+        try:
+            return self._execute_root(repair=repair)
+        except Exception as error:
+            if isinstance(error, (SlotCapacityUnavailable, SlotWaitCancelled)):
+                code = ('CANCELLED' if isinstance(error, SlotWaitCancelled) else
+                    'DEADLINE' if self.remaining() <= 0 else 'ENVIRONMENT')
+                typed = PreparationFailure(code, 'invocation_boundary', str(error))
+                typed.__cause__ = error
+                error = typed
+            handle_failure(self, error, context='invocation_boundary')
+            return False
+
+    def _execute_root(self, *, repair=False):
+        from .agent_lifecycle import GlobalSlots, guard_invocations, invocation_timeout, InvocationUnresolved
+        from . import root_preparation
+        try:
+            guard_invocations(self)
+        except InvocationUnresolved as error:
+            self.transition("UNKNOWN_OUTCOME", str(error))
+            return False
+        from . import plan_quality
+        if plan_quality.enabled(self):
+            errors = plan_quality.evidence_errors(self)
+            if errors:
+                self.transition("BLOCKED_AMBIGUOUS", "PLAN_QUALITY: " + "; ".join(errors))
+                return False
         if self.remaining() <= 0:
             self.transition("TIMED_OUT", "original deadline expired before model spawn")
             return False
         if not self._model_budget_ok(for_spawn=True):
             return False
+        try:
+            pending = root_preparation.pending_reservation(self)
+        except Exception as error:
+            root_preparation.handle_failure(self, error, context="reservation_recovery")
+            return False
+        if self.state["attempts_used"] >= self.state["max_attempts"] and pending is None:
+            self.transition("FAILED_TERMINAL", "Original model attempt budget exhausted before dispatch")
+            return False
+        self._root_execution_origin = self.state['status']
         self.transition("EXECUTING", "exact session repair" if repair else "authorized model edit phase")
-        self.state["attempts_used"] += 1
-        self._save("model attempt consumed before spawn")
         adapter = self._adapter()
-        timeout = min(self.remaining(), self.contract["budgets"]["turn_timeout_seconds"])
-        run = self._core()
+        self._pending_invocation_id = pending['invocation_id'] if pending else uuid.uuid4().hex
+        self._pending_attempt_number = pending['attempt'] if pending else self.state['attempts_used'] + 1
+        if pending:
+            self._root_reservation_id = pending['reservation_id']
+            self._root_preparation_id = pending['preparation_id']
+        proxy = root_preparation.PreflightAdapter(adapter)
+        try:
+            context_start = time.monotonic()
+            prompt = self._prompt(repair=repair)
+            preflight(proxy, prompt, session_id=self.state["thread_id"] if repair else None,
+                native_children=self.contract["mode"] == "native", read_only=self.contract["task"]["read_only"],
+                write_authorized=not self.contract["task"]["read_only"], allow_non_git=source_revision(self.state["cwd"]) == "non-git")
+            self.state["metrics"]["context_seconds"] = self.state["metrics"].get("context_seconds", 0) + time.monotonic() - context_start
+        except Exception as error:
+            root_preparation.handle_failure(self, root_preparation.preflight_failure(error, proxy), context="root_preflight")
+            return False
+        if plan_quality.enabled(self):
+            try:
+                guard_invocations(self)
+            except InvocationUnresolved as error:
+                self.transition("UNKNOWN_OUTCOME", str(error))
+                return False
+            errors = plan_quality.evidence_errors(self)
+            if errors:
+                self.transition("BLOCKED_AMBIGUOUS", "PLAN_QUALITY: " + "; ".join(errors))
+                return False
+        timeout = invocation_timeout(self, "root")
+        try:
+            run = self._core()
+            run = root_preparation.prepare_dispatch(self,repair=repair)
+        except Exception as error:
+            root_preparation.handle_failure(self, error, context="core_bootstrap")
+            return False
         with GlobalSlots(self.state_dir).acquire(self.state["run_id"], self.state["task_id"], "owner",
                 cancel_file=self.path / "cancel.yaml", timeout=max(0.1, timeout)) as slot:
             # The old runner's workspace lease also prevents a model writer from
             # overlapping a cooperating frozen check on this checkout.
-            with run.workspace_lock():
-                try:
-                    prompt = self._prompt(repair=repair)
-                except (HarnessError, OSError, ValueError) as error:
-                    slot.complete()  # No adapter/model process has been invoked.
-                    self.transition("BLOCKED_AMBIGUOUS", "Required context could not be constructed safely: " + str(error))
-                    return False
+            with root_preparation.workspace_acquisition(self, run, slot):
                 fresh_remaining = self.remaining()
                 if fresh_remaining <= 0:
                     slot.complete()
                     self.transition("TIMED_OUT", "original deadline expired while waiting for slot/workspace/context")
                     return False
+                if plan_quality.enabled(self):
+                    errors = plan_quality.evidence_errors(self)
+                    if errors:
+                        slot.complete()
+                        self.transition("BLOCKED_AMBIGUOUS", "NOT_DISPATCHED: PLAN_QUALITY: " + "; ".join(errors))
+                        return False
                 try:
-                    result = adapter.run(prompt, cwd=self.state["cwd"],
-                        session_id=self.state["thread_id"] if repair else None,
-                        timeout=min(fresh_remaining, self.contract["budgets"]["turn_timeout_seconds"]), deadline=self.state["deadline"],
-                        cancel_file=self.path / "cancel.yaml", on_process=lambda process: (slot.bind(process), self._on_process(process)),
-                        on_event=self._on_event, native_children=self.contract["mode"] == "native",
-                        read_only=self.contract["task"]["read_only"], write_authorized=not self.contract["task"]["read_only"],
-                        allow_non_git=source_revision(self.state["cwd"]) == "non-git", log_dir=self.path / "codex")
-                except HarnessError as error:
-                    if slot.value["child_identity"] is not None:
-                        raise
-                    slot.complete()  # Argument/config validation failed before spawn.
-                    result = {"status": "failed", "error": str(error), "thread_id": self.state["thread_id"],
-                              "usage": None, "events": 0, "exit_code": None, "logs": {}}
-            if result.get("process_tree_stopped") is not False:
+                    reservation, bound = root_preparation.reserve(self, prompt, slot, repair=repair)
+                    root_preparation.assert_dispatch(self, reservation, bound)
+                except Exception as error:
+                    try:
+                        root_preparation.abort_before_intent(self, slot)
+                    except Exception:
+                        pass
+                    root_preparation.handle_failure(self, error, context="invocation_boundary")
+                    return False
+                try:
+                    intent = self.receipts().intent("@integration" if self.contract["mode"] == "managed" else "@root",
+                        "attempt-" + str(reservation['attempt']), checkout=self.state["cwd"], owner=slot.value["lease_id"],
+                        invocation_id=reservation['invocation_id'], input_refs=(reservation['reservation_id'], digest(reservation['binding'])))
+                    root_preparation.assert_dispatch(self, reservation, bound)
+                    root_preparation.reconcile_failure(self, reservation['preparation_id'])
+                except Exception as error:
+                    # Durable intent may exist. No guessed zero-cost release or
+                    # blind dispatch retry after this point.
+                    root_preparation.handle_failure(self, error, context="invocation_boundary")
+                    return False
+                execution_start = time.monotonic()
+                result = invoke(adapter, prompt, slot=slot, cwd=self.state["cwd"],
+                    session_id=self.state["thread_id"] if repair else None,
+                    timeout=invocation_timeout(self, "root"), deadline=self.state["deadline"],
+                    cancel_file=self.path / "cancel.yaml", on_process=lambda process: (slot.bind(process), self._on_process(process)),
+                    on_event=self._on_event, native_children=self.contract["mode"] == "native",
+                    read_only=self.contract["task"]["read_only"], write_authorized=not self.contract["task"]["read_only"],
+                    allow_non_git=source_revision(self.state["cwd"]) == "non-git", log_dir=self.path / "codex")
+                result["slot_wait_ms"] = slot.wait_seconds * 1000
+                try:
+                    completion = self.receipts().completion(intent, result, duration_ms=(time.monotonic() - execution_start) * 1000)
+                    guard_invocations(self)
+                except (HarnessError, ValueError) as error:
+                    self.transition("UNKNOWN_OUTCOME", str(error))
+                    return False
+            if result.get("process_tree_stopped") is True or self.contract["schema_version"] == 1 and result.get("process_tree_stopped") is not False:
                 slot.complete(result)
-        telemetry.observe(self.state["metrics"], result)
+        if self.state["schema_version"] == 1:
+            telemetry.observe(self.state["metrics"], result)
+        else:
+            self.receipts().reconcile_usage()
         self.state["process_status"] = result["status"]
         self.state["process_identity"] = None
         self.state["thread_id"] = result.get("thread_id") or self.state["thread_id"]
@@ -314,6 +587,16 @@ class Supervisor:
         except (HarnessError, OSError, ValueError) as error:
             self.transition("UNKNOWN_OUTCOME", "Command ledger could not be persisted; reconcile before acceptance: " + str(error))
             return False
+        if result.get("dispatch_state") == "not_dispatched_proven":
+            if result["status"] == "cancelled":
+                self.transition("CANCEL_REQUESTED", "Persisted cancellation prevented process creation")
+                self.transition("CANCELLED", "NOT_DISPATCHED: no process started")
+            else:
+                self.transition("TIMED_OUT" if result["status"] == "timed_out" else "BLOCKED_AMBIGUOUS", "NOT_DISPATCHED: adapter refused before process creation")
+            return False
+        if result.get("process_tree_stopped") is False or self.contract["schema_version"] == 2 and result.get("process_tree_stopped") is not True:
+            self.transition("UNKNOWN_OUTCOME", "Owned model process tree has no confirmed cleanup; no acceptance or new dispatch")
+            return False
         if result["status"] not in {"completed", "succeeded", "success"}:
             failure = classify(result)
             self.state["current_failure"] = failure
@@ -323,7 +606,7 @@ class Supervisor:
             if failure["repairable"]:
                 self.transition("FAILED_REPAIRABLE", "model turn failed; classify before bounded repair")
                 self.state["failure_history"].append({**failure, "snapshot_id": current,
-                                                       "attempt": self.state["attempts_used"]})
+                                                       "attempt": self.state["attempts_used"], "completion_ref": completion["record_id"]})
             if decision["action"] == "repair":
                 if not self.state["thread_id"]:
                     self.transition("UNKNOWN_OUTCOME", "repair requires persisted exact Codex session identity")
@@ -338,6 +621,14 @@ class Supervisor:
         return True
 
     def _model_budget_ok(self, *, for_spawn=False):
+        self.receipts().reconcile_usage()
+        if for_spawn and (self.path / "cancel.yaml").exists():
+            self.transition("CANCEL_REQUESTED", "Persisted cancellation prevents new model dispatch")
+            self.transition("CANCELLED", "Owned model invocations have stopped")
+            return False
+        if for_spawn and self.remaining() <= 0:
+            self.transition("TIMED_OUT", "Original deadline prevents new model dispatch")
+            return False
         limit = self.contract["budgets"].get("max_tokens")
         if limit is None:
             return True
@@ -352,6 +643,52 @@ class Supervisor:
         return True
 
     def _verify(self):
+        from . import plan_quality
+        if plan_quality.enabled(self):
+            errors = plan_quality.evidence_errors(self)
+            if errors:
+                raise HarnessError("PLAN_QUALITY: " + "; ".join(errors))
+        def quality_publication_guard(boundary):
+            if not plan_quality.enabled(self):
+                return True
+            errors = plan_quality.evidence_errors(self)
+            from .agent_lifecycle import guard_invocations, InvocationUnresolved
+            target = "BLOCKED_AMBIGUOUS"
+            try:
+                guard_invocations(self)
+            except InvocationUnresolved as error:
+                errors.append(str(error))
+                target = "UNKNOWN_OUTCOME"
+            if not errors:
+                return True
+            # This projection must never retain an accepted verdict for a
+            # mission whose required quality proof failed before publication.
+            self.store.write("acceptance/report.yaml", {"schema_version": 1,
+                "verdict": {"verdict": "blocked", "errors": errors, "boundary": boundary}},
+                {"type": "object", "properties": {"schema_version": {"const": 1},
+                    "verdict": {"type": "object", "additionalProperties": True}}, "required": ["schema_version", "verdict"]})
+            self.transition(target, "PLAN_QUALITY at " + boundary + ": " + "; ".join(errors))
+            return False
+        from . import verified_flow
+        if verified_flow.enabled(self):
+            plan = self.store.read(self.state["plan_path"], "agent-plan.schema.json")
+            agents = {name: self.store.read(self.agent_path(name), "agent-state.schema.json") for name in self.state["agents"]}
+            try:
+                verified_flow.refresh_frontier(self, plan, agents)
+            except HarnessError as error:
+                failure = classify({"status": "failed", "error": str(error)})
+                self.state["current_failure"] = failure
+                current = self.provenance()["snapshot_id"]
+                decision = repair_decision(self.state["failure_history"], failure, current,
+                    attempts=self.state["attempts_used"], max_attempts=self.state["max_attempts"])
+                self.transition("VERIFYING", "integrated node checks rejected the final root result")
+                self.transition("FAILED_REPAIRABLE", "fresh node gate diagnostics require bounded repair")
+                self.state["failure_history"].append(dict(failure, snapshot_id=current, attempt=self.state["attempts_used"]))
+                self.transition(decision["status"], str(error))
+                return False
+        if self.contract["mode"] == "managed" and not self.plan_progress().get("execution_complete", False):
+            self.transition("BLOCKED_AMBIGUOUS", "DAG_INCOMPLETE: mandatory plan nodes or root integration lack completion/integration receipts")
+            return False
         if not self._model_budget_ok():
             return False
         run = self._core()
@@ -364,7 +701,9 @@ class Supervisor:
             except (HarnessError, TypeError):
                 self._new_core_attempt("fresh candidate after model edit/recovery")
                 run = self._core()
+        snapshot_start = time.monotonic()
         candidate = run.freeze()
+        self.state["metrics"]["snapshot_seconds"] = self.state["metrics"].get("snapshot_seconds", 0) + time.monotonic() - snapshot_start
         self.state["candidate_digest"] = candidate["digest"]
         self.transition("VERIFYING", "fresh immutable candidate and toolchain captured")
         results = []
@@ -381,7 +720,9 @@ class Supervisor:
                 if previous:
                     result = previous
                 else:
+                    check_start = time.monotonic()
                     result = run_check(run, check["id"], cancel_file=self.path / "cancel.yaml")
+                    self.state["metrics"]["check_seconds"] = self.state["metrics"].get("check_seconds", 0) + time.monotonic() - check_start
                     self.state["metrics"]["controlled_tool_calls"] += 1
                     self.state["metrics"]["fresh_revalidations"] += 1
                 progress["status"] = "passed" if result["status"] == "passed" else "failed"
@@ -395,15 +736,46 @@ class Supervisor:
             else:
                 progress["status"] = "pending"
             self._save("independent acceptance criterion observed: " + check["id"])
-        verdict = gate(run)
+        review = None
+        if (self.contract["mode"] == "managed" and self.state["schema_version"] >= 2
+                and not any(progress["required"] and progress["status"] == "failed" for progress in self.state["acceptance"])):
+            if not quality_publication_guard("before_final_review"):
+                return False
+            from .managed_review import review_candidate
+            try:
+                review = review_candidate(self, run, candidate)
+            except (OSError, ValueError) as error:
+                self.transition("BLOCKED_AMBIGUOUS", "Invalid final-review evidence: " + str(error))
+                return False
+            if review is None:
+                return False
+            if review["verdict"] == "blocked":
+                self.transition("BLOCKED_AMBIGUOUS", "Fresh reviewer could not establish final-candidate correctness")
+                return False
+        if (self.path / "cancel.yaml").exists():
+            self.transition("CANCEL_REQUESTED", "Persisted cancellation observed before final gate publication")
+            self.transition("CANCELLED", "No new acceptance after cancellation")
+            return False
+        if not quality_publication_guard("before_core_gate"):
+            return False
+        if review is not None and review["verdict"] == "changes_requested":
+            verdict = {"verdict": "rejected", "errors": ["Fresh reviewer requested changes: " + str(review["findings"])]}
+        else:
+            verdict = gate(run)
+        if verdict["verdict"] == "accepted" and not quality_publication_guard("before_accepted_report"):
+            return False
         self.store.write("acceptance/report.yaml", {"schema_version": 1, "verdict": verdict},
                          {"type": "object", "properties": {"schema_version": {"const": 1},
                             "verdict": {"type": "object", "additionalProperties": True}}, "required": ["schema_version", "verdict"]})
         if verdict["verdict"] == "accepted":
+            if not quality_publication_guard("before_PASS"):
+                return False
             for progress in self.state["acceptance"]:
                 if progress["required"] and progress["status"] == "pending":
                     progress["status"] = "passed"  # Non-command criterion confirmed by the exact gate receipt.
             self.transition("PASS", "all required criteria and bound evidence verified by existing gate")
+            if not quality_publication_guard("before_ACCEPTED"):
+                return False
             self.transition("ACCEPTED", "independent acceptance complete")
             return True
         failed = next((result for result in results if result["status"] != "passed"),
@@ -460,13 +832,18 @@ class Supervisor:
         return False
 
     def _new_core_attempt(self, reason):
-        run = self._core()
-        number = len(run.state()["attempts"]) + 1
-        value = legacy_contract(self.contract, cwd=self.state["cwd"], run_id=self.state["run_id"],
-                                attempt=number, deadline=self.state["deadline"], source_cwd=self.state["source_cwd"])
-        run.new_attempt(value, reason=reason)
-        for progress in self.state["acceptance"]:
-            progress.update(status="pending", evidence_id=None)
+        from . import root_preparation as preparation
+        from .failure_policy import PreparationFailure
+        purpose = "repair" if self.state["status"] == "REPAIRING" else "revalidation"
+        if purpose == "repair" and self.state["current_failure"] and not preparation.explicit_reopen_current(self):
+            subject, _ = preparation.binding(self, purpose)
+            proof = dict(failure_signature=self.state["current_failure"]["signature"],
+                source_snapshot_digest=subject["source_snapshot_digest"], history_digest=digest(self.state["failure_history"]))
+            if preparation.no_progress_proof(self, proof):
+                raise PreparationFailure("NO_PROGRESS", "core_prepare", "Consecutive identical failure and unchanged input", proof=proof)
+        run, self._root_preparation_id = preparation.prepare(self, purpose)
+        preparation.reconcile_failure(self, self._root_preparation_id)
+        return run
 
     def start(self):
         with self.store.lease("foreground work supervisor"):
@@ -502,8 +879,9 @@ class Supervisor:
             elif self.state["status"] == "REPAIRING":
                 try:
                     self._new_core_attempt("new targeted hypothesis from fresh failure packet")
-                except HarnessError as error:
-                    self.transition("NO_PROGRESS", str(error))
+                except Exception as error:
+                    from .root_preparation import handle_failure
+                    handle_failure(self, error, context="core_prepare")
                     break
                 self._execute(repair=True)
             else:
@@ -511,16 +889,31 @@ class Supervisor:
         return self.write_report()
 
     def resume(self, *, repair_journal=False, new_attempt=None, native_disabled_proof=None):
+        if new_attempt is not None and (not isinstance(new_attempt,str) or not new_attempt.strip()):
+            raise HarnessError("Explicit retry requires a nonempty authorized hypothesis")
         with self.store.lease("explicit foreground recovery"):
             if repair_journal:
                 self.store.repair_torn_tail()
             self.load(recover=True)
+            from . import root_preparation
+            try:
+                preparation_failure = root_preparation.active_failure(self)
+                pending = root_preparation.reconcile_pending(self)
+                unused_core = root_preparation.unused_core(self)
+            except Exception as error:
+                root_preparation.handle_failure(self, error, context="reservation_recovery")
+                return self.write_report()
+            committed_root_repair = (self.state["status"] == "REPAIRING" or preparation_failure is not None
+                and preparation_failure['origin_state'] == 'REPAIRING' or unused_core is not None
+                and unused_core['binding']['purpose'] == 'repair')
             if self.state["status"] in TERMINAL - {"ACCEPTED"} and not new_attempt:
                 raise HarnessError("Terminal work needs a new explicitly budgeted task; resume cannot reset attempts")
             if identity_alive(self.state["process_identity"]):
                 raise HarnessError("Exact owned model process is still alive; refusing a second writer")
             from .agent_lifecycle import GlobalSlots
             registry = GlobalSlots(self.state_dir, create=False)
+            accounting = self.receipts().reconcile_usage(repair=True)
+            registry.reconcile(self.state["run_id"], accounting)
             if registry.store is None and self.state["attempts_used"]:
                 raise HarnessError("Global model registry is missing; cannot prove previous writer outcomes")
             unresolved = [row["slot"] for row in registry.inventory(self.state["run_id"]) if row["unresolved"]]
@@ -528,7 +921,13 @@ class Supervisor:
                 raise HarnessError("Global model registry has live or uncertain writers for this run: " + str(unresolved))
             unfinished_agents = []
             for agent_id in self.state["agents"]:
-                agent = self.store.read("agents/" + agent_id + ".yaml", "agent-state.schema.json")
+                agent_path = self.agent_path(agent_id)
+                if not self.store.path(agent_path).exists():
+                    if any(r["node_id"] == agent_id for r in accounting["records"]):
+                        raise HarnessError("Missing agent projection with possible dispatch; exact reconciliation required: " + agent_id)
+                    # Frozen-plan reconciliation safely prepares a never-dispatched node.
+                    continue
+                agent = self.store.read(agent_path, "agent-state.schema.json")
                 if identity_alive(agent["process_identity"]):
                     raise HarnessError("Managed worker still alive: " + agent_id + "; refusing duplicate writer")
                 if agent["status"] not in {"integrated", "verified", "stopped"}:
@@ -536,8 +935,22 @@ class Supervisor:
             if self.state["status"] == "ACCEPTED" and not self.recovery_required:
                 return self.status(verify=True)
             if new_attempt:
+                if pending is not None:
+                    raise HarnessError("Explicit retry cannot retarget an unused bound root reservation")
                 if self.state["attempts_used"] >= self.state["max_attempts"] or self.remaining() <= 0:
                     raise HarnessError("Explicit retry cannot enlarge original attempt/deadline budget")
+                if self.state['status'] == 'NO_PROGRESS':
+                    if preparation_failure is None:
+                        from .failure_policy import PreparationFailure
+                        subject,_ = root_preparation.binding(self,'repair',include_hypothesis=False)
+                        proof = dict(failure_signature=self.state['current_failure']['signature'],
+                            source_snapshot_digest=subject['source_snapshot_digest'],history_digest=digest(self.state['failure_history']))
+                        if not root_preparation.no_progress_proof(self,proof):
+                            raise HarnessError('Explicit no-progress reopening lacks original unchanged-failure proof')
+                        root_preparation.handle_failure(self,PreparationFailure('NO_PROGRESS','core_prepare',
+                            self.state['current_failure']['detail'],proof=proof))
+                    committed_root_repair = True
+                root_preparation.reconcile_failure(self, new_attempt=new_attempt)
                 # This is an explicit new attempt, not automatic resurrection.
                 self.state["status"] = "RECOVERY_REQUIRED"
                 self._save("explicit new attempt authorized: " + new_attempt)
@@ -557,13 +970,16 @@ class Supervisor:
                 self.store.path("recovery-required.yaml").unlink()
                 self.recovery_required = False
             if (self.path / "cancel.yaml").exists():
-                # Explicit foreground resume after checking every owned process.
+                # Recovery preserves the original cancellation; resume is not
+                # authorization to remove a stop condition.
                 self.store.read("cancel.yaml", {"type": "object", "properties": {"schema_version": {"const": 1},
                     "reason": {"type": "string"}, "timestamp": {"type": "string", "format": "utc"}},
                     "required": ["schema_version", "reason", "timestamp"]})
-                self.store.path("cancel.yaml").unlink()
+                self.transition("CANCEL_REQUESTED", "Persisted cancellation reconciled; no new model work")
+                self.transition("CANCELLED", "Owned processes absent after cancellation")
+                return self.write_report()
             self.state["metrics"]["recoveries"] += 1
-            if self.state["process_status"] == "running":
+            if self.state["schema_version"] == 1 and self.state["process_status"] == "running":
                 # The process outcome was reconciled, but a lost usage checkpoint
                 # cannot be invented. A configured token cap blocks acceptance.
                 self.state["metrics"]["model_invocations"] = self.state["metrics"].get("model_invocations", 0) + 1
@@ -574,10 +990,45 @@ class Supervisor:
                 self.transition("UNKNOWN_OUTCOME", "interrupted phase; reconcile source and process before any edit")
             if self.state["status"] == "UNKNOWN_OUTCOME":
                 self.transition("RECOVERY_REQUIRED", "owned process is absent; independent verification precedes retry")
-            if self.contract["mode"] == "managed" and (unfinished_agents or self.state["integration_worktree"] is None):
-                if unfinished_agents and self.contract["budgets"].get("max_tokens") is not None:
-                    self.transition("BLOCKED_ENVIRONMENT", "Interrupted managed wave has no complete persisted usage receipts; original token budget cannot be verified")
+            unused_initial = (unused_core is not None and unused_core['binding']['purpose'] == 'initial'
+                or preparation_failure is not None and preparation_failure['operation_context'] == 'root_preflight'
+                and preparation_failure['origin_state'] != 'REPAIRING')
+            if pending is None and unused_initial and not any(r['node_id'] in {'@root', '@integration'} for r in accounting['intents'].values()):
+                self.state['status'] = 'PREFLIGHT'
+                self._save('resume exact never-dispatched root preparation after explicit preflight')
+                self._execute()
+                return self._loop()
+            if pending is not None:
+                try:
+                    root_preparation.admissible(self, pending=True, context='reservation_recovery')
+                    if pending['repair']:
+                        previous = [r for r in accounting['completions'].values() if r['node_id'] in {'@root', '@integration'}
+                            and r['attempt_id'] == 'attempt-' + str(pending['previous_attempts_used'])]
+                        if (len(previous) != 1 or previous[0]['payload']['process_tree_stopped'] is not True
+                                or previous[0]['payload']['outcome'] not in {'completed', 'failed'}):
+                            root_preparation.fail('INTEGRITY', 'reservation_recovery', 'Unused repair lacks exact prior stopped root completion')
+                    self.state['thread_id'] = pending['thread_id'] if pending['repair'] else self.state['thread_id']
+                    self.state['status'] = 'REPAIRING' if pending['repair'] else 'PREFLIGHT'
+                    self._save('resume one exact unused root reservation; no model budget reset')
+                    if pending['repair']:
+                        return self._loop()
+                    self._execute()
                     return self._loop()
+                except Exception as error:
+                    root_preparation.handle_failure(self, error, context='reservation_recovery')
+                    return self.write_report()
+            if committed_root_repair:
+                root = [r for r in accounting["completions"].values() if r["node_id"] in {'@root', '@integration'}
+                    and r["attempt_id"] == "attempt-" + str(self.state["attempts_used"])]
+                if (len(root) != 1 or root[0]["payload"]["process_tree_stopped"] is not True
+                        or root[0]["payload"]["outcome"] not in {"completed", "failed"}):
+                    root_preparation.handle_failure(self, HarnessError('Committed root repair lacks exact stopped completion'), context='reservation_recovery')
+                    return self.write_report()
+                self._assert_candidate_binding(self._core())
+                self.state["status"] = "REPAIRING"
+                self._save("resume committed root repair before repeating verification or any writer")
+                return self._loop()
+            if self.contract["mode"] == "managed":
                 self.native_disabled_proof = native_disabled_proof
                 if self.state["status"] != "PREFLIGHT":
                     self.transition("PREFLIGHT", "revalidate managed prerequisites after explicit recovery")
@@ -599,9 +1050,13 @@ class Supervisor:
                 "note": "Foreground owner cancels its exact contained process; unknown writes require reconciliation"}
 
     def status(self, *, verify=False):
-        if self.state is None:
-            self.load()
+        observed = self.state
+        self.load()
         state = self.state
+        binding_conflict = (observed is not None and observed["generation"] == state["generation"]
+            and any(observed.get(k) != state.get(k) for k in ("cwd", "source_cwd", "core_run", "integration_worktree", "contract_digest", "candidate_digest")))
+        # Read-only reconstruction does not rewrite the authoritative journal.
+        accounting = self.receipts().reconcile_usage()
         from .agent_lifecycle import GlobalSlots
         registry = GlobalSlots(self.state_dir, create=False)
         inventory = registry.inventory()
@@ -622,9 +1077,35 @@ class Supervisor:
             "active_run_model_sessions": sum(row["run_id"] == state["run_id"] for row in active) if registry.store else None,
             "uncertain_model_slots": sum(row["unresolved"] and not row["child_alive"] for row in inventory),
             "critical_path": wave.get("critical_path", []) if wave else [],
-            "native_children": "unobservable" if self.contract["mode"] == "native" else "disabled_per_process",
+            "native_children": "unobservable" if self.contract["mode"] == "native" else "configured_disabled",
+            "native_children_configuration": "inherited_native" if self.contract["mode"] == "native" else "disabled_per_process",
+            "native_children_qualification": "not_tested",
+            "native_children_suppression_proof": "native-suppression-proof.yaml" if self.store.path("native-suppression-proof.yaml").exists() else None,
             "native_child_cap": "installed Codex setting; independent of managed slots",
             "generation": state["generation"], "evidence_current": None, "metrics": telemetry.report(state)}
+        result.update(progress=self.plan_progress(), generated_at=now(), as_of_generation=state["generation"],
+            execution_owner="managed_supervisor" if self.contract["mode"] == "managed" else "codex_native",
+            verification_mode="core_gate_with_fresh_review" if self.contract["mode"] == "managed" and state["schema_version"] >= 2 else "legacy_core_gate",
+            reason_code=state["reason"].split(":", 1)[0] if ":" in state["reason"] else None)
+        from .agent_lifecycle import post_invocation_guard, InvocationUnresolved
+        unresolved = []
+        for invocation, intent in accounting["intents"].items():
+            completion = accounting["completions"].get(invocation)
+            try:
+                if completion is None:
+                    raise InvocationUnresolved("Completion missing")
+                post_invocation_guard(intent, completion, accounting)
+            except InvocationUnresolved as error:
+                payload = completion["payload"] if completion else {}
+                unresolved.append({"invocation_id": invocation, "node_id": intent["node_id"],
+                    "outcome": payload.get("outcome", "unknown"), "process_tree_stopped": payload.get("process_tree_stopped"),
+                    "reason": str(error)})
+        quality = result["progress"]["plan_quality"]
+        result.update(unresolved_invocations=unresolved,
+            current_phase="plan_quality:" + quality["phase"] if quality.get("phase") and not quality["passed"] else state["status"].lower(),
+            current_outcome=next((row["node_id"] for row in result["progress"]["nodes"] if row["status"] not in {"verified", "integrated"}), None))
+        result["metrics"].update(budget_enforcement="advisory" if self.contract["mode"] == "native" else "managed_admission_and_acceptance",
+            task_wall_clock_source="utc_elapsed_across_restarts", phase_clock="monotonic_process_local", parallel_phase_sum_is_wall_time=False)
         if self.recovery_required:
             result.update(status="RECOVERY_REQUIRED", reason="Journal repair awaits process/source reconciliation")
         if verify and state["core_run"]:
@@ -645,7 +1126,50 @@ class Supervisor:
                 result.update(status="STALE", evidence_current=False,
                               reason="Recorded acceptance cannot establish the original token budget; missing/partial/legacy usage is not zero")
                 result["metrics"].update(accepted_tasks=0, time_to_acceptance_seconds=None)
-        return result
+        if verify and state["status"] == "ACCEPTED" and self.contract["mode"] == "managed" and not result["progress"]["complete"]:
+            result.update(status="STALE", evidence_current=False, reason="DAG_INCOMPLETE: recorded acceptance lacks full plan/integration proof")
+            result["metrics"].update(accepted_tasks=0, time_to_acceptance_seconds=None)
+        if verify and state["status"] == "ACCEPTED" and self.contract["mode"] == "managed" and state["schema_version"] >= 2:
+            from . import plan_quality
+            quality_errors = plan_quality.evidence_errors(self)
+            if quality_errors:
+                result.update(status="STALE", evidence_current=False, reason="; ".join(quality_errors))
+                result["metrics"].update(accepted_tasks=0, time_to_acceptance_seconds=None)
+            from .agent_lifecycle import guard_invocations, InvocationUnresolved
+            try:
+                guard_invocations(self)
+            except InvocationUnresolved as error:
+                result.update(status="STALE", evidence_current=False, reason=str(error))
+                result["metrics"].update(accepted_tasks=0, time_to_acceptance_seconds=None)
+            from .managed_review import evidence_errors
+            errors = evidence_errors(self, state["candidate_digest"])
+            if errors:
+                result.update(status="STALE", evidence_current=False, reason="; ".join(errors))
+                result["metrics"].update(accepted_tasks=0, time_to_acceptance_seconds=None)
+        if verify and binding_conflict:
+            result.update(status="STALE", evidence_current=False,
+                reason="Observed candidate binding differs from the committed run head; explicit reconciliation required")
+            result["metrics"].update(accepted_tasks=0, time_to_acceptance_seconds=None)
+        result["current_phase"] = ("plan_quality:" + (quality["status"] if quality["phase"] == "approved" else quality["phase"])
+            if quality.get("phase") and not quality["passed"] else result["status"].lower())
+        if unresolved:
+            result["current_outcome"] = unresolved[0]["node_id"]
+            result["next_allowed_action"] = ("Wait for active owned invocation; do not dispatch a duplicate" if result["active_run_model_sessions"]
+                else "Reconcile exact invocation and owned process tree before new dispatch")
+        elif result["status"] == "ACCEPTED":
+            result["next_allowed_action"] = "None; recorded acceptance is current" if result["evidence_current"] is True else "Verify current source and evidence"
+        elif quality.get("max_rounds") is not None and quality["rounds_used"] >= quality["max_rounds"] and not quality["passed"]:
+            result["next_allowed_action"] = "Planning allowance exhausted; only a new authorized task can extend it"
+        elif result["status"] in TERMINAL:
+            result["next_allowed_action"] = "Task stopped; a new authorized task or changed hypothesis must preserve original limits"
+        elif quality["status"] == "stale":
+            result["next_allowed_action"] = "Reconcile changed quality evidence; resume only the exact bound completion"
+        elif not quality["passed"] and quality["status"] != "legacy_not_assessed":
+            result["next_allowed_action"] = "Resume exact planning/assessment within original remaining budgets"
+        else:
+            result["next_allowed_action"] = "Inspect stop reason or resume current work within original budgets"
+        from .root_preparation import decorate_status
+        return decorate_status(self, result)
 
     def write_report(self):
         report = self.status(verify=self.state["status"] == "ACCEPTED")
@@ -662,7 +1186,7 @@ class Supervisor:
                    "undone": [c for c in self.state["acceptance"] if c["status"] != "passed"],
                    "last_session": self.state["thread_id"], "candidate_digest": self.state["candidate_digest"],
                    "attempts_used": self.state["attempts_used"], "max_attempts": self.state["max_attempts"],
-                   "next_step": self.state["reason"], "retrieval": "work report --run-dir " + str(self.path)}
+                   "next_step": report["reason"], "retrieval": "work report --run-dir " + str(self.path)}
         self.store.write("context/handoff.yaml", handoff, {"type": "object", "additionalProperties": True})
         if self.contract["memory"]:
             from .memory import Memory
@@ -673,7 +1197,7 @@ class Supervisor:
                 "repository_identity": self.repository_identity(), "goal": self.contract["task"]["objective"],
                 "constraints": self.contract["task"]["allowed_write_scopes"], "checkpoint": str(self.state["generation"]),
                 "active_task": self.state["task_id"], "failures": [f["signature"] for f in self.state["failure_history"]],
-                "important_files": self.contract["task"]["allowed_write_scopes"], "next_step": self.state["reason"],
+                "important_files": self.contract["task"]["allowed_write_scopes"], "next_step": report["reason"],
                 "evidence_ids": [c["evidence_id"] for c in self.state["acceptance"] if c["evidence_id"]],
                 "session_id": self.state["thread_id"], "attempts_used": self.state["attempts_used"],
                 "tokens_reported": self.state["metrics"]["input_tokens"], "updated_at": now(), "provenance": current})

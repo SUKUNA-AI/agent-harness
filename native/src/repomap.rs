@@ -5,7 +5,7 @@
 //! SQLite/cache, lexer fallback or TreeContext rendering is copied.
 //! https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/repomap.py
 
-use crate::snapshot::{git_head_until, read_regular, source_paths_until};
+use crate::snapshot::{git_head_until, read_regular_until, source_paths_until};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -878,7 +878,7 @@ pub fn run(request: &Value) -> Result<Value, String> {
             scan.reasons.insert("max_total_bytes".to_owned());
             break;
         }
-        let data = match read_regular(&source_path, limit as u64) {
+        let data = match read_regular_until(&source_path, limit as u64,deadline) {
             Ok(data) => data,
             Err(_) => {
                 scan.issue(&path, "unreadable_changed_or_byte_limit");

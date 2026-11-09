@@ -81,10 +81,10 @@ class RunnerAuditTests(unittest.TestCase):
         self.assertEqual("passed", result["status"])
         self.assertEqual("accepted", verdict["verdict"])
 
-    def test_required_regex_means_at_least_one_passed_match(self):
+    def test_required_regex_requires_every_matching_case_to_pass(self):
         result, verdict = self.junit('<testsuite><testcase name="family_one"><skipped/></testcase><testcase name="family_two"/></testsuite>', ["family_"])
-        self.assertEqual("passed", result["status"])
-        self.assertEqual("accepted", verdict["verdict"])
+        self.assertEqual("failed", result["status"])
+        self.assertEqual("rejected", verdict["verdict"])
 
     def test_failed_case_still_rejects_report_with_another_matching_pass(self):
         result, verdict = self.junit('<testsuite><testcase name="family_one"><failure/></testcase><testcase name="family_two"/></testsuite>', ["family_"])

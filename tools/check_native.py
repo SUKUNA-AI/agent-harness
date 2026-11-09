@@ -25,10 +25,70 @@ def git(root, *args):
     return subprocess.check_output(["git", "-C", str(root), *args], stderr=subprocess.PIPE).decode().strip()
 
 
+
+def snapshot_difference(expected, observed, *, max_rows=8, max_nodes=10000, max_bytes=4096):
+    """Bounded synthetic-fixture diagnostic; never dump an entire manifest."""
+    rows, examined, truncated = [], 0, False
+    missing = object()
+    priority = ("root_binding", "cwd", "snapshot_scheme_version", "topology_policy", "content_digest", "digest")
+
+    def shown(value):
+        if value is missing:
+            return {"missing": True}
+        if isinstance(value, (dict, list)):
+            return {"type": type(value).__name__, "length": len(value)}
+        if isinstance(value, str) and len(value) > 160:
+            return {"prefix": value[:160], "characters": len(value), "truncated": True}
+        return value
+
+    def visit(left, right, path, depth=0):
+        nonlocal examined, truncated
+        if len(rows) >= max_rows or examined >= max_nodes or depth > 32:
+            truncated = True
+            return
+        examined += 1
+        if type(left) is dict and type(right) is dict:
+            def keys():
+                for key in priority:
+                    if key in left or key in right:
+                        yield key
+                for key in left:
+                    if key not in priority:
+                        yield key
+                for key in right:
+                    if key not in left and key not in priority:
+                        yield key
+            for key in keys():
+                if len(rows) >= max_rows or examined >= max_nodes:
+                    truncated = True
+                    break
+                visit(left.get(key, missing), right.get(key, missing),
+                      path + "/" + str(key).replace("~", "~0").replace("/", "~1"), depth + 1)
+        elif type(left) is list and type(right) is list:
+            for index in range(max(len(left), len(right))):
+                if len(rows) >= max_rows or examined >= max_nodes:
+                    truncated = True
+                    break
+                visit(left[index] if index < len(left) else missing,
+                      right[index] if index < len(right) else missing, path + "/" + str(index), depth + 1)
+        elif left is missing or right is missing or type(left) is not type(right) or left != right:
+            rows.append({"path": path[:256], "path_truncated": len(path) > 256,
+                         "python_expected": shown(left), "rust_observed": shown(right)})
+
+    visit(expected, observed, "")
+    value = {"schema_version": 1, "differences": rows, "truncated": truncated, "nodes_examined": examined}
+    while rows and len(json.dumps(value, ensure_ascii=True, separators=(",", ":")).encode()) > max_bytes:
+        rows.pop()
+        value["truncated"] = True
+    return value
+
 def parity(contract):
     expected = snapshot_python(contract)
     observed = invoke({"operation": "snapshot", "contract": contract})
-    assert canonical(observed) == canonical(expected), "Rust/Python manifest or digest differs"
+    if canonical(observed) != canonical(expected):
+        diagnostic = snapshot_difference(expected, observed)
+        raise AssertionError("Rust/Python manifest or digest differs: "
+                             + json.dumps(diagnostic, ensure_ascii=True, separators=(",", ":")))
     return observed
 
 

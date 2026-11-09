@@ -33,6 +33,54 @@ Managed recovery проверяет worktree ownership до model resume. Неи
 creation identity, чужой сохранённый cwd или orphan child не освобождают slot.
 При token budget неизвестный interrupted usage блокирует продолжение.
 
+## Snapshot и физическое владение
+
+Snapshot scheme v2 проверяет ancestors каждого inventory path, в том числе
+tracked file под ignored parent. Default запрещает root alias и intermediate
+symlink/junction/reparse; разрешённый leaf symlink представлен literal target,
+а не bytes внешнего regular file. Python/POSIX reads используют nofollow dirfd
+и повторную identity-проверку. Неподдержанная capability должна дать отказ.
+
+`root_binding` хранит локальные device/inode, а полный `digest` связывает его
+с manifest. `content_digest` исключает `root_binding`, но сохраняет cwd, Git
+metadata, inventory policy и exclusions. Поэтому он не является автоматически
+переносимым cross-worktree идентификатором; отдельные file SHA-256 характеризуют
+bytes и не передают владение checkout или действительность evidence.
+Смена snapshot scheme требует новой проверки; старые receipts не переписываются.
+
+Installer проверяет весь target plan и сохраняет parent bindings. Его
+write/replace/unlink привязаны к inspected directories; byte-identical target
+после parent retarget не получает ownership по совпадению содержимого.
+Компенсация проверяет metadata и сохраняет backups/journal при неполном restore.
+Linux descriptor metadata path требует `/proc/self/fd`; Windows handles и ACL
+нуждаются в отдельной реальной платформенной квалификации.
+
+## Hooks и версии installation state
+
+Управляемые `hooks.json` и launcher обратимы через общий installation protocol.
+Идентичный payload устанавливается идемпотентно; unmanaged/duplicate harness
+handler отклоняется без удаления чужих handlers. Входное событие передаётся
+через stdin статическому launcher, а не интерполируется в shell code.
+Installer сохраняет client trust state. `configured`, trusted handler,
+фактический callback и поддержанный lifecycle проверяются отдельно; direct
+Python smoke не является actual Codex qualification. Новый payload требует
+штатного review и новой сессии, без обещания hot reload.
+
+Новые install manifests используют schema v2; legacy v1 остаётся читаемым без
+перезаписи цепочки. Старый normal active reader отвергает v2. Прямой вызов
+старого бинарника с `--manifest` не получает ретроактивной защиты и не является
+поддержанным downgrade. Пользователь сохраняет старые пакеты и backups для
+разбора recovery, не ослабляя version checks ради повторного apply.
+
+## Reports как недоверенные данные
+
+JUnit profile `junit-harness-v2` учитывает suite errors и проверяет согласованность
+aggregate counts; неизвестные структуры, namespaces, DTD/entities и превышение
+bounds не дают PASS. Required pattern требует успеха всех совпавших случаев.
+`reports.equals` — единственный явно открытый map внутри закрытого report
+контракта; duplicate keys, non-finite numbers и превышение bounds отклоняются.
+Подробные limits и JSON comparison semantics — в [приёмке](ACCEPTANCE.md#reports-json-types-и-skipped-cases).
+
 ## Остаточные ограничения
 
 Worktree и cooperating locks не являются OS sandbox против другого процесса

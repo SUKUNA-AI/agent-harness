@@ -1,0 +1,183 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "record_type": {
+      "const": "work_state_migration_plan"
+    },
+    "source_version": {
+      "const": 2
+    },
+    "destination_version": {
+      "const": 3
+    },
+    "run_id": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "task_id": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "expected_generation": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "targets": {
+      "type": "array",
+      "maxItems": 512,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "path",
+          "sha256",
+          "bytes"
+        ]
+      }
+    },
+    "contract_path": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "contract_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "source_state_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "source_journal_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "source_snapshots": {
+      "type": "array",
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "root": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "scheme": {
+            "const": 2
+          }
+        },
+        "required": [
+          "root",
+          "digest",
+          "scheme"
+        ]
+      }
+    },
+    "absent_artifacts": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "string",
+        "maxLength": 512
+      }
+    },
+    "material_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "target_policy_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "output_schema_ref": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "path",
+            "sha256"
+          ]
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "digest",
+        "output_schema_ref"
+      ]
+    },
+    "usage_policy": {
+      "const": "preserve_source_trust"
+    },
+    "assessment": {
+      "const": "unassessed"
+    },
+    "downgrade_policy": {
+      "const": "v2_writer_refuses_v3"
+    }
+  },
+  "required": [
+    "schema_version",
+    "record_type",
+    "source_version",
+    "destination_version",
+    "run_id",
+    "task_id",
+    "expected_generation",
+    "targets",
+    "contract_path",
+    "contract_digest",
+    "source_state_digest",
+    "source_journal_hash",
+    "source_snapshots",
+    "absent_artifacts",
+    "material_digest",
+    "target_policy_ref",
+    "usage_policy",
+    "assessment",
+    "downgrade_policy"
+  ]
+}

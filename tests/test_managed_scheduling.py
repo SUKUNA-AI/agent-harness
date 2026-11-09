@@ -10,7 +10,7 @@ from unittest.mock import patch as environment_patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from agent_harness.core import HarnessError
-from agent_harness.codex_execution import CodexAdapter
+from managed_process_fixture import BoundFixtureCodexAdapter as CodexAdapter, bound_fake_script
 from agent_harness.strict_yaml import dump
 from agent_harness.work_contract import normalize
 from agent_harness.scheduling import Scheduler, validate_plan
@@ -82,7 +82,7 @@ class ManagedSchedulingTests(unittest.TestCase):
             for args in (["init"], ["add", "."], ["-c", "user.name=Fixture", "-c", "user.email=fixture@localhost", "commit", "-m", "fixture"]):
                 subprocess.run(["git", *args], cwd=source, check=True, capture_output=True)
             fake = root / "fake.py"
-            fake.write_text(FAKE)
+            fake.write_text(bound_fake_script(FAKE))
             task, plan = root / "task.yaml", root / "plan.yaml"
             dump(task, self.contract)
             dump(plan, self.plan)
@@ -96,7 +96,7 @@ class ManagedSchedulingTests(unittest.TestCase):
             self.assertEqual((source / "left.py").read_text(), "VALUE = 0\n")
             self.assertEqual(result["metrics"]["managed_spawns"], 2)
             self.assertGreater(result["metrics"]["spawn_seconds"], 0)
-            self.assertEqual(result["metrics"]["spawn_measurements"], 3)
+            self.assertEqual(result["metrics"]["spawn_measurements"], 4)
             self.assertGreater(result["metrics"]["worktree_seconds"], 0)
             agents = [supervisor.store.read("agents/" + name + ".yaml", "agent-state.schema.json") for name in ("left", "right")]
             self.assertNotEqual(agents[0]["worktree"]["path"], agents[1]["worktree"]["path"])
@@ -137,7 +137,7 @@ class ManagedSchedulingTests(unittest.TestCase):
             self.assertEqual(supervisor.state["metrics"]["input_tokens"], 5)
             self.assertEqual(supervisor.state["process_status"], "completed")
 
-    def test_interrupted_wave_cannot_reset_a_configured_token_budget(self):
+    def test_interrupted_wave_with_completion_receipts_preserves_configured_token_budget(self):
         from unittest.mock import patch
         from agent_harness.agent_lifecycle import Worktrees
         class FakeManaged(CodexAdapter):
@@ -154,7 +154,7 @@ class ManagedSchedulingTests(unittest.TestCase):
             for args in (["init"], ["add", "."], ["-c", "user.name=Fixture", "-c", "user.email=fixture@localhost", "commit", "-m", "fixture"]):
                 subprocess.run(["git", *args], cwd=source, check=True, capture_output=True)
             fake = root / "fake.py"
-            fake.write_text(FAKE)
+            fake.write_text(bound_fake_script(FAKE))
             contract = deepcopy(self.contract)
             contract["budgets"]["max_tokens"] = 10000
             task, plan = root / "task.yaml", root / "plan.yaml"
@@ -164,13 +164,18 @@ class ManagedSchedulingTests(unittest.TestCase):
                 state_dir=root / "state", adapter=adapter)
             supervisor.plan_input = str(plan)
             with patch.object(Worktrees, "integrate", side_effect=ControllerCrash):
-                with self.assertRaises(ControllerCrash):
-                    supervisor.start()
+                try:
+                    unexpected = supervisor.start()
+                except ControllerCrash:
+                    pass
+                else:
+                    self.fail('Integration fault was not reached: ' + repr(unexpected))
             calls = fake.with_suffix(".calls").read_bytes()
             result = Supervisor(supervisor.path, adapter=adapter).resume()
-            self.assertEqual(result["status"], "BLOCKED_ENVIRONMENT")
-            self.assertIn("usage receipts", result["reason"])
-            self.assertEqual(fake.with_suffix(".calls").read_bytes(), calls)
+            self.assertEqual(result["status"], "ACCEPTED", result)
+            self.assertEqual((result["metrics"]["input_tokens"], result["metrics"]["output_tokens"]), (40, 12))
+            self.assertEqual(fake.with_suffix(".calls").read_text().splitlines(), ["exec"] * 4)
+            self.assertTrue(fake.with_suffix(".calls").read_bytes().startswith(calls))
 
     def test_acceptance_cwd_and_internal_paths_are_rebased_to_staging(self):
         from agent_harness.work_contract import legacy_contract
@@ -231,7 +236,7 @@ class ManagedSchedulingTests(unittest.TestCase):
             for args in (["init"], ["add", "."], ["-c", "user.name=Fixture", "-c", "user.email=fixture@localhost", "commit", "-m", "fixture"]):
                 subprocess.run(["git", *args], cwd=source, check=True, capture_output=True)
             fake = root / "fake.py"
-            fake.write_text(FAKE)
+            fake.write_text(bound_fake_script(FAKE))
             task, plan = root / "task.yaml", root / "plan.yaml"
             dump(task, self.contract); dump(plan, self.plan)
             adapter = FakeManaged((sys.executable, str(fake)))
@@ -243,16 +248,29 @@ class ManagedSchedulingTests(unittest.TestCase):
                 original(trees, staging, patch_bytes)
                 raise ControllerCrash()
             with patch.object(Worktrees, "integrate", crash_after_write):
-                with self.assertRaises(ControllerCrash):
-                    supervisor.start()
+                try:
+                    unexpected = supervisor.start()
+                except ControllerCrash:
+                    pass
+                else:
+                    self.fail('Integration fault was not reached: ' + repr(unexpected))
             recovered = Supervisor(supervisor.path, adapter=adapter)
             result = recovered.resume()
-            self.assertEqual(result["status"], "ACCEPTED", result)
+            # Report the recovery verdict before callback counts so a blocked
+            # Windows run exposes its actual cause, not a secondary count.
+            reason = str(result.get("reason", ""))
+            recovery_detail = {"status": result.get("status"), "reason": reason[:1536],
+                "reason_truncated": len(reason) > 1536, "attempt": result.get("attempt"),
+                "bound_children": len(adapter.bound_children)}
+            if result["status"] != "ACCEPTED":
+                recovery_detail["fixture_transport"] = adapter.failure_summary(result)
+            self.assertEqual(result["status"], "ACCEPTED", recovery_detail)
+            self.assertGreaterEqual(len(adapter.bound_children), 4, recovery_detail)
             self.assertTrue(result["evidence_current"])
             agents = [recovered.store.read("agents/" + name + ".yaml", "agent-state.schema.json") for name in ("left", "right")]
-            self.assertTrue(all(row["attempts_used"] == 2 for row in agents))
+            self.assertTrue(all(row["attempts_used"] == 1 for row in agents))
             self.assertNotEqual(agents[0]["thread_id"], agents[1]["thread_id"])
-            self.assertEqual(fake.with_suffix(".calls").read_text().splitlines().count("resume"), 2)
+            self.assertEqual(fake.with_suffix(".calls").read_text().splitlines().count("resume"), 0)
             self.assertEqual((source / "left.py").read_text(), "VALUE = 0\n")
 
     def test_recovery_rejects_foreign_worker_or_staging_before_any_model_spawn(self):
@@ -277,8 +295,8 @@ class ManagedSchedulingTests(unittest.TestCase):
                 # Exact session selection does not itself authorize a cwd. This
                 # fake honors the supplied ID, like a restored session adapter;
                 # the supervisor must prevent foreign writes before invocation.
-                fake.write_text(FAKE.replace("if 'resume' in args: assert args[args.index('resume')+1]==sid",
-                                             "if 'resume' in args: sid=args[args.index('resume')+1]"))
+                fake.write_text(bound_fake_script(FAKE.replace("if 'resume' in args: assert args[args.index('resume')+1]==sid",
+                                             "if 'resume' in args: sid=args[args.index('resume')+1]")))
                 task, plan = root / "task.yaml", root / "plan.yaml"
                 dump(task, self.contract); dump(plan, self.plan)
                 adapter = FakeManaged((sys.executable, str(fake)))
@@ -286,8 +304,12 @@ class ManagedSchedulingTests(unittest.TestCase):
                                                state_dir=root / "state", adapter=adapter)
                 supervisor.plan_input = str(plan)
                 with patch.object(Worktrees, "integrate", side_effect=ControllerCrash):
-                    with self.assertRaises(ControllerCrash):
-                        supervisor.start()
+                    try:
+                        unexpected = supervisor.start()
+                    except ControllerCrash:
+                        pass
+                    else:
+                        self.fail("Expected integration fault; observed " + repr(adapter.failure_summary(unexpected)))
                 calls_before = fake.with_suffix(".calls").read_bytes()
                 target = "integration.yaml" if corrupt == "staging" else "agents/left.yaml"
                 record = supervisor.store.read(target)
@@ -302,3 +324,51 @@ class ManagedSchedulingTests(unittest.TestCase):
                     Supervisor(supervisor.path, adapter=adapter).resume()
                 self.assertEqual(fake.with_suffix(".calls").read_bytes(), calls_before)
                 self.assertEqual((foreign / "left.py").read_text(), "VALUE = 0\n")
+
+    def test_fixture_diagnostic_keeps_the_exact_ownership_error(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fake = root / "fake.py"
+            fake.write_text(bound_fake_script(FAKE), encoding="utf-8")
+            adapter = CodexAdapter((sys.executable, str(fake)))
+            def reject(process):
+                raise HarnessError("synthetic exact identity refusal")
+            result = adapter.run("left", cwd=str(root), timeout=5, write_authorized=True,
+                allow_non_git=True, on_process=reject)
+            summary = adapter.failure_summary(result)
+            self.assertFalse(result["outcome_known"], summary)
+            self.assertEqual(summary["transports"][0]["bind_error"],
+                "HarnessError: synthetic exact identity refusal")
+            self.assertLess(len(repr(summary)), 8192)
+
+    def test_all_recovery_variants_keep_child_live_during_delayed_bind(self):
+        import time
+        from agent_harness.agent_lifecycle import ModelLease
+        from agent_harness.core import identity_alive
+        original = ModelLease.bind
+        delayed = []
+        def delayed_left_bind(lease, process):
+            if lease.value['task_id'] == 'left':
+                delayed.append(process['identity'])
+                # On the old raw fake this waits for natural exit, then the
+                # real bind correctly refuses it. The handshake child remains
+                # live through the entire delay and real ownership callback.
+                end = time.monotonic() + 2
+                while identity_alive(process['identity']) and time.monotonic() < end:
+                    time.sleep(0.001)
+            return original(lease, process)
+        methods = (
+            'test_interrupted_wave_with_completion_receipts_preserves_configured_token_budget',
+            'test_managed_recovery_resumes_exact_workers_and_reconciles_already_applied_patch',
+            'test_recovery_rejects_foreign_worker_or_staging_before_any_model_spawn',
+        )
+        with environment_patch.object(ModelLease, 'bind', delayed_left_bind):
+            for method in methods:
+                with self.subTest(recovery=method):
+                    case = ManagedSchedulingTests(method)
+                    try:
+                        case.setUp()
+                        getattr(case, method)()
+                    finally:
+                        case.doCleanups()
+        self.assertEqual(len(delayed), 5)

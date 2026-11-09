@@ -250,6 +250,12 @@ def dumps(value, schema=None):
         validate(value, schema)
     # SafeDumper emits no aliases because object sharing has no state semantics.
     class Dumper(yaml.SafeDumper):
+        # Strings such as opaque Windows file IDs (digits + "e" + digits)
+        # must be quoted according to the reader's JSON scalar policy. The
+        # stock YAML resolver disagrees about exponent notation and could
+        # otherwise turn a valid string into a float, including infinity.
+        yaml_implicit_resolvers = _Loader.yaml_implicit_resolvers
+
         def ignore_aliases(self, data):
             return True
     result = yaml.dump(value, Dumper=Dumper, allow_unicode=True, sort_keys=True, default_flow_style=False)

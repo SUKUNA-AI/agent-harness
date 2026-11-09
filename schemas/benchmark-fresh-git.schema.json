@@ -1,0 +1,85 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "record_type": {
+      "const": "benchmark_fresh_git"
+    },
+    "root": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "initial_head": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}([a-f0-9]{24})?$"
+    },
+    "initial_tree": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}([a-f0-9]{24})?$"
+    },
+    "git_binding": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "device": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "inode": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "path",
+          "device",
+          "inode"
+        ]
+      }
+    },
+    "root_binding": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "device": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "inode": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "path",
+          "device",
+          "inode"
+        ]
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "record_type",
+    "root",
+    "initial_head",
+    "initial_tree",
+    "git_binding",
+    "root_binding"
+  ]
+}

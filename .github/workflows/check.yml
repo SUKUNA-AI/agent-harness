@@ -11,31 +11,61 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-latest]
         python: ['3.11', '3.13']
+        # Keep the full suite on each platform below the hosted job time limit.
+        shard: [1, 2, 3, 4]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0 # actual baseline-writer migration regression
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python }}
       - run: python tools/release_check.py
-      - run: python tools/run_tests.py
+      - run: python tools/run_tests.py --shard ${{ matrix.shard }} --shards 4
       - run: python -m pip install --disable-pip-version-check "mcp==2.3.0"
       - run: python -I -B tools/check_mcp.py
   native:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        include:
+          - {os: ubuntu-latest, python: '3.13'}
+          - {os: windows-latest, python: '3.11'}
+          - {os: windows-latest, python: '3.13'}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0 # actual baseline-writer migration regression
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: '3.13'
+          python-version: ${{ matrix.python }}
+      - name: Early rollback, recovery and benchmark contracts
+        shell: python {0}
+        run: |
+          import sys
+          import unittest
+          sys.path[:0] = ["src", "tests"]
+          names = [
+              "test_boundary_spec.InstallationBoundaryTests.test_hooks_foreign_handler_idempotence_and_rollback",
+              "test_hook_adoption.HookAdoptionTests.test_addressed_rollback_preserves_new_user_group_and_restores_legacy",
+              "test_execution_durability.ExecutionDurabilityTests.test_successful_terminal_event_without_process_tree_cleanup_cannot_integrate",
+              "test_execution_durability.ExecutionDurabilityTests.test_cleanup_fixture_does_not_mask_pre_exec_failure",
+              "test_benchmark_runner.BenchmarkRunnerTests.test_full_cohort_executes_existing_engines_and_never_replays_completed_trials",
+              "test_managed_scheduling.ManagedSchedulingTests.test_managed_recovery_resumes_exact_workers_and_reconciles_already_applied_patch",
+              "test_managed_scheduling.ManagedSchedulingTests.test_fixture_diagnostic_keeps_the_exact_ownership_error",
+              "test_execution_durability.ExecutionDurabilityTests.test_integration_faults_reconcile_pre_post_and_completion_without_replay",
+              "test_managed_scheduling.ManagedSchedulingTests.test_recovery_rejects_foreign_worker_or_staging_before_any_model_spawn",
+              "test_managed_scheduling.ManagedSchedulingTests.test_all_recovery_variants_keep_child_live_during_delayed_bind",
+              "test_managed_process_fixture.ManagedFixturePublicationTests.test_real_child_consumes_only_a_closed_binding_marker",
+              "test_work_cli.WorkCLITests.test_cli_stop_cancels_live_owned_process_and_watch_reports_failure",
+              "test_work_cli.WorkCLITests.test_cli_cancellation_fixture_remains_live_during_a_slow_stop_request",
+          ]
+          result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromNames(names))
+          raise SystemExit(not result.wasSuccessful())
       - run: rustup toolchain install 1.90.0 --profile minimal
       - run: cargo +1.90.0 test --release --manifest-path native/Cargo.toml --locked
         working-directory: .
@@ -49,7 +79,7 @@ jobs:
       - run: python tools/release_check.py
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: native-${{ runner.os }}
+          name: native-${{ runner.os }}-${{ matrix.python }}
           path: bin/
           if-no-files-found: error
           retention-days: 30

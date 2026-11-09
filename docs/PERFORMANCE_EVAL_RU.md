@@ -122,3 +122,74 @@ limitations. Required `not_run`, `skipped`, `unknown` не являются pass
 ограничивает суммарные токены задачи. Budget enforcement и наблюдаемость
 usage описывайте по актуальному runtime; не выдавайте schema field за
 гарантированный hard backend limit.
+
+## Applicability и portfolio correction candidate
+
+Alias installed/null fingerprint не разрешает automatic TOON. Receipt v2
+связывает route/config, client binary/build, evaluator/template, data/shape и
+complete samples с отдельными уникальными session IDs. Synthetic statistics
+не включают production selection; complete raw evidence проверяется при reuse.
+Срок — один день в observed identity scope; скрытые server-side model updates
+не объявляются детектируемыми. Render требует исходный `--evidence-dir`.
+
+Offline `work benchmark` валидирует frozen local portfolio, задаёт paired
+schedule и считает полные denominators, missing/failed outcomes, usage coverage
+и task-cluster uncertainty. Qualified model runner, official pinned assets,
+operational isolation, approved total budget и реальные runs остаются отдельным
+незавершённым этапом; synthetic report не подтверждает экономию.
+[Полные ограничения](STABILIZATION_RU.md).
+
+Report сохраняет `accepted_pairs.per_task`: каждый task/repeat, исходы обеих
+ветвей, наблюдённые и полные tokens, absolute/relative savings и причину
+неопределимого процента. Failed/missing/partial observations остаются видны.
+`costs` отдельно суммирует наблюдённые затраты принятых в обеих ветвях пар с
+coverage; `complete_usage_costs` содержит сопоставимые полные затраты.
+Нулевой baseline сохраняется в этих totals, его индивидуальный процент — null.
+Отношение totals обозначено `relative_token_saving_of_totals`; среднее repeats
+по task и median task clusters имеют отдельные поля. `full_cohort` включает
+также неудачные запуски и не заменяется выборкой accepted pairs.
+
+Format resolver подтверждает только закрытый профиль isolated table lookup.
+Unknown config sections, dynamic hooks/MCP/plugins, ambient AGENTS или explicit
+project cwd не имеют здесь доказанной полной closure и отключают automatic
+positive applicability. Данные не читаются для извлечения private prompt; для
+такого профиля остаётся JSON. Features/agent scalar settings включены в fingerprint.
+
+## Persisted cohort driver API
+
+[`BenchmarkRunner`](../src/agent_harness/benchmark_runner.py) принимает frozen
+manifest/assets, отдельный private run store, подготовленный adapter и explicit
+`BudgetAuthorization(manifest_digest, authorization_id, max_total_tokens, deadline,
+measurement_kind)`. `create`, `advance`, `run`, `status`, `report` используют
+существующий journal, Supervisor для harness arms и CodexAdapter для plain arms.
+Полное расписание и reservations фиксируются до dispatch. Unknown solve/grade
+блокирует replay; complete receipts повторно не запускают модель. Failed/timeout
+trials остаются в первоначальном знаменателе. Caller authority не читается из
+недоверенного поля manifest `approved`.
+
+В текущей поставке production isolation adapters не зарегистрированы: обычный
+наблюдаемый model run возвращает `ENVIRONMENT_ISOLATION_UNAVAILABLE` до dispatch.
+Contained synthetic controls проверяют driver interface и не квалифицируют
+реальный filesystem/network/evaluator boundary. Для actual cohort нужен отдельно
+проверенный поддержанный environment adapter; пустой registry нельзя заполнять
+caller flag или текстовым заверением. Budget/hard-cap guarantees остаются разными.
+
+Trial receipts v2 содержат nullable `metrics` и `phase_seconds`; v1 читаются
+по прежней закрытой схеме. Ненаблюдаемые manual interventions, пропущенные узлы,
+duplicate writes и overhead имеют null/unavailable. Ненулевое значение и
+наблюдённый ноль требуют отдельного metric receipt с trial/manifest binding,
+producer scope и hashes исходных instrumentation records. Report проверяет эти
+ссылки и показывает unknown/partial coverage отдельно. Байтовая целостность
+метрик не квалифицирует producer или изоляцию среды.
+
+Текущие trial v1/v2 не содержат наблюдённую role-level model/effort map клиента.
+Поэтому observed matched comparison сохраняет descriptive costs, но возвращает
+`insufficient_data`/`matched_role_mapping_unavailable`. Равные policy hashes не
+доказывают одинаковое фактическое распределение reasoning. Synthetic accounting
+не является реальным causal comparison; package comparison имеет отдельный scope.
+
+Adapter может предоставить `independent_grade` для закрытой evaluator boundary.
+Этот callback — единственный путь данного grade dispatch: после его неизвестного
+исхода нет fallback на argv или повторного evaluator call. Старый pinned argv
+протокол сохранён для adapters без callback. Fault-controller hooks вызываются
+перед solve и после сохранения точного solve artifact; default их не создаёт.

@@ -31,6 +31,42 @@ cache closure и полнота query inventory — разные гаранти�
 
 ## Адресное чтение и продолжение
 
+### Общее файловое ядро Rust
+
+В Linux native snapshot и RepoMap используют [fs_read](../native/src/fs_read.rs).
+`read_bounded_until` удерживает handles всех ancestors, открывает ordinary file
+через no-follow/nonblocking open и сверяет pathname/descriptor identity.
+Проверяются limit+1 и второй content pass по тому же descriptor; hard cap
+bounded read — 16 MiB. `hash_regular_until` хеширует блоками по 64 KiB без
+загрузки всего файла; ограничения размера bounded read к snapshot hash не
+применяются. Deadline и cancellation проверяются между блоками. Флаг отмены
+задаётся через библиотечный `Control.cancelled`; существующие `*_until` consumers
+передают `None`. Новый wire cancel endpoint этим изменением не добавляется.
+
+Наблюдённая подмена ancestor, leaf, bytes или metadata даёт ошибку. Symlink,
+FIFO, device и socket не принимаются как ordinary file. POSIX backslash остаётся
+символом имени; неподдержанные spelling с ведущим `//`, `.` или `..` отклоняются
+до открытия. Это кооперативные проверки, а не OS sandbox или изоляция от любого
+same-user writer.
+
+Python `file_io` и правила context/secret scopes сохраняются. Новое strict API
+возвращает `UnsupportedPlatform` вне Linux; прежние Windows/macOS механизмы
+snapshot/RepoMap сохранены и не получают новую qualification автоматически.
+Snapshot/digest scheme и literal symlink entries snapshot не изменены.
+
+Compiled conformance gate из корня checkout:
+
+```sh
+cargo test --release --manifest-path native/Cargo.toml --locked --offline
+cargo build --release --manifest-path native/Cargo.toml --example fs_probe --locked --offline
+python tools/check_native_fs.py --probe native/target/release/examples/fs_probe
+```
+
+Последний путь соответствует default Cargo target directory. При явном
+`CARGO_TARGET_DIR` используйте его `release/examples/fs_probe`. Это development
+probe публичной Rust library; он не устанавливает профиль и не является новым
+wire endpoint.
+
 ```text
 agent-harness context read --root . --file src/service.py --start-line 40 --lines 80 --max-bytes 8192
 agent-harness context read --root . --file src/service.py --offset 4096 --expect-sha256 <actual-sha256> --max-bytes 8192
@@ -114,6 +150,12 @@ RepoMap требует native binary даже при `AGENT_HARNESS_BACKEND=pyth
 второго graph runtime или постоянного индекса.
 
 ## Native backend и маршрутизация
+
+Следующая policy управляет snapshot. Для LSP отдельно доступен явный
+`AGENT_HARNESS_LSP_BACKEND=native` на Linux x86_64/glibc; default — Python.
+Tokio helper обслуживает одну полную Session без нового сервиса, а Python
+сохраняет semantic policy. Limits, cleanup и rollback backend — в
+[LSP reference](LSP_RU.md). Это не перенос runner, Codex transport или installer.
 
 ```text
 agent-harness native status

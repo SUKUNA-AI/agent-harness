@@ -1,0 +1,61 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "record_type": {
+      "const": "benchmark_state_policy"
+    },
+    "trial_checkout": {
+      "const": "fresh"
+    },
+    "client_home": {
+      "const": "per_trial_per_arm"
+    },
+    "memory_cohort": {
+      "enum": [
+        "cold",
+        "warm_repeated_task"
+      ]
+    },
+    "peer_state": {
+      "const": "deny"
+    },
+    "provider_prompt_cache": {
+      "enum": [
+        "uncontrolled_observable_limitation",
+        "qualified_control"
+      ]
+    },
+    "reset_profile_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "path",
+        "sha256"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "record_type",
+    "trial_checkout",
+    "client_home",
+    "memory_cohort",
+    "peer_state",
+    "provider_prompt_cache",
+    "reset_profile_ref"
+  ]
+}

@@ -1,4 +1,4 @@
-# Справочник CLI — 1.5.1
+# Справочник CLI — 1.6.0
 
 Этот справочник описывает текущие аргументы парсера и значения по умолчанию.
 Практический полный сценарий — [эксплуатация](OPERATIONS.md#полный-локальный-пример),
@@ -18,7 +18,9 @@
 абсолютным каталогом; пути argv передаются отдельными строками, без shell.
 Relative POSIX paths в `context`/`code` интерпретируются относительно `--root`.
 
-Успешные результаты и отрицательные verdict/results — JSON в stdout. Обработанная
+Core/query команды обычно возвращают JSON в stdout. `work` поддерживает
+`--format text|yaml|json`, по умолчанию `text`: status/report печатают строковую
+сводку; отдельные metadata replies могут оставаться JSON. Обработанная
 ошибка — JSON в stderr с exit 2. Ошибки самого `argparse`, включая неизвестный флаг,
 также имеют exit 2, но используют обычный текст usage. Установочные commands используют собственный JSON output: в том числе blocked/error
 печатаются в stdout. Build-команда native передаёт вывод build script и его exit
@@ -42,13 +44,15 @@ code. Полный managed JSON обычно форматирован;
 
 | Команда | Аргументы и действие |
 | --- | --- |
-| `work start` | `--contract F`; `--cwd` default current directory; optional `--run-dir`, `--state-dir`, `--codex`, `--plan`, `--native-disabled-proof`, `--format text\|yaml\|json` |
+| `work start` | `--contract F`; `--cwd` default current directory; optional `--run-dir`, `--state-dir`, `--codex`, `--plan`, `--native-disabled-proof`, `--max-planning-rounds`, `--format text\|yaml\|json` |
 | `work status` | `--run-dir P`, optional `--summary`, `--verify-evidence`, `--format` |
 | `work report` | `--run-dir P`, `--format`; сверяет актуальность evidence |
 | `work watch` | `--run-dir P`; interval2s, timeout3600s, без model calls |
-| `work resume` | `--run-dir P`; optional `--repair-journal`, `--new-attempt REASON`, `--codex`; original budgets сохраняются |
+| `work resume` | `--run-dir P`; optional `--repair-journal`, `--new-attempt REASON`, `--codex`, `--plan F`, `--native-disabled-proof F`; original budgets сохраняются |
 | `work stop` | `--run-dir P`, optional `--reason`; durable request, exact owned process cancellation |
 
+В подкомандах `work`, где эти flags доступны, `--state-dir` задаёт global state
+registry, а `--format` выбирает `text`, `yaml` или `json` с default `text`.
 State directory по умолчанию берётся из установленного machine pointer, затем
 platform state path. Новый run по умолчанию получает UUID под `state/runs`.
 Путь global registry сохраняется в state; несовместимый override при resume
@@ -59,7 +63,8 @@ accepted task в проверенном report.
 
 Contract: [work schema](../schemas/work-contract.schema.json). Defaults:
 max_attempts3 (initial edit включён), managed concurrency1, max_wall_seconds7200,
-turn_timeout_seconds1800, mode native, memory false, ledger inform. Global cap
+turn_timeout_seconds1800, mode native, ledger inform. Default `memory` — `false`
+для contract v1 и `true` для contract v2; явное значение сохраняется. Global cap
 managed sessions5; contract может понизить до1. Max tokens проверяется по native
 reported usage на границах turns, не внутри скрытого model runtime.
 
@@ -85,7 +90,7 @@ cwd должен находиться внутри source checkout; внутре
 python tools/harness.py work ledger --help
 python tools/harness.py work memory --help
 python tools/harness.py work format-bench --input TABLE.yaml --real-codex --repeats 5 --output BENCH.yaml --evidence-dir /absolute/private/eval
-python tools/harness.py work format-bench --input TABLE.yaml --render --evaluation BENCH.yaml
+python tools/harness.py work format-bench --input TABLE.yaml --render --evaluation BENCH.yaml --evidence-dir /absolute/private/eval
 python tools/harness.py repomap related-tests --root /absolute/repo --target src/auth.py --revision HEAD
 python tools/harness.py repomap trace-to-code --root /absolute/repo --trace-file TRACE.txt --revision HEAD
 python tools/harness.py repomap change-impact --root /absolute/repo --changed src/auth.py --revision HEAD
@@ -203,6 +208,12 @@ serialized packet при verify ограничен 4 MiB. Слишком бол�
 
 ## LSP code
 
+`AGENT_HARNESS_LSP_BACKEND=python|native` выбирает transport; default `python`.
+Native доступен только на квалифицированном Linux x86_64/glibc с проверенным
+bundle, без автоматического fallback после ошибки. Snapshot backend задаётся
+отдельно. Для rollback уберите переменную или задайте `python` перед новой
+Session; подробности — [LSP reference](LSP_RU.md).
+
 | Команда | Обязательные аргументы | Особенности |
 | --- | --- | --- |
 | `code doctor` | Нет; `--root .` default | Optional file/server/language/max-bytes; серверы не запускаются |
@@ -277,3 +288,74 @@ Optional MCP — отдельный read-only интерфейс metadata, см.
 [repomap_queries.py](../src/agent_harness/repomap_queries.py),
 [format_bench.py](../src/agent_harness/format_bench.py). При расхождении установленного
 `--help` с этой страницей сначала сверяйте версию/путь запускаемого пакета.
+
+## Correction candidate: новые операции
+
+`work migrate --run-dir RUN --expected-generation N` даёт dry-run. Apply требует
+`--apply --expected-plan-digest SHA`; `--recover OPERATION_ID` явно завершает
+pending migration. `work benchmark validate|schedule|report --manifest FILE
+--assets-root ROOT` проверяет offline portfolio; report требует `--trials FILE`.
+Это не solve runner и не разрешение на model расход.
+
+Для отдельного managed v2 → v3 plan-quality upgrade используется
+`work migrate --run-dir RUN --expected-generation N --target-version 3`.
+Apply добавляет `--apply --expected-plan-digest SHA`. Необязательный
+`--max-planning-rounds N` только уменьшает исходный предел; повторите его при
+apply, если он был в dry-run. Pending v3 завершается явно:
+`work migrate --run-dir RUN --expected-generation N --target-version 3 --recover OPERATION_ID`.
+Recovery использует frozen policy и не принимает новый round limit. Команда
+не запускает assessment или модель, сохраняет исходные counters/deadline и
+оставляет план unassessed до следующего допустимого resume. Default без target3
+сохраняет прежний v1 → v2 маршрут; автоматического upgrade при status/resume нет.
+Форматы, backups и barrier описаны в [миграции состояния](STATE_FORMATS_AND_MIGRATION_RU.md).
+Для нового managed contract2 run `work start --max-planning-rounds N` также
+только уменьшает исходный planning limit; для native/legacy contracts override
+отклоняется. Resume не принимает новый limit и сохраняет frozen policy.
+
+`agent-harness-session goal-update --session ID --goal TEXT --expected-generation N [--operation-id ID]`
+обновляет краткую active goal через CAS. `intake [--event-file FILE]` принимает
+allowlisted metadata (default stdin); `status --root ROOT` выводит coverage.
+`verify-result --session ID --run-dir CORE_RUN --expected-candidate SHA` связывает
+существующую current core приёмку с изолированным candidate.
+Memory `show ID --kind semantic|episode|short_term` разрешает typed namespace;
+`migrate|gc --scope KIND [--apply]` сохраняет originals и unresolved refs.
+Общие `--state`/`--max-bytes` у session передаются перед именем операции.
+
+Точные contracts и ограничения: [Стабилизация](STABILIZATION_RU.md).
+
+Deterministic facts: `work memory file-fact ID --root ROOT --path RELATIVE_FILE`
+и `symbol-fact ID --root ROOT --path MODULE.py --symbol NAME`; обе команды требуют
+`--store` и `--repository-identity`. `show --kind fact` читает их typed namespace.
+Они подтверждают точные bytes/координаты, а не поведение произвольного приложения.
+
+`agent-harness-session context-config` показывает private scan limits.
+Изменение через `--checkpoint-scan '{"max_records":64}'` или `--memory-scan JSON`
+требует `--expected-generation N`. Это не Codex model/permission/compaction settings.
+Общий session transport budget принимается только в диапазоне 2048–65536 bytes.
+Текущие goal bytes/digest/generation и constraints обязательны даже после source
+change. Когда required envelope не помещается, `BUDGET_TOO_SMALL` требует большего
+бюджета; обязательные поля не обрезаются. Interrupted generation publication
+блокирует resume с `SESSION_RECOVERY_REQUIRED`; сохраняйте private marker и
+immutable generation для repair. Полный протокол: [Memory и context](MEMORY_AND_CONTEXT_RU.md).
+
+`install --adopt-hook-sha256 SHA` явно принимает существующую single-handler
+SessionStart группу по SHA256 от installer canonical(group). По умолчанию чужой
+harness handler остаётся конфликтом; mixed groups отклоняются и с digest.
+
+Текущий SessionStart launcher возвращает bounded JSON с
+`hookSpecificOutput.hookEventName = "SessionStart"` и строкой
+`hookSpecificOutput.additionalContext`.
+Wire budget включает весь serialized JSON и escaping. Если required context
+не доставлен, hook сообщает degraded/not_delivered; успешный bootstrap не
+заявляется. SessionStart с `session_id`/`cwd` без agent fields может установить
+root scope, сохраняя observed agent identity как unknown. Config/JSON fixtures
+и `verify --native` не подтверждают fresh-client lifecycle или trust конкретного
+клиента: для этого нужна отдельная квалификация его версии и платформы.
+
+## Verified managed contracts
+
+`work start --contract <private-contract.yaml> --plan <private-plan.yaml> --cwd <source>` принимает согласованные contract/plan v2. В v2 обязательны mission/node_checks, у плана mission_digest/generation, а у узлов requirement_ids/checks.local/checks.integration. `work status --run-dir <run> --verify-evidence` показывает current requirements и проверяет raw node evidence. Без --plan managed v2 использует structured planner также при cap1. [Формат и ограничения](VERIFIED_TASK_FLOW_RU.md).
+
+`work mission-update --run-dir <run> --contract <new.yaml> --reason <explicit-change>` сохраняет immutable successor mission без model call. `work resume --run-dir <run> --plan <new-plan.yaml>` продолжает новое поколение, сохраняя старые budgets/usage и проверяя новую mission binding.
+
+`work benchmark task-flow-experiment prepare|verify|aggregate --help` подготавливает source-bound matched arms и агрегирует будущие independent reports без запуска моделей. [Входы, ограничения и примеры](TASK_FLOW_PREPARATION_RU.md).

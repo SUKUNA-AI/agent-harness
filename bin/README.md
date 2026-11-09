@@ -1,4 +1,4 @@
-# Native bundles — 1.5.1
+# Native bundles — 1.6.0
 
 Полный релизный ZIP содержит два готовых bundle: `linux-x86_64/` и
 `windows-x86_64/`. В Git хранится эта инструкция, а скомпилированные файлы
@@ -6,7 +6,7 @@
 
 | Файл внутри bundle | Назначение |
 | --- | --- |
-| `harness-native` или `harness-native.exe` | Rust scanner/snapshot и Tree-sitter RepoMap |
+| `harness-native` или `harness-native.exe` | Rust scanner/snapshot и Tree-sitter RepoMap; Linux opt-in LSP stream mode |
 | `build-info.json` | Версия, протокол, host target, toolchain, source digest, SHA-256 и размер бинарника |
 | `licenses/index.json` и notices | Закреплённые зависимости и их лицензии |
 
@@ -57,10 +57,57 @@ cross-compilation pipeline. Поставляемые платформы соби
 Другие архитектуры/ОС не заявляются проверенными лишь потому, что имя platform
 распознаётся кодом.
 
+## Library и явный wire v2
+
+Тот же Cargo package содержит library и executable. Обычный запуск executable
+сохраняет v1 snapshot/repomap/info и их digest semantics. Новый закрытый envelope
+выбирается только аргументами `--protocol-version 2`; сейчас его wire operation —
+`capabilities` версии 1. Файловое ядро используется внутри snapshot/RepoMap,
+отдельный filesystem/context/generic-process wire API не заявлен.
+
+Linux capabilities также объявляют `stream_modes` с `lsp-session` protocol v1.
+Это отдельный long-lived `--lsp-session <session-id>` entrypoint на Tokio, не
+one-shot operation v2. Его использует Python LSP adapter при явном
+`AGENT_HARNESS_LSP_BACKEND=native`; default остаётся Python. Session protocol,
+границы Linux/glibc qualification и возврат к Python описаны в
+[LSP reference](../docs/LSP_RU.md#лимиты-и-завершение-процесса).
+
+Пример для собранного Linux bundle из корня пакета:
+
+```sh
+printf '%s\n' '{"protocol_version":2,"operation":"capabilities","operation_version":1,"request_id":"discovery-1","budget":{"timeout_ms":1000,"max_response_bytes":4096},"input":{}}' | bin/linux-x86_64/harness-native --protocol-version 2
+```
+
+V2 отклоняет duplicate keys, неизвестные поля закрытого envelope, неверные типы,
+unsupported versions и превышение bounds. Request/response ограничены 65536
+bytes, depth — 32, nodes — 8192; response budget 1024–65536 включает финальный LF.
+Response связывает request ID и operation/version, сообщает package version,
+OS и architecture. Exact binary SHA/source fingerprint проверяются отдельно
+по `build-info.json`; эти сведения не являются аутентификацией автора.
+
+Поле `protocol_version: 1` существующего build-info описывает legacy entrypoint;
+его schema не переопределяется. Новые capabilities читаются явно у того же
+проверенного бинарника. Snapshot routing `auto` и порог 512 файлов сохранены.
+Linux [strict read/hash](../docs/CONTEXT_AND_NATIVE_RU.md#общее-файловое-ядро-rust)
+не переключает Python файловые consumers.
+
+При проверке поставки запускайте `tools/check_native.py` и
+`tools/check_native_build.py`; первый требует настоящий helper, второй проверяет
+сборку и сохранение предыдущего bundle при ошибке публикации. ZIP проверяется
+через `tools/build_release.py`, включая extracted install/verify/rollback smoke.
+Linux-only candidate не квалифицирует новый Windows/macOS код.
+
+Rollback программы выполняется согласованной копией package и bundle с
+проверенными hashes, после завершения активных операций. Не заменяйте один
+executable посреди Session и не редактируйте metadata ради совпадения версии.
+Эти read-only изменения не мигрируют durable state и не требуют изменения
+профиля Codex. Rollback установленного профиля остаётся отдельной операцией
+по [SETUP_RU](../SETUP_RU.md).
+
 ## Обновление и диагностика
 
 После обновления source checkout старый ignored `bin/` может остаться на месте.
-Для версии 1.5.1 пересоберите helper или используйте полный новый релизный ZIP.
+Пересоберите helper для версии исходников или используйте полный релизный ZIP.
 Не меняйте только поле version или manifest старого бинарника.
 
 | Состояние | Поведение |

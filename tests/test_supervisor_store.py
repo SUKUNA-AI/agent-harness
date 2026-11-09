@@ -18,6 +18,14 @@ SCHEMA = {"type": "object", "required": ["schema_version", "status"], "propertie
 
 
 class StrictYAMLTests(unittest.TestCase):
+    def test_numeric_looking_windows_file_ids_roundtrip_as_strings(self):
+        from agent_harness.strict_yaml import dumps, loads
+        for value in ('12e999', '960e0000000000000000000000000000', '1e12', '-2E3',
+                      'true', 'null', '2026-11-08', '0000123'):
+            with self.subTest(value=value):
+                document = {value: {'inode': value}}
+                self.assertEqual(loads(dumps(document)), document)
+
     def test_block_yaml_roundtrip_json_scalar_policy(self):
         value = sy.loads("schema_version: 1\nstatus: pending\ncount: 2\n", SCHEMA)
         self.assertEqual(value["count"], 2)
@@ -102,6 +110,139 @@ class SupervisorStoreTests(unittest.TestCase):
         self.assertEqual(restored["state"]["status"], "accepted")
         self.assertFalse(self.store.recover()["recovered"])
 
+    def test_recovery_marker_preserves_corrupt_projection_and_returns_journal_state(self):
+        expected = {"schema_version": 1, "status": "pending"}
+        self.store.commit(expected, "start")
+        journal = self.root / "journal/events.jsonl"
+        journal.write_bytes(journal.read_bytes() + b'{"partial":')
+        self.store.repair_torn_tail()
+        state = self.root / "state.yaml"
+        state.write_bytes(b"{broken:")
+        marker = self.root / "recovery-required.yaml"
+        receipt = self.store.read("recovery-required.yaml")
+        before = {"journal": journal.read_bytes(), "marker": marker.read_bytes(), "state": state.read_bytes()}
+        checkpoint = self.root / "checkpoints/000001.yaml"
+        checkpoint.unlink()  # Read-only keeps it missing; authorized recovery reconstructs it.
+        for read_only in (True, False):
+            with self.subTest(read_only=read_only):
+                result = self.store.recover(read_only=read_only)
+                self.assertTrue(result["recovery_required"])
+                self.assertEqual(result["state"], expected)
+                self.assertEqual(result["recovery_receipt"], receipt)
+                self.assertEqual(state.read_bytes(), before["state"])
+                self.assertEqual(marker.read_bytes(), before["marker"])
+                self.assertEqual(journal.read_bytes(), before["journal"])
+                self.assertEqual(checkpoint.exists(), not read_only)
+
+    def test_no_checkpoint_provenance_precedes_corrupt_projection_parsing(self):
+        state = self.root / "state.yaml"
+        state.write_bytes(b"{broken:")
+        for read_only in (True, False):
+            with self.subTest(read_only=read_only):
+                with self.assertRaisesRegex(HarnessError, "State lacks committed journal provenance"):
+                    self.store.recover(read_only=read_only)
+                self.assertEqual(state.read_bytes(), b"{broken:")
+
+    def test_readonly_recovery_preserves_legacy_and_current_store_contents(self):
+        self.store.commit({"schema_version": 1, "status": "pending"}, "start")
+        guard = self.root / "locks/journal-snapshot.guard"
+        self.assertTrue(guard.is_file())
+        for legacy in (False, True):
+            if legacy:
+                guard.unlink()
+            before = {str(path.relative_to(self.root)): path.read_bytes()
+                      for path in self.root.rglob("*") if path.is_file()}
+            reader = SupervisorStore(self.root, SCHEMA, create=False)
+            self.assertEqual(reader.recover(read_only=True)["state"]["status"], "pending")
+            after = {str(path.relative_to(self.root)): path.read_bytes()
+                     for path in self.root.rglob("*") if path.is_file()}
+            self.assertEqual(after, before)
+
+    def test_legacy_read_rejects_new_snapshot_anchor_without_adopting_publication(self):
+        self.store.commit({"schema_version": 1, "status": "pending"}, "start")
+        guard = self.root / "locks/journal-snapshot.guard"
+        guard.unlink()
+        reader = SupervisorStore(self.root, SCHEMA, create=False)
+        from agent_harness.file_io import ParentDirectory
+        opening = ParentDirectory.open
+        def publication(parent, *args, **kwargs):
+            if parent.path.name == "state.yaml":
+                guard.write_bytes(b"")
+            return opening(parent, *args, **kwargs)
+        with patch.object(ParentDirectory, "open", new=publication):
+            with self.assertRaisesRegex(HarnessError, "anchor appeared during legacy read"):
+                reader.recover(read_only=True)
+
+    def test_read_snapshot_cannot_upgrade_to_lifetime_writer_lease(self):
+        self.store.commit({"schema_version": 1, "status": "pending"}, "start")
+        with self.store._snapshot():
+            with self.assertRaisesRegex(HarnessError, "Cannot upgrade"):
+                self.store.append_event({"must": "not publish"})
+            with self.assertRaisesRegex(HarnessError, "Cannot upgrade"):
+                with self.store.lease():
+                    self.fail("reader acquired a lifetime lease")
+        self.assertEqual(len(self.store.events()), 1)
+
+    def test_prepared_publication_rejects_mutated_value_without_writing(self):
+        value = {"schema_version": 1, "status": "pending"}
+        writes = [("state.yaml", value, SCHEMA, False)]
+        self.store._prepared_writes = self.store._publish_writes(writes)
+        value["status"] = "accepted"
+        try:
+            with self.assertRaisesRegex(HarnessError, "Prepared publication"):
+                self.store.write("state.yaml", value, SCHEMA)
+        finally:
+            self.store._prepared_writes = {}
+        self.assertFalse((self.root / "state.yaml").exists())
+
+    def test_snapshot_rejects_linked_guard_or_lease_before_external_open(self):
+        self.store.commit({"schema_version": 1, "status": "pending"}, "start")
+        external = Path(self.temp.name) / "external"
+        external.write_bytes(b"external bytes must remain unchanged")
+        opening = Path.open
+        def checked(path, *args, **kwargs):
+            if path in (self.root / "locks/journal-snapshot.guard", self.root / "locks/journal-snapshot"):
+                raise AssertionError("linked coordination path was opened")
+            return opening(path, *args, **kwargs)
+        for name in ("journal-snapshot.guard", "journal-snapshot"):
+            path = self.root / "locks" / name
+            original = path.read_bytes() if path.exists() else None
+            if path.exists():
+                path.unlink()
+            for target in (external, external.with_name("missing-external")):
+                try:
+                    path.symlink_to(target)
+                except OSError:
+                    if original is not None:
+                        path.write_bytes(original)
+                    self.skipTest("Symlink privilege unavailable")
+                try:
+                    with patch.object(Path, "open", new=checked):
+                        with self.assertRaisesRegex(HarnessError, "Symlink/reparse"):
+                            self.store.recover(read_only=True)
+                finally:
+                    path.unlink()
+            if original is not None:
+                path.write_bytes(original)
+        self.assertEqual(external.read_bytes(), b"external bytes must remain unchanged")
+        self.assertFalse(external.with_name("missing-external").exists())
+
+    @unittest.skipUnless(os.name == "nt", "Windows junction substitution")
+    def test_legacy_snapshot_rejects_junction_created_in_missing_lock_parent(self):
+        empty = SupervisorStore(Path(self.temp.name) / "empty")
+        outside = Path(self.temp.name) / "outside"
+        outside.mkdir()
+        locks = empty.root / "locks"
+        try:
+            with self.assertRaisesRegex(HarnessError, "Symlink/reparse|Unsupported"):
+                with empty._snapshot():
+                    linked = subprocess.run(["cmd", "/d", "/c", "mklink", "/J", str(locks), str(outside)], capture_output=True)
+                    self.assertEqual(linked.returncode, 0, linked.stderr)
+        finally:
+            if locks.exists():
+                locks.rmdir()
+        self.assertEqual(list(outside.iterdir()), [])
+
     def test_crash_after_durable_journal_rebuilds_checkpoint(self):
         original = self.store.write
         def fail_checkpoint(name, *args, **kwargs):
@@ -141,6 +282,48 @@ class SupervisorStoreTests(unittest.TestCase):
         self.assertTrue(resumed["recovery_required"])
         self.assertEqual(resumed["state"]["status"], "pending")
         self.assertEqual(self.store.repair_torn_tail()["status"], "no_repair_needed")
+
+    def test_tail_repair_rejects_once_deleted_marker_before_any_publication(self):
+        self.check_tail_marker_change(replace=False)
+
+    def test_tail_repair_rejects_once_replaced_marker_before_any_publication(self):
+        self.check_tail_marker_change(replace=True)
+
+    def check_tail_marker_change(self, *, replace):
+        self.store.commit({"schema_version": 1, "status": "accepted"}, "fixture checkpoint")
+        journal = self.root / "journal/events.jsonl"
+        journal.write_bytes(journal.read_bytes() + b'{"first":')
+        receipt = self.store.repair_torn_tail()
+        old_archive = (self.root / receipt["archive"]).read_bytes()
+        journal.write_bytes(journal.read_bytes() + b'{"second":')
+        torn = journal.read_bytes()
+        marker = self.root / "recovery-required.yaml"
+        decode = self.store._decode_events
+        observed, calls = {}, []
+        def files():
+            return {str(path.relative_to(self.root)): path.read_bytes() for path in self.root.rglob("*")
+                    if path.is_file() and "locks" not in path.relative_to(self.root).parts}
+        def once(raw):
+            records = decode(raw)  # Real prefix validation, no schema/read mocking.
+            calls.append(True)
+            self.assertEqual(len(calls), 1)
+            if replace:
+                alternate = marker.with_name("marker-replacement")
+                alternate.write_bytes(marker.read_bytes() + b"# external replacement\n")
+                os.replace(alternate, marker)
+            else:
+                marker.unlink()
+            observed.update(files())
+            return records
+        with patch.object(self.store, "_decode_events", side_effect=once):
+            with self.assertRaisesRegex(HarnessError, "Recovery marker changed before repair publication"):
+                self.store.repair_torn_tail()
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(files(), observed)
+        self.assertEqual(journal.read_bytes(), torn)
+        self.assertEqual((self.root / receipt["archive"]).read_bytes(), old_archive)
+        with self.assertRaisesRegex(HarnessError, "Torn journal tail"):
+            SupervisorStore(self.root, SCHEMA, create=False).recover(read_only=True)
 
     def test_tail_repair_refuses_complete_corruption_and_missing_newline(self):
         self.store.commit({"schema_version": 1, "status": "pending"}, "start")

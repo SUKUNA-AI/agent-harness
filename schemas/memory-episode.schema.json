@@ -72,6 +72,45 @@
           "sha256": {
             "type": "string",
             "pattern": "^[a-f0-9]{64}$"
+          },
+          "reference": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "project_id": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "kind": {
+                "enum": [
+                  "semantic",
+                  "episode",
+                  "short_term",
+                  "ledger_event",
+                  "evidence",
+                  "fact"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+              },
+              "generation": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "content_digest": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": [
+              "project_id",
+              "kind",
+              "id",
+              "generation",
+              "content_digest"
+            ]
           }
         },
         "required": [
@@ -137,11 +176,54 @@
       ]
     },
     "supersedes": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "maxLength": 128
+      "anyOf": [
+        {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project_id": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "kind": {
+              "enum": [
+                "semantic",
+                "episode",
+                "short_term",
+                "ledger_event",
+                "evidence",
+                "fact"
+              ]
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+            },
+            "generation": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "content_digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "project_id",
+            "kind",
+            "id",
+            "generation",
+            "content_digest"
+          ]
+        }
+      ]
     },
     "provenance": {
       "type": "object",
@@ -164,7 +246,7 @@
           "maxProperties": 4096,
           "propertyNames": {
             "type": "string",
-            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)(?!.*:).+$"
+            "pattern": "^(?!/)(?![\\s\\S]*(?:^|/)\\.\\.(?:/|$))(?![\\s\\S]*\\\\)(?![\\s\\S]*:)[\\s\\S]+$"
           },
           "additionalProperties": {
             "type": "string",
@@ -185,6 +267,52 @@
         "omitted_file_count": {
           "type": "integer",
           "minimum": 0
+        },
+        "binding_kind": {
+          "enum": [
+            "whole_snapshot"
+          ]
+        },
+        "snapshot_algorithm": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "snapshot_ref": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "inventory_policy_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "scope_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "checkout_ref": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "checkout_root": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "inventory_complete": {
+          "type": "boolean"
+        },
+        "details_complete": {
+          "type": "boolean"
+        },
+        "details_omitted_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "details_ref": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 512
         }
       },
       "required": [
@@ -193,6 +321,20 @@
         "snapshot_id",
         "files"
       ]
+    },
+    "claim_kind": {
+      "enum": [
+        "check_result"
+      ]
+    },
+    "verification_rule": {
+      "enum": [
+        "check_completion_v1"
+      ]
+    },
+    "check_id": {
+      "type": "string",
+      "maxLength": 512
     }
   },
   "required": [

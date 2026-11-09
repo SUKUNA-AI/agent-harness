@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import time
 import uuid
 
 from .core import HarnessError, canonical, digest, lock, now
@@ -37,11 +38,16 @@ def object_schema(properties, required=()):
 PROVENANCE_SCHEMA = object_schema({
     "repository_identity": HASH, "revision": SHORT, "snapshot_id": HASH,
     "files": {"type": "object", "maxProperties": 4096,
-        "propertyNames": {"type": "string", "pattern": r"^(?!/)(?!.*(?:^|/)\.\.(?:/|$))(?!.*\\)(?!.*:).+$"},
+        "propertyNames": {"type": "string", "pattern": r"^(?!/)(?![\s\S]*(?:^|/)\.\.(?:/|$))(?![\s\S]*\\)(?![\s\S]*:)[\s\S]+$"},
         "additionalProperties": HASH},
     "toolchain_digest": HASH, "branch": SHORT,
     "file_inventory_complete": {"type": "boolean"},
     "omitted_file_count": {"type": "integer", "minimum": 0},
+    "binding_kind": {"enum": ["whole_snapshot"]}, "snapshot_algorithm": SHORT,
+    "snapshot_ref": HASH, "inventory_policy_digest": HASH, "scope_digest": HASH,
+    "checkout_ref": HASH, "checkout_root": SHORT, "inventory_complete": {"type": "boolean"},
+    "details_complete": {"type": "boolean"}, "details_omitted_count": {"type": "integer", "minimum": 0},
+    "details_ref": {"type": ["string", "null"], "maxLength": 512},
 }, ("repository_identity", "revision", "snapshot_id", "files"))
 
 PAYLOAD_PROPERTIES = {
@@ -70,7 +76,9 @@ KINDS = {"file_read": ("path", "digest", "purpose"),
          "check": ("check_id", "status", "evidence_id"),
          "failure": ("category", "signature", "status"),
          "repair_hypothesis": ("hypothesis", "outcome"),
-         "decision": ("reason",), "state_transition": ("from_status", "to_status", "reason")}
+         "decision": ("reason",), "lifecycle": ("reason",), "checkpoint": ("reason",),
+         "retrieval": ("reason",), "observation": ("reason",), "invalidation": ("reason", "supersedes"),
+         "integration": ("reason",), "state_transition": ("from_status", "to_status", "reason")}
 EVENT_SCHEMA = object_schema({
     "schema_version": {"const": 1}, "event_id": IDENTIFIER, "run_id": IDENTIFIER,
     "task_id": IDENTIFIER, "kind": {"enum": list(KINDS)}, "actor": SHORT,
@@ -236,7 +244,14 @@ def provenance_for(root, snapshot, *, toolchain_digest=None, file_limit=256):
     entries = [(name, entry["sha256"]) for name, entry in sorted(snapshot["files"].items()) if entry.get("kind") == "file"]
     value = {"repository_identity": repository_identity(root),
              "revision": snapshot.get("git", {}).get("head") or "directory",
-             "snapshot_id": snapshot["digest"],
+             "snapshot_id": snapshot["digest"], "binding_kind": "whole_snapshot",
+             "snapshot_ref": snapshot["digest"], "snapshot_algorithm": "harness-snapshot-v" + str(snapshot.get("snapshot_scheme_version", 1)),
+             "checkout_ref": digest({"root": str(Path(root).resolve()), "physical": snapshot.get("root_binding")}),
+             "checkout_root": str(Path(root).resolve()),
+             "inventory_policy_digest": digest(snapshot.get("inventory_policy", {"algorithm": "snapshot-default-v1"})),
+             "scope_digest": digest({"exclude": snapshot.get("exclude", [])}),
+             "inventory_complete": True, "details_complete": len(entries) <= file_limit,
+             "details_omitted_count": max(0, len(entries) - file_limit), "details_ref": None,
              "files": dict(entries[:file_limit]), "file_inventory_complete": len(entries) <= file_limit,
              "omitted_file_count": max(0, len(entries) - file_limit)}
     if snapshot.get("git", {}).get("branch"):
@@ -249,13 +264,21 @@ def provenance_for(root, snapshot, *, toolchain_digest=None, file_limit=256):
 def validity(provenance, current, *, status="valid", evidence=None):
     if status != "valid":
         return status
-    for field in ("repository_identity", "revision", "branch", "toolchain_digest"):
+    for field in ("repository_identity", "revision", "branch", "toolchain_digest",
+                  "binding_kind", "snapshot_algorithm", "inventory_policy_digest", "scope_digest", "checkout_ref"):
         if field in provenance and provenance.get(field) != current.get(field):
             return "needs_revalidation"
     # Snapshot binding is intentionally conservative, even with a file subset.
     if provenance.get("snapshot_id") != current.get("snapshot_id"):
         return "needs_revalidation"
-    if any(current.get("files", {}).get(name) != sha for name, sha in provenance.get("files", {}).items()):
+    # A compact details projection is not the source inventory. Equal complete
+    # snapshot bindings establish all bytes, including details omitted in either view.
+    full_binding = (provenance.get("inventory_complete") is True
+        and current.get("inventory_complete") is True
+        and provenance.get("snapshot_algorithm") == current.get("snapshot_algorithm")
+        and provenance.get("snapshot_algorithm") is not None)
+    if not full_binding and any(current.get("files", {}).get(name) != sha
+                               for name, sha in provenance.get("files", {}).items()):
         return "needs_revalidation"
     if evidence:
         try:
@@ -369,10 +392,52 @@ class Ledger:
             self.rebuild_index(locked=True)
         return event
 
+    def _inventory(self):
+        """Bound authoritative enumeration before trusting a derived index."""
+        paths, total = {}, 0
+        started = time.monotonic()
+        with os.scandir(self.events) as entries:
+            for entry in entries:
+                if time.monotonic() - started > 5:
+                    raise HarnessError("LEDGER_SCAN_BOUND: deadline")
+                if not entry.name.endswith(".yaml"):
+                    continue
+                identifier = entry.name[:-5]
+                if not re.fullmatch(ID, identifier) or not entry.is_file(follow_symlinks=False):
+                    raise HarnessError("LEDGER_EVENT_CORRUPT: invalid authoritative event path")
+                total += entry.stat(follow_symlinks=False).st_size
+                if len(paths) >= 10000 or total > 32 * 1024 * 1024:
+                    raise HarnessError("LEDGER_SCAN_BOUND: event count or bytes")
+                paths[identifier] = safe_private(Path(entry.path))
+        return paths
+
+    @staticmethod
+    def _load_event(path, identifier, budget=None):
+        from .strict_yaml import loads
+        try:
+            remaining = 2 * 1024 * 1024
+            if budget is not None:
+                if time.monotonic() - budget["started"] > 5:
+                    raise HarnessError("LEDGER_SCAN_BOUND: deadline")
+                remaining = min(remaining, 32 * 1024 * 1024 - budget["bytes"])
+            raw = read_regular_file(path, max_bytes=remaining)
+            if budget is not None:
+                budget["bytes"] += len(raw)
+            row = loads(raw, EVENT_SCHEMA)
+            if row["event_id"] != identifier:
+                raise HarnessError("filename and event ID differ")
+            return row
+        except (OSError, ValueError, HarnessError) as exc:
+            if str(exc).startswith("LEDGER_SCAN_BOUND"):
+                raise
+            raise HarnessError("LEDGER_EVENT_CORRUPT: authoritative event " + identifier) from exc
+
     def rebuild_index(self, *, locked=False):
         from .strict_yaml import dump, load
         def rebuild():
-            rows = [load(safe_private(path), EVENT_SCHEMA) for path in self.events.glob("*.yaml")]
+            paths = self._inventory()
+            budget = {"started": time.monotonic(), "bytes": 0}
+            rows = [self._load_event(path, identifier, budget) for identifier, path in paths.items()]
             rows.sort(key=lambda row: (row["timestamp"], row["event_id"]))
             dump(self.root / "index.yaml", {"schema_version": 1, "events": [r["event_id"] for r in rows]}, INDEX_SCHEMA)
             return rows
@@ -383,20 +448,24 @@ class Ledger:
 
     def _records(self):
         from .strict_yaml import load
-        try:
-            index = load(safe_private(self.root / "index.yaml"), INDEX_SCHEMA)
-            records = [load(safe_private(self.events / (event_id + ".yaml")), EVENT_SCHEMA) for event_id in index["events"]]
-            if len(records) != len(list(self.events.glob("*.yaml"))):
-                return self.rebuild_index()
-            return records
-        except (OSError, ValueError, HarnessError):
-            return self.rebuild_index()
+        with lock(self.root / ".lock", purpose="execution ledger read"):
+            paths = self._inventory()
+            try:
+                index = load(safe_private(self.root / "index.yaml"), INDEX_SCHEMA)
+                ids = index["events"]
+                if len(ids) != len(set(ids)) or set(ids) != set(paths):
+                    raise HarnessError("Derived ledger membership mismatch")
+            except (OSError, ValueError, HarnessError):
+                return self.rebuild_index(locked=True)
+            # Authoritative corruption is never treated as a disposable index.
+            budget = {"started": time.monotonic(), "bytes": 0}
+            return [self._load_event(paths[identifier], identifier, budget) for identifier in ids]
 
     def show(self, event_id, *, offset=0, limit=8192):
         from .strict_yaml import load
         if not re.fullmatch(ID, event_id):
             raise HarnessError("Invalid ledger event identifier")
-        value = load(safe_private(self.events / (event_id + ".yaml")), EVENT_SCHEMA)
+        value = self._load_event(safe_private(self.events / (event_id + ".yaml")), event_id)
         return paginate(value, offset=offset, limit=limit)
 
     @staticmethod
@@ -431,7 +500,8 @@ class Ledger:
             else:
                 facts.append(item)
         return reduce(failures + facts + examined, category="memory", max_bytes=max_bytes,
-                      required={"repository_revision": current.get("revision"), "stale_items": stale[:10], "stale_items_count": len(stale),
+                      recordset_store=self.root / "recordsets",
+                      required={"repository_identity": current.get("repository_identity"), "repository_revision": current.get("revision"), "stale_items": stale[:10], "stale_items_count": len(stale),
                                 "govern_scope": "advisory_for_native_codex_tools"})
 
     def govern(self, operation, current, *, force=False):
@@ -492,5 +562,6 @@ def ledger_dispatch(argv):
     args = parser.parse_args(argv)
     ledger = Ledger(args.run_dir)
     value = ledger.show(args.event_id, offset=args.offset, limit=args.limit) if args.command == "show" else {"events": len(ledger.rebuild_index())}
-    print(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
+    from .output import write_json
+    write_json(value)
     return 0

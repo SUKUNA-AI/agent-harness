@@ -1,0 +1,98 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "record_type": {
+      "const": "benchmark_role_policy_observations"
+    },
+    "backend_build_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "coverage": {
+      "enum": [
+        "complete",
+        "partial",
+        "unknown"
+      ]
+    },
+    "method": {
+      "enum": [
+        "runtime_query",
+        "client_runtime_metadata"
+      ]
+    },
+    "roles": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "role": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "model": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "provider": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "reasoning_effort": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "max_tokens": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "max_compaction_tokens": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "evidence_ref": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string",
+                "maxLength": 512
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": [
+              "path",
+              "sha256"
+            ]
+          }
+        },
+        "required": [
+          "role",
+          "model",
+          "provider",
+          "reasoning_effort",
+          "max_tokens",
+          "max_compaction_tokens",
+          "evidence_ref"
+        ]
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "record_type",
+    "backend_build_digest",
+    "coverage",
+    "method",
+    "roles"
+  ]
+}

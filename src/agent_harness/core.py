@@ -58,15 +58,21 @@ def digest(value):
 
 
 def file_hash(path):
+    from .file_io import ParentDirectory, _regular, _stamp, FileReadError
     h = hashlib.sha256()
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0)
-    # A regular path may have become a FIFO since the caller inspected it.
-    # Nonblocking open permits descriptor validation without waiting for a writer.
-    with os.fdopen(os.open(path, flags), "rb") as source:
-        if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
-            raise HarnessError("Hash input must be a regular file: " + str(path))
-        for block in iter(lambda: source.read(1024 * 1024), b""):
-            h.update(block)
+    try:
+        with ParentDirectory(path) as parent:
+            with os.fdopen(parent.open(flags), "rb") as source:
+                before = os.fstat(source.fileno())
+                _regular(before, path)
+                for block in iter(lambda: source.read(1024 * 1024), b""):
+                    h.update(block)
+                if _stamp(before) != _stamp(os.fstat(source.fileno())):
+                    raise HarnessError("Hash input changed: " + str(path))
+            parent.check()
+    except (OSError, FileReadError) as error:
+        raise HarnessError("Unsafe hash input: " + str(error)) from error
     return h.hexdigest()
 
 
@@ -480,6 +486,13 @@ def validate_contract(contract):
                 except (KeyError, TypeError, re.error):
                     raise HarnessError("Output assertions require a valid regex")
             for report in check.get("reports", []):
+                from .validation import validate_equals
+                try:
+                    if set(report) - {"path", "format", "min_tests", "max_skipped", "required_cases", "equals"}:
+                        raise ValueError("unknown report field")
+                    validate_equals(report.get("equals", {}))
+                except ValueError as error:
+                    raise HarnessError("Invalid report contract: " + str(error)) from error
                 if not report.get("path") or report.get("format") not in {"junit", "json"}:
                     raise HarnessError("Reports require a path and supported format")
                 if report["format"] == "junit" and (not isinstance(report.get("min_tests", 1), int) or report.get("min_tests", 1) < 1 or not isinstance(report.get("max_skipped", 0), int) or report.get("max_skipped", 0) < 0):
@@ -526,7 +539,7 @@ def _git(cwd, *args):
     return None
 
 
-def _entry(path):
+def _entry_unanchored(path):
     if not isinstance(path, Path):
         path = Path(path)
     try:
@@ -548,6 +561,19 @@ def _entry(path):
     return entry
 
 
+
+def _entry(path):
+    from .file_io import ParentDirectory, FileReadError
+    try:
+        with ParentDirectory(path) as parent:
+            value = _entry_unanchored(path)
+            parent.check()
+            return value
+    except (FileNotFoundError, NotADirectoryError):
+        return {"kind": "missing"}
+    except (OSError, FileReadError) as error:
+        raise HarnessError("Unsafe snapshot path: " + str(error)) from error
+
 def _git_settings(cwd):
     """Read all snapshot-relevant config in one process, preserving last-value semantics."""
     settings = dict.fromkeys(("core.autocrlf", "core.eol", "core.filemode"))
@@ -562,17 +588,18 @@ def _git_settings(cwd):
 
 def snapshot(contract):
     """Select a verified native backend when available; preserve manifest format."""
+    _supported_snapshot_root(contract)
     from .native import snapshot as native_snapshot
     value = native_snapshot(contract)
     return snapshot_python(contract) if value is None else verify_snapshot(value, "Native snapshot")
 
 
-def snapshot_python(contract):
+def _snapshot_python(contract):
     """Actual bytes, including tracked deletion and nonignored untracked files."""
     cwd_value = contract.get("cwd")
     result = {"schema_version": 1, "kind": "non_file", "files": {}, "external_inputs": {}}
     if cwd_value:
-        cwd = Path(cwd_value).resolve()
+        cwd = Path(os.path.abspath(cwd_value))
         excludes = [".git", ".git/**", *contract.get("scope", {}).get("exclude", [])]
         head = _git(cwd, "rev-parse", "HEAD")
         root = _git(cwd, "rev-parse", "--show-toplevel")
@@ -608,7 +635,7 @@ def snapshot_python(contract):
                 names.update((relative / d).as_posix() for d in os.listdir(directory) if (Path(directory) / d).is_symlink())
         result["files"] = {n: _entry(cwd / n) for n in sorted(names) if not matches(n, excludes)}
     for item in contract.get("inputs", []):
-        path = Path(item["path"]).resolve()
+        path = Path(os.path.abspath(item["path"]))
         if not path.is_file():
             raise HarnessError(f"Required input missing: {path}")
         entry = _entry(path)
@@ -618,6 +645,38 @@ def snapshot_python(contract):
     result["digest"] = digest(result)
     return result
 
+
+
+def _supported_snapshot_root(contract):
+    # POSIX reserves exactly two leading slashes for implementation-defined
+    # semantics. Refuse ambiguous spellings before Git can change inventory kind.
+    # Windows UNC roots are supported by the Windows reader and must stay intact.
+    if os.name != "nt" and str(contract.get("cwd", "")).startswith("//"):
+        raise HarnessError("UNSUPPORTED_ROOT_SPELLING: use a single POSIX root slash")
+
+
+def snapshot_python(contract):
+    _supported_snapshot_root(contract)
+    from .file_io import ParentDirectory, FileReadError
+    try:
+        with ExitStack() as stack:
+            parent = None
+            if contract.get("cwd"):
+                root = Path(os.path.abspath(contract["cwd"]))
+                parent = stack.enter_context(ParentDirectory(root / ".harness-root-binding"))
+                binding = parent.physical_identity()
+            result = _snapshot_python(contract)
+            result["snapshot_scheme_version"] = 2
+            result["topology_policy"] = "nofollow-ancestors-literal-leaf-v1"
+            if parent is not None:
+                parent.check()
+                result["root_binding"] = binding
+            result.pop("digest", None)
+            result["content_digest"] = digest({key: value for key, value in result.items() if key != "root_binding"})
+            result["digest"] = digest(result)
+            return result
+    except (OSError, FileReadError) as error:
+        raise HarnessError("Unsafe snapshot boundary: " + str(error)) from error
 
 def changed_paths(before, after):
     return sorted(p for p in set(before["files"]) | set(after["files"]) if before["files"].get(p) != after["files"].get(p))
@@ -741,6 +800,16 @@ class Run:
             target.parent.mkdir(parents=True, exist_ok=True)
             if source.exists():
                 shutil.copyfile(source, target)
+
+    def prepare_supervisor_attempt(self, preparation):
+        """Separate journal-bound verification generation; not a CLI attempt.
+
+        The Supervisor owns model reservations and checks its original budgets.
+        The protocol verifies exact authority, physical ownership and pre/post
+        state while preserving this run's origin baseline and attempt history.
+        """
+        from .root_preparation import prepare_core
+        return prepare_core(self, preparation)
 
     def new_attempt(self, contract, *, reason):
         validate_contract(contract)
@@ -924,21 +993,26 @@ class Run:
     def status(self, *, verify_evidence=False):
         state = self.state()
         contract = self.contract(state)
-        actual = snapshot(contract)
-        state["source_current"] = state.get("candidate_digest") == actual["digest"]
+        snapshot_errors = []
+        try:
+            actual = snapshot(contract)
+        except (HarnessError, OSError, ValueError) as error:
+            actual = None
+            snapshot_errors = ["snapshot unavailable: " + str(error)]
+        state["source_current"] = actual is not None and state.get("candidate_digest") == actual["digest"]
         # A cheap status observation cannot assert that logs/reports still exist.
         # Full read-only validation is explicit, avoiding heavy repeated polling.
         state["evidence_current"] = None if state["source_current"] else False
-        state["evidence_validation"] = {"status": "not_checked", "errors": []}
+        state["evidence_validation"] = {"status": "failed" if snapshot_errors else "not_checked", "errors": snapshot_errors}
         state["recorded_status"] = state.get("status")
         if verify_evidence and state.get("accepted"):
             from .runner import accepted_evidence_errors
-            errors = accepted_evidence_errors(self, state["accepted"]["verdict_digest"])
+            errors = snapshot_errors + accepted_evidence_errors(self, state["accepted"]["verdict_digest"])
             state["evidence_current"] = not errors
             state["evidence_validation"] = {"status": "failed" if errors else "passed", "errors": errors}
         if state["evidence_current"] is False and state.get("status") == "accepted":
             state["status"] = "stale"
-        state["actual_snapshot"] = actual["digest"]
+        state["actual_snapshot"] = actual["digest"] if actual is not None else None
         state["run_dir"] = str(self.path)
         return state
 

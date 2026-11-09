@@ -1,0 +1,368 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "native-observation v2",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "identity_contract": {
+      "const": "native-receipt-identity-v1"
+    },
+    "record_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "project_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "payload_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "record_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "run_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    },
+    "task_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    },
+    "plan_digest": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "node_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    },
+    "attempt_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    },
+    "invocation_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    },
+    "producer_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+    },
+    "producer_kind": {
+      "const": "native_hook_observer"
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "created_at": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "harness_version": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "harness_build_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "build_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "package_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "producer_code_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "package_files_examined": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "source": {
+          "const": "on_disk_package_and_loaded_producer"
+        }
+      },
+      "required": [
+        "package_digest",
+        "producer_code_digest",
+        "package_files_examined",
+        "source"
+      ]
+    },
+    "client_version": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    },
+    "capability_receipt_ref": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 512
+    },
+    "input_refs": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "id": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "content_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "scope": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "content_digest",
+          "scope"
+        ]
+      }
+    },
+    "schema_version": {
+      "const": 2
+    },
+    "record_type": {
+      "const": "native_observation"
+    },
+    "event": {
+      "enum": [
+        "PostModelRequest",
+        "PreModelRequest",
+        "SessionEnd",
+        "SessionStart",
+        "Stop",
+        "SubagentStop",
+        "ToolEnd",
+        "ToolStart"
+      ]
+    },
+    "event_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    },
+    "session_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    },
+    "parent_session_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    },
+    "agent_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    },
+    "agent_type": {
+      "enum": [
+        "root",
+        "child",
+        "unknown"
+      ]
+    },
+    "turn_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    },
+    "request_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128
+    },
+    "context_epoch": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "session_cwd": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "hook_process_cwd": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "tool_requested_cwd": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 512
+    },
+    "observed_checkout_ref": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "namespace": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "resolution_status": {
+      "enum": [
+        "observed",
+        "ambiguous",
+        "unavailable"
+      ]
+    },
+    "outcome": {
+      "enum": [
+        "cancelled",
+        "completed",
+        "failed",
+        "started",
+        "unknown"
+      ]
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "input_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000000
+        },
+        "cached_input_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000000
+        },
+        "output_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000000
+        },
+        "reasoning_output_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000000
+        },
+        "total_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000000
+        }
+      },
+      "required": []
+    },
+    "usage_binding": {
+      "enum": [
+        "stable_attempt",
+        "observed_unreconciled",
+        "unavailable"
+      ]
+    },
+    "acceptance": {
+      "const": "not_performed"
+    }
+  },
+  "required": [
+    "schema_version",
+    "record_type",
+    "record_id",
+    "project_id",
+    "producer_kind",
+    "generation",
+    "created_at",
+    "payload_digest",
+    "event",
+    "event_id",
+    "session_id",
+    "parent_session_id",
+    "agent_id",
+    "agent_type",
+    "turn_id",
+    "request_id",
+    "attempt_id",
+    "context_epoch",
+    "session_cwd",
+    "hook_process_cwd",
+    "tool_requested_cwd",
+    "observed_checkout_ref",
+    "namespace",
+    "resolution_status",
+    "outcome",
+    "usage",
+    "usage_binding",
+    "acceptance",
+    "identity_contract",
+    "record_id",
+    "project_id",
+    "payload_digest",
+    "record_digest",
+    "run_id",
+    "task_id",
+    "plan_digest",
+    "node_id",
+    "attempt_id",
+    "invocation_id",
+    "producer_id",
+    "producer_kind",
+    "generation",
+    "created_at",
+    "harness_version",
+    "harness_build_digest",
+    "build_provenance",
+    "client_version",
+    "capability_receipt_ref",
+    "input_refs"
+  ]
+}

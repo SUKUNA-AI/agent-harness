@@ -59,6 +59,27 @@ fn shown_path(path: &Path) -> Result<String, String> {
     Ok(value)
 }
 
+/// Windows spelling key for equality only: never resolve links, trim names,
+/// collapse '..', or accept an ancestor-prefix match in an ownership check.
+#[cfg(any(windows, test))]
+fn windows_path_key(value: &str) -> String {
+    // Git names use '/', while GetFinalPathNameByHandleW uses '\\'.
+    // Normalize separators before recognizing DOS/UNC verbatim prefixes.
+    let value = value.replace('/', "\\").to_lowercase();
+    if let Some(value) = value.strip_prefix(r"\\?\unc\") {
+        return format!(r"\\{value}");
+    }
+    value.strip_prefix(r"\\?\").unwrap_or(&value).to_owned()
+}
+
+#[cfg(any(windows, test))]
+fn verify_windows_opened_path(actual: &str, requested: &str) -> Result<(), String> {
+    if windows_path_key(actual) != windows_path_key(requested) {
+        return Err("opened source escaped requested path".into());
+    }
+    Ok(())
+}
+
 fn resolve(path: &Path) -> Result<PathBuf, String> {
     let absolute = if path.is_absolute() {
         path.to_owned()
@@ -86,6 +107,24 @@ fn resolve(path: &Path) -> Result<PathBuf, String> {
         }
     }
     Ok(resolved)
+}
+
+/// Compare the Git-reported top against the workspace without changing its
+/// lexical binding. Windows canonicalize returns a verbatim path, while the
+/// snapshot root intentionally retains the caller's ordinary absolute spelling.
+fn git_root_matches(top: &[u8], root: &Path) -> Result<bool, String> {
+    let top = resolve(Path::new(git_path_record(bytes_text(top)?)))?;
+    #[cfg(windows)]
+    {
+        // Match pathlib's Windows case semantics after giving both operands the
+        // same canonical/prefix representation. Do not trim filename whitespace.
+        Ok(windows_path_key(&text(top.as_os_str())?)
+            == windows_path_key(&text(resolve(root)?.as_os_str())?))
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(top == root)
+    }
 }
 
 /// Python fnmatchcase semantics: '*' crosses '/', backslash is a literal.
@@ -440,7 +479,7 @@ fn inventory(
     };
     let top = git(root, &["rev-parse", "--show-toplevel"], deadline)?;
     let is_git = match top {
-        Some(top) => resolve(Path::new(git_path_record(bytes_text(&top)?)))? == root,
+        Some(top) => git_root_matches(&top, root)?,
         None => false,
     };
     let mut names = Names::default();
@@ -620,6 +659,114 @@ fn observed(path: &Path) -> Result<(Metadata, Stamp), std::io::Error> {
     Ok((metadata, identity.map_err(std::io::Error::other)?))
 }
 
+#[cfg(any(windows, test))]
+fn windows_root_identity(volume: u64, identifier: [u8; 16]) -> Value {
+    let file_id: String = identifier
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    json!({"identity_kind":"windows-file-id-info-v1",
+           "device":format!("{volume:016x}"),"inode":file_id})
+}
+
+fn root_identity(path: &Path) -> Result<Value, String> {
+    #[cfg(unix)]
+    {
+        let (_, identity) = observed(path).map_err(|e| e.to_string())?;
+        Ok(json!({"device":identity.device,"inode":identity.inode}))
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::{
+            fs::{MetadataExt, OpenOptionsExt},
+            io::AsRawHandle,
+        };
+        use windows_sys::Win32::Storage::FileSystem::{
+            FileIdInfo, GetFileInformationByHandleEx, FILE_FLAG_BACKUP_SEMANTICS,
+            FILE_FLAG_OPEN_REPARSE_POINT, FILE_ID_INFO, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        };
+        let file = OpenOptions::new()
+            .access_mode(0)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)
+            .map_err(|e| e.to_string())?;
+        let metadata = file.metadata().map_err(|e| e.to_string())?;
+        if !metadata.is_dir() || metadata.file_attributes() & 0x400 != 0 {
+            return Err("physical source root must be an ordinary directory".into());
+        }
+        let mut value: FILE_ID_INFO = unsafe { std::mem::zeroed() };
+        if unsafe {
+            GetFileInformationByHandleEx(
+                file.as_raw_handle(),
+                FileIdInfo,
+                (&mut value as *mut FILE_ID_INFO).cast(),
+                std::mem::size_of::<FILE_ID_INFO>() as u32,
+            )
+        } == 0
+        {
+            return Err("full Windows FileIdInfo root identity is unavailable".into());
+        }
+        Ok(windows_root_identity(
+            value.VolumeSerialNumber,
+            value.FileId.Identifier,
+        ))
+    }
+}
+
+fn parent_topology(path: &Path) -> Result<Vec<(PathBuf, u64, u64)>, String> {
+    let mut result = Vec::new();
+    for parent in path.ancestors().skip(1) {
+        let (metadata, identity) = match observed(parent) {
+            Ok(value) => value,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.to_string()),
+        };
+        #[cfg(windows)]
+        let reparse = {
+            use std::os::windows::fs::MetadataExt;
+            metadata.file_attributes() & 0x400 != 0
+        };
+        #[cfg(unix)]
+        let reparse = false;
+        if metadata.file_type().is_symlink() || reparse {
+            return Err(format!(
+                "source ancestor is symlink/reparse: {}",
+                parent.display()
+            ));
+        }
+        if !metadata.is_dir() {
+            return Err(format!(
+                "source ancestor is not a directory: {}",
+                parent.display()
+            ));
+        }
+        result.push((parent.to_owned(), identity.device, identity.inode));
+    }
+    Ok(result)
+}
+
+fn lexical_absolute(path: &Path) -> Result<PathBuf, String> {
+    let absolute = if path.is_absolute() {
+        path.to_owned()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| e.to_string())?
+            .join(path)
+    };
+    let mut result = PathBuf::new();
+    for part in absolute.components() {
+        match part {
+            Component::ParentDir => {
+                result.pop();
+            }
+            Component::CurDir => {}
+            _ => result.push(part.as_os_str()),
+        }
+    }
+    Ok(result)
+}
+
 fn regular_open(path: &Path) -> Result<File, String> {
     let mut options = OpenOptions::new();
     options.read(true);
@@ -738,13 +885,22 @@ fn rooted_open(path: &Path) -> Result<File, String> {
     let actual = PathBuf::from(
         String::from_utf16(&buffer[..length as usize]).map_err(|_| "invalid source handle path")?,
     );
-    if shown_path(&actual)?.to_lowercase() != shown_path(path)?.to_lowercase() {
-        return Err("opened source escaped requested path".into());
-    }
+    verify_windows_opened_path(&text(actual.as_os_str())?, &text(path.as_os_str())?)?;
     Ok(file)
 }
 
 pub fn read_regular(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
+    read_regular_until(path,limit,Instant::now()+Duration::from_secs(120))
+}
+
+pub fn read_regular_until(path: &Path, limit: u64, deadline: Instant) -> Result<Vec<u8>, String> {
+    #[cfg(target_os="linux")]
+    {
+        return crate::fs_read::read_bounded_until(path,limit,deadline).map_err(|e|e.to_string());
+    }
+    #[cfg(not(target_os="linux"))]
+    {
+    check_time(deadline)?;
     let mut file = rooted_open(path)?;
     let metadata = file.metadata().map_err(|e| e.to_string())?;
     if !metadata.is_file() {
@@ -767,10 +923,12 @@ pub fn read_regular(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
         return Err("source changed during read".into());
     }
     Ok(data)
+    }
 }
 
 fn entry(path: &Path, deadline: Instant) -> Result<Value, String> {
     check_time(deadline)?;
+    let topology = parent_topology(path)?;
     let (metadata, before) = match observed(path) {
         Ok(value) => value,
         Err(error)
@@ -787,7 +945,11 @@ fn entry(path: &Path, deadline: Instant) -> Result<Value, String> {
         let target = text(fs::read_link(path).map_err(|e| e.to_string())?.as_os_str())?;
         json!({"kind":"symlink","sha256":format!("{:x}",Sha256::digest(target.as_bytes())),"target":target})
     } else if metadata.is_file() {
-        let mut file = regular_open(path)?;
+        #[cfg(target_os="linux")]
+        let digest=crate::fs_read::hash_regular_until(path,deadline).map_err(|e|e.to_string())?.sha256;
+        #[cfg(not(target_os="linux"))]
+        let digest={
+        let mut file = rooted_open(path)?;
         if stamp(&file.metadata().map_err(|e| e.to_string())?, Some(&file))? != before {
             return Err(format!(
                 "source changed during snapshot: {}",
@@ -804,6 +966,8 @@ fn entry(path: &Path, deadline: Instant) -> Result<Value, String> {
             }
             hash.update(&buffer[..count]);
         }
+        format!("{:x}",hash.finalize())
+        };
         #[cfg(unix)]
         let executable = {
             use std::os::unix::fs::MetadataExt;
@@ -811,11 +975,12 @@ fn entry(path: &Path, deadline: Instant) -> Result<Value, String> {
         };
         #[cfg(windows)]
         let executable = Value::Null;
-        json!({"kind":"file","sha256":format!("{:x}",hash.finalize()),"size":metadata.len(),"executable":executable})
+        json!({"kind":"file","sha256":digest,"size":metadata.len(),"executable":executable})
     } else {
         return Ok(json!({"kind":"directory"}));
     };
-    if observed(path).map_err(|e| e.to_string())?.1 != before {
+    if parent_topology(path)? != topology || observed(path).map_err(|e| e.to_string())?.1 != before
+    {
         return Err(format!(
             "source changed during snapshot: {}",
             path.display()
@@ -861,12 +1026,21 @@ pub fn snapshot(contract: &Value) -> Result<Value, String> {
     }
     let deadline = Instant::now() + Duration::from_secs(120);
     let mut result = json!({"schema_version":1,"kind":"non_file","files":{},"external_inputs":{}});
+    let mut bound_root = None;
     if let Some(cwd) = contract
         .get("cwd")
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
     {
-        let root = resolve(Path::new(cwd))?;
+        #[cfg(unix)]
+        if cwd.starts_with("//") {
+            return Err("UNSUPPORTED_ROOT_SPELLING: use a single POSIX root slash".into());
+        }
+        let root = lexical_absolute(Path::new(cwd))?;
+        let topology = parent_topology(&root.join(".harness-root-binding"))?;
+        let root_binding = root_identity(&root)?;
+        result["root_binding"] = root_binding.clone();
+        bound_root = Some((root.clone(), root_binding.clone()));
         let mut excludes = vec![".git".to_owned(), ".git/**".to_owned()];
         if let Some(values) = contract.pointer("/scope/exclude") {
             for value in values.as_array().ok_or("scope.exclude must be an array")? {
@@ -907,10 +1081,15 @@ pub fn snapshot(contract: &Value) -> Result<Value, String> {
                 .collect::<Result<_, _>>()
         })?;
         result["files"] = Value::Object(rows.into_iter().collect());
+        if parent_topology(&root.join(".harness-root-binding"))? != topology
+            || root_identity(&root)? != root_binding
+        {
+            return Err("source root physical identity changed during snapshot".into());
+        }
     }
     if let Some(inputs) = contract.get("inputs") {
         for item in inputs.as_array().ok_or("inputs must be an array")? {
-            let path = resolve(Path::new(
+            let path = lexical_absolute(Path::new(
                 item.get("path")
                     .and_then(Value::as_str)
                     .ok_or("input requires path")?,
@@ -930,6 +1109,18 @@ pub fn snapshot(contract: &Value) -> Result<Value, String> {
             result["external_inputs"][shown_path(&path)?] = observed;
         }
     }
+    if let Some((root, binding)) = bound_root {
+        if root_identity(&root)? != binding {
+            return Err("source root physical identity changed before manifest publication".into());
+        }
+    }
+    result["snapshot_scheme_version"] = json!(2);
+    result["topology_policy"] = json!("nofollow-ancestors-literal-leaf-v1");
+    let mut content = result.clone();
+    content.as_object_mut().unwrap().remove("root_binding");
+    let mut content_encoded = Vec::new();
+    canonical(&content, &mut content_encoded)?;
+    result["content_digest"] = json!(format!("{:x}", Sha256::digest(&content_encoded)));
     let mut encoded = Vec::new();
     canonical(&result, &mut encoded)?;
     result["digest"] = json!(format!("{:x}", Sha256::digest(&encoded)));
@@ -939,6 +1130,34 @@ pub fn snapshot(contract: &Value) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn ambiguous_posix_root_spelling_is_refused_before_inventory() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(temporary.path()).unwrap();
+        let spelling = format!("/{}", shown_path(&root).unwrap());
+        assert!(snapshot(&json!({"cwd": spelling})).unwrap_err()
+            .contains("UNSUPPORTED_ROOT_SPELLING"));
+    }
+
+    #[test]
+    fn windows_root_identity_retains_all_bits_as_opaque_bytes() {
+        let mut identifier = [0u8; 16];
+        for (index, byte) in identifier.iter_mut().enumerate() {
+            *byte = index as u8;
+        }
+        let result = windows_root_identity(0x123456789abcdef0, identifier);
+        assert_eq!(
+            result,
+            json!({"identity_kind":"windows-file-id-info-v1",
+            "device":"123456789abcdef0","inode":"000102030405060708090a0b0c0d0e0f"})
+        );
+        let mut changed = identifier;
+        changed[15] ^= 1;
+        assert_ne!(result, windows_root_identity(0x123456789abcdef0, changed));
+        assert_ne!(result, windows_root_identity(0x9abcdef0, identifier));
+    }
 
     #[test]
     fn glob_matches_python_path_rules() {
@@ -994,6 +1213,147 @@ mod tests {
         assert_eq!(git_path_record("/project\r\n"), "/project\r");
         #[cfg(windows)]
         assert_eq!(git_path_record("C:/project\r\n"), "C:/project");
+    }
+
+    #[test]
+    fn windows_opened_path_comparison_handles_nested_separators_without_escape() {
+        for (actual, requested) in [
+            (
+                r"\\?\C:\Root\submodule\child.py",
+                r"C:\Root\submodule/child.py",
+            ),
+            (
+                r"\\?\C:\Проект\nested\child.py",
+                r"c:/проект/nested/child.py",
+            ),
+            (
+                r"\\?\UNC\Host\Share\Root\nested\child.py",
+                r"//host/share/root/nested/child.py",
+            ),
+        ] {
+            verify_windows_opened_path(actual, requested).unwrap();
+        }
+        for (actual, requested) in [
+            (r"\\?\C:\Outside\child.py", r"C:\Root/child.py"),
+            (r"\\?\C:\Root-other\child.py", r"C:\Root/child.py"),
+            (r"\\?\C:\Root\other.py", r"C:\Root/child.py"),
+            (r"\\?\D:\Root\child.py", r"C:\Root/child.py"),
+            (r"\\?\C:\Root\child.py", r"C:\Root/child.py "),
+            (r"\\?\C:\Outside\child.py", r"C:\Root/../Outside/child.py"),
+            (r"\\?\C:\Root\child.py", r"C:Root/child.py"),
+            (r"\\?\UNC\Host\Other\child.py", r"//host/share/child.py"),
+        ] {
+            assert!(
+                verify_windows_opened_path(actual, requested).is_err(),
+                "{actual:?} {requested:?}"
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_read_accepts_git_style_nested_and_verbatim_paths() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = PathBuf::from(shown_path(&fs::canonicalize(temporary.path()).unwrap()).unwrap());
+        fs::create_dir(root.join("submodule")).unwrap();
+        fs::write(
+            root.join("submodule").join("child.py"),
+            b"nested source bytes",
+        )
+        .unwrap();
+        let ordinary_mixed = root.join("submodule/child.py");
+        let canonical = fs::canonicalize(root.join("submodule").join("child.py")).unwrap();
+        for path in [ordinary_mixed, canonical] {
+            assert_eq!(read_regular(&path, 64).unwrap(), b"nested source bytes");
+        }
+    }
+
+    #[test]
+    fn snapshot_reads_actual_gitlink_tree_with_nested_names() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = PathBuf::from(shown_path(&fs::canonicalize(temporary.path()).unwrap()).unwrap());
+        let deadline = Instant::now() + Duration::from_secs(30);
+        assert!(git(&root, &["init", "-q"], deadline).unwrap().is_some());
+        fs::create_dir(root.join("submodule")).unwrap();
+        fs::write(
+            root.join("submodule").join("child.py"),
+            b"nested source bytes",
+        )
+        .unwrap();
+        fs::write(
+            root.join("submodule").join(".git"),
+            b"fixture metadata excluded",
+        )
+        .unwrap();
+        assert!(git(
+            &root,
+            &[
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                "160000,1111111111111111111111111111111111111111,submodule"
+            ],
+            deadline
+        )
+        .unwrap()
+        .is_some());
+        let observed = snapshot(&json!({"cwd":shown_path(&root).unwrap()})).unwrap();
+        assert_eq!(observed["kind"], "git");
+        assert_eq!(observed["files"]["submodule/child.py"]["kind"], "file");
+        assert_eq!(
+            observed["files"]["submodule/child.py"]["sha256"],
+            format!("{:x}", Sha256::digest(b"nested source bytes"))
+        );
+        assert!(observed["files"].get("submodule/.git").is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn git_root_comparison_normalizes_verbatim_prefix_and_drive_case() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("Проект with spaces");
+        fs::create_dir(&root).unwrap();
+        let ordinary = shown_path(&fs::canonicalize(&root).unwrap()).unwrap();
+        let verbatim = fs::canonicalize(&root).unwrap();
+        let top = format!("{}\n", ordinary.replace('\\', "/"));
+        assert_ne!(
+            resolve(Path::new(git_path_record(&top))).unwrap(),
+            Path::new(&ordinary)
+        );
+        for spelling in [
+            PathBuf::from(&ordinary),
+            verbatim,
+            PathBuf::from(ordinary.to_lowercase()),
+        ] {
+            assert!(git_root_matches(top.as_bytes(), &spelling).unwrap());
+        }
+        let child = root.join("nested");
+        fs::create_dir(&child).unwrap();
+        assert!(!git_root_matches(top.as_bytes(), &child).unwrap());
+        assert!(!git_root_matches(top.as_bytes(), temporary.path()).unwrap());
+    }
+
+    #[test]
+    fn git_inventory_keeps_tracked_deletion_and_rejects_subdirectory_root() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = PathBuf::from(shown_path(&fs::canonicalize(temporary.path()).unwrap()).unwrap());
+        let deadline = Instant::now() + Duration::from_secs(30);
+        // No commit or user identity is required to qualify the cached inventory.
+        assert!(git(&root, &["init", "-q"], deadline).unwrap().is_some());
+        fs::write(root.join("deleted.txt"), b"tracked bytes").unwrap();
+        assert!(git(&root, &["add", "deleted.txt"], deadline)
+            .unwrap()
+            .is_some());
+        fs::remove_file(root.join("deleted.txt")).unwrap();
+        let inventory = inventory(&root, &[], true, false, deadline).unwrap();
+        assert!(inventory.is_git);
+        assert!(inventory.git.is_some());
+        assert!(inventory.names.contains(&"deleted.txt".to_owned()));
+        let nested = root.join("nested");
+        fs::create_dir(&nested).unwrap();
+        let inventory = super::inventory(&nested, &[], true, false, deadline).unwrap();
+        assert!(!inventory.is_git);
+        assert!(inventory.git.is_none());
     }
 
     #[test]

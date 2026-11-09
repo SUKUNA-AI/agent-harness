@@ -3,7 +3,10 @@
   "additionalProperties": false,
   "properties": {
     "schema_version": {
-      "const": 1
+      "enum": [
+        1,
+        2
+      ]
     },
     "task_id": {
       "type": "string",
@@ -115,6 +118,49 @@
             },
             "maxItems": 128,
             "minItems": 1
+          },
+          "requirement_ids": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 128,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+              "maxLength": 128
+            }
+          },
+          "checks": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "local": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 128,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+                  "maxLength": 128
+                }
+              },
+              "integration": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 128,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+                  "maxLength": 128
+                }
+              }
+            },
+            "required": [
+              "local",
+              "integration"
+            ]
           }
         },
         "required": [
@@ -137,6 +183,14 @@
       },
       "maxItems": 64,
       "minItems": 1
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "mission_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
     }
   },
   "required": [
@@ -145,5 +199,40 @@
     "tasks"
   ],
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "agent-plan v1"
+  "title": "Managed plan v1 legacy / v2 verified frontier",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "const": 2
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "generation",
+          "mission_digest"
+        ],
+        "properties": {
+          "tasks": {
+            "type": "array",
+            "items": {
+              "required": [
+                "requirement_ids",
+                "checks"
+              ]
+            }
+          }
+        }
+      },
+      "else": {
+        "not": {
+          "required": [
+            "generation"
+          ]
+        }
+      }
+    }
+  ]
 }

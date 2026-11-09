@@ -312,3 +312,11 @@ Rollback проверяет installed copies/backups и текущие bytes/met
 Приватные manifest/evidence, machine overlay, абсолютные пути и credentials не
 включаются в переносимый package. На другой ОС отдельно проверьте реальные paths,
 line endings, executables и cancellation; отсутствие наблюдения сохраняйте unknown.
+
+## Проверка обновлённого candidate
+
+После обновления сохраните actual source/build identity и выполните полный suite,
+release check, isolated install/upgrade/rollback и нужные live integrations.
+Новый hook definition требует штатного review/trust в новом клиенте; hot reload
+не обещается. Versioned pending migration завершается explicit recovery;
+не удаляйте lease или журнал вручную. [Runbook](STABILIZATION_RU.md).

@@ -21,14 +21,14 @@ def normalize(value):
         value["budgets"].setdefault(key, default)
     value.setdefault("model", {"inherit_installed_codex_config": True})
     value.setdefault("mode", "native")
-    value.setdefault("memory", False)
+    value.setdefault("memory", value.get("schema_version") == 2)
     value.setdefault("ledger", "inform")
     value.setdefault("inputs", [])
     if isinstance(value.get("task"), dict):
         value["task"].setdefault("read_only", False)
         value["task"].setdefault("allowed_write_scopes", [])
     if isinstance(value.get("acceptance"), list):
-        for check in value["acceptance"]:
+        for check in value["acceptance"] + value.get("node_checks", []):
             if isinstance(check, dict) and check.get("kind") == "command":
                 check.setdefault("timeout", 300)
     validate(value, "work-contract.schema.json")
@@ -55,12 +55,29 @@ def normalize(value):
         raise HarnessError("Duplicate acceptance IDs")
     if not any(check["required"] for check in checks):
         raise HarnessError("At least one applicable required acceptance criterion is necessary")
+    if value["schema_version"] == 2:
+        mission = value["mission"]
+        ids = [row["id"] for row in mission["requirements"]]
+        if len(ids) != len(set(ids)) or not any(row["required"] for row in mission["requirements"]):
+            raise HarnessError("Mission requires unique requirements and a mandatory outcome")
+        known_checks = {row["id"] for row in checks if row["required"]}
+        for row in mission["requirements"]:
+            if not set(row["acceptance_ids"]) <= {c["id"] for c in checks} or row["required"] and not set(row["acceptance_ids"]) <= known_checks:
+                raise HarnessError("Requirement must map to applicable frozen acceptance definitions")
+        local_ids = [row["id"] for row in value["node_checks"]]
+        if len(local_ids) != len(set(local_ids)):
+            raise HarnessError("Duplicate node check definitions")
+        if any(row["kind"] != "command" or not row["required"] for row in value["node_checks"]):
+            raise HarnessError("Node gates need executable required checks; unavailable semantic checks cannot become PASS")
     if value["mode"] == "native" and value["budgets"]["max_concurrent_managed_agents"] != 1:
         raise HarnessError("Native child cap and external managed concurrency are different; native mode uses one coordinator")
-    for check in checks:
+    for check in checks + value.get("node_checks", []):
         if not IDENTIFIER.fullmatch(check["id"]):
             raise HarnessError("Invalid acceptance ID")
         if check["kind"] == "command":
+            from .validation import validate_equals
+            for report in check.get("reports", []):
+                validate_equals(report.get("equals", {}))
             if not check.get("argv") or any("\x00" in item for item in check["argv"]):
                 raise HarnessError("Command check requires safe argv")
         elif not check.get("criteria"):

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "native-agent-harness"
-version = "1.5.1"
+version = "1.6.0"
 description = "Deterministic state, verification and installation tools for native Codex orchestration"
 requires-python = ">=3.11"
 dependencies = []
@@ -14,6 +14,7 @@ mcp = ["mcp==2.3.0"]
 
 [project.scripts]
 agent-harness = "agent_harness.cli:main"
+agent-harness-session = "agent_harness.native_session:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

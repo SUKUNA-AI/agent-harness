@@ -1,0 +1,519 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Execution operation receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "record_type": {
+      "enum": [
+        "invocation_intent",
+        "completion",
+        "integration_intent",
+        "integration",
+        "review",
+        "node_check",
+        "node_acceptance",
+        "coverage"
+      ]
+    },
+    "record_id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9-]{1,128}$"
+    },
+    "project_id": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "run_id": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "task_id": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "node_id": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "attempt_id": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "producer_id": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "producer_kind": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "created_at": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "harness_version": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "harness_build_digest": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "client_version": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "execution_owner": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "payload_digest": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "plan_digest": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "invocation_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "capability_receipt_ref": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "input_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 16384
+      },
+      "maxItems": 128
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "checkout": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "owner_id": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "dependency_vector": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "maxItems": 128
+        },
+        "contract_digest": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "deadline": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "dispatch_state": {
+          "enum": [
+            "possibly_dispatched",
+            "finished_observed",
+            "not_dispatched_proven",
+            "started_observed"
+          ]
+        },
+        "intent_ref": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "outcome": {
+          "enum": [
+            "completed",
+            "failed",
+            "cancelled",
+            "unknown",
+            "timed_out"
+          ]
+        },
+        "usage_scope": {
+          "enum": [
+            "individual_attempt",
+            "invocation_total"
+          ]
+        },
+        "usage_status": {
+          "enum": [
+            "complete",
+            "partial",
+            "unavailable",
+            "invalid",
+            "conflicting",
+            "unverified_legacy",
+            "not_applicable"
+          ]
+        },
+        "input_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "output_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "cached_input_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "reasoning_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "usage_source_ref": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 16384
+        },
+        "covered_event_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 16384
+          },
+          "maxItems": 10000
+        },
+        "correlation_status": {
+          "enum": [
+            "explicit",
+            "ambiguous"
+          ]
+        },
+        "started_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 16384
+        },
+        "finished_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 16384
+        },
+        "duration_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "clock": {
+          "const": "monotonic"
+        },
+        "thread_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 16384
+        },
+        "turn_started": {
+          "type": "boolean"
+        },
+        "observable_tool_calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "spawn_seconds": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "process_tree_stopped": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "logs": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "stdout": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 16384
+            },
+            "stderr": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 16384
+            },
+            "stdout_digest": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            },
+            "stderr_digest": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            }
+          },
+          "required": [
+            "stdout",
+            "stderr",
+            "stdout_digest",
+            "stderr_digest"
+          ]
+        },
+        "completion_ref": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "patch_ref": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "patch_digest": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "worker_checkout_ref": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "ownership_token": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "pre_head": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "pre_tree": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "expected_tree": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "result_head": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "result_tree": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "result_kind": {
+          "enum": [
+            "patch",
+            "read_only",
+            "unchanged"
+          ]
+        },
+        "integration_intent_ref": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "result_digest": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "candidate_digest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "verdict": {
+          "enum": [
+            "approved",
+            "changes_requested",
+            "blocked"
+          ]
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "maxItems": 16
+        },
+        "slot_wait_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "error": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "phase": {
+          "enum": [
+            "local",
+            "integration"
+          ]
+        },
+        "verification_run": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "verification_digest": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "verification_definition_digest": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "requirement_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+            "maxLength": 128
+          }
+        },
+        "check_ref": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "local_ref": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "integrated_ref": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "mission_digest": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "coverage": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+                "maxLength": 128
+              },
+              "status": {
+                "enum": [
+                  "accepted",
+                  "pending",
+                  "stale",
+                  "blocked"
+                ]
+              },
+              "evidence_ids": {
+                "type": "array",
+                "maxItems": 128,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "id",
+              "status",
+              "evidence_ids"
+            ]
+          }
+        },
+        "integration_ref": {
+          "type": "string",
+          "maxLength": 128
+        }
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "record_type",
+    "record_id",
+    "project_id",
+    "run_id",
+    "task_id",
+    "node_id",
+    "attempt_id",
+    "producer_id",
+    "producer_kind",
+    "created_at",
+    "harness_version",
+    "harness_build_digest",
+    "client_version",
+    "execution_owner",
+    "payload_digest",
+    "plan_digest",
+    "invocation_id",
+    "capability_receipt_ref",
+    "generation",
+    "input_refs",
+    "payload"
+  ]
+}

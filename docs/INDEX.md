@@ -1,7 +1,10 @@
-# Документация Native Agent Harness 1.5.1
+# Документация Native Agent Harness 1.6.0
 
 Этот индекс разделяет актуальные инструкции, короткие процедуры для агента и
 снимки прошлых проверок. Начальная точка — [README](../README.md).
+
+Новые contracts correction candidate и ограничения приёмки:
+[Стабилизация исполнения](STABILIZATION_RU.md).
 
 ## Установить и настроить
 
@@ -59,7 +62,8 @@
 
 ## Релизы, проверки и архив исследования
 
-Текущая линия: [1.5.1](RELEASE_NOTES_1.5.1.md); сохранённая база:
+Текущий выпуск — [1.6.0](RELEASE_NOTES_1.6.0.md). Предыдущие выпуски —
+[1.5.1](RELEASE_NOTES_1.5.1.md),
 [1.5.0](RELEASE_NOTES_1.5.0.md) и [1.4.2](RELEASE_1_4_2.md). Полная история:
 [CHANGELOG](../CHANGELOG.md).
 
@@ -79,3 +83,9 @@
 Числа тестов, benchmark и ограничения старого отчёта относятся к его версии.
 Состояние нового релиза проверяется по его commit, CI, отдельному verification
 report и встроенному `release-manifest.json` с hashes payload файлов.
+
+## Verified task flow
+
+- [Проверяемая очередь задач](VERIFIED_TASK_FLOW_RU.md) — contract/plan v2, node gates и текущая приёмка.
+- [Протокол matched сравнения](TASK_FLOW_EXPERIMENT_RU.md) — подготовка последующих model runs.
+- [Подготовка source-bound task-flow эксперимента](TASK_FLOW_PREPARATION_RU.md) — supplied bank, frozen policies и unknown-aware reports.

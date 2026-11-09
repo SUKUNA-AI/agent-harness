@@ -1,0 +1,48 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "manifest_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "trial_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "evaluator_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "solve_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "cwd": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "solve_outcome": {
+      "enum": [
+        "completed",
+        "failed",
+        "cancelled",
+        "timeout",
+        "environment_error",
+        "unknown"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "manifest_digest",
+    "trial_id",
+    "evaluator_digest",
+    "solve_digest",
+    "cwd",
+    "solve_outcome"
+  ]
+}

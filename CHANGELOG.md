@@ -1,5 +1,42 @@
 # История изменений
 
+## 1.6.0
+
+- SessionStart добавляет короткий начальный контекст и связывает продолжение сессии
+  с сохранённой целью, квитанциями и явной проверкой актуальности.
+- Проверка плана, исполнение узлов и итоговое ревью связаны с одним кандидатом.
+  Восстановление сохраняет дедлайны, счётчики и доказательства предыдущих вызовов.
+- На Windows сравнивается физическая идентичность каталогов с учётом коротких имён.
+  Подготовка benchmark сохраняет Git-байты при CRLF, а компактные пакеты учитывают
+  длинные пути и разные диски в прежнем лимите.
+- Захват журнала и его проекций согласован между процессами. Кэш проверяет байты
+  перед повторным использованием, а восстановление сверяет маркер до записи.
+- Полный набор Python-тестов выполняется четырьмя непересекающимися частями
+  для каждой пары ОС и версии Python.
+
+[Заметки о выпуске 1.6.0](docs/RELEASE_NOTES_1.6.0.md).
+
+### Нативная файловая система и опциональный Linux LSP
+
+- Существующий native executable использует переиспользуемую library/dispatch.
+  Legacy snapshot/repomap/info v1 сохранены; явный wire v2 добавляет ограниченный
+  закрытый capabilities contract с проверкой duplicate keys и типов.
+- Linux snapshot/RepoMap используют общее anchored read/hash ядро: bounded
+  two-pass reads, streamed SHA-256, deadline/cancel и identity checks. Добавлены
+  compiled race regressions и Python/native conformance gate.
+- Linux Tokio LSP stream mode обслуживает одну полную Session с bounded IO,
+  Content-Length framing, cancellation и owned process-group cleanup. Python
+  сохраняет semantic policy. Default transport — Python; native выбирается явно
+  через `AGENT_HARNESS_LSP_BACKEND`, без повторного запуска при ошибке.
+- Python verified core, файловые consumers, runner, Codex adapter, installer и
+  WindowsJob сохраняются. Windows/macOS strict filesystem и native LSP
+  qualification, общий кроссплатформенный релиз и улучшение качества модели
+  этой записью не заявлены.
+- Общий regression gate выявил унаследованный разрыв frontier независимых nodes.
+  После интеграции перепроверяются все завершённые nodes на текущем candidate;
+  bounded repair выполняется до интеграции остальных сохранённых результатов
+  волны. Строгий root gate сохранён, completion replay не создаёт новый вызов.
+
 ## 1.5.1 — 2026-11-02
 
 Первый самостоятельный patch release после 1.5.0. Включает исправления
@@ -257,3 +294,14 @@ native-квалификация Linux/macOS не заявляется.
 переименовываются. GitHub может показывать старое сообщение рядом с файлами,
 которые с тех пор не менялись. Версия source checkout указана в пакете и начале
 этого changelog; опубликованные releases определяются своими тегами.
+
+## Unreleased correction candidate
+
+- Durable DAG/invocation/completion/integration recovery и usage coverage v3.
+- Physical snapshot v2, anchored IO, JUnit consistency и bounded JSON equals.
+- Typed memory/evidence lifecycle, goal CAS, bounded retrievable context и inventory fixes.
+- Reversible hook installation, observer diagnostics и explicit state migration.
+- Strict format applicability и offline benchmark portfolio accounting.
+
+Это перечень изменений кода, не результаты platform/evaluation qualification.
+Оставшиеся gates и ограничения: [Стабилизация](docs/STABILIZATION_RU.md).

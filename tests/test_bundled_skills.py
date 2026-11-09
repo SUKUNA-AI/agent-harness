@@ -51,6 +51,7 @@ class BundledSkillTests(unittest.TestCase):
             shutil.copytree(PACKAGE / name, package / name)
         (package / "tools").mkdir()
         (package / "tools/harness.py").write_text("# fixture", encoding="utf-8")
+        (package / "tools/session.py").write_text("# SessionStart fixture", encoding="utf-8")
         def plan():
             return install.plan(package, self.home, self.skills, self.state, self.state / "machine.json")
         install.apply_plan(plan(), self.state, package)

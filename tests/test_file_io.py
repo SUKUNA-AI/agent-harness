@@ -58,6 +58,8 @@ class RegularFileReadTests(unittest.TestCase):
         native_open = os.open
 
         def race(path, flags, *args, **kwargs):
+            if flags & getattr(os, "O_DIRECTORY", 0):
+                return native_open(path, flags, *args, **kwargs)
             self.path.unlink()
             os.mkfifo(self.path)
             self.assertTrue(flags & os.O_NONBLOCK)
@@ -115,6 +117,7 @@ class RegularFileReadTests(unittest.TestCase):
     def test_content_verification_rejects_same_size_edit_with_unchanged_observations(self):
         self.path.write_bytes(b'{"a":1}')
         observed = self.path.lstat()
+        native_lstat, native_fstat = Path.lstat, os.fstat
         native_read = os.read
         changed = False
 
@@ -129,8 +132,8 @@ class RegularFileReadTests(unittest.TestCase):
         # Model Windows delayed timestamps explicitly: every identity/timestamp
         # observation stays unchanged; only a real content comparison can fail.
         with patch.object(file_io, "_VERIFY_CONTENT", True), \
-                patch.object(Path, "lstat", return_value=observed), \
-                patch.object(os, "fstat", return_value=observed), \
+                patch.object(Path, "lstat", autospec=True, side_effect=lambda path: observed if path == self.path else native_lstat(path)), \
+                patch.object(os, "fstat", side_effect=lambda fd: native_fstat(fd) if stat.S_ISDIR(native_fstat(fd).st_mode) else observed), \
                 patch.object(os, "read", side_effect=editing), \
                 self.assertRaisesRegex(FileReadError, "content verification"):
             read_regular_file(self.path)
@@ -155,6 +158,7 @@ class RegularFileReadTests(unittest.TestCase):
     def test_growth_during_verification_is_rejected_with_unchanged_observations(self):
         self.path.write_bytes(b"old")
         observed = self.path.lstat()
+        native_lstat, native_fstat = Path.lstat, os.fstat
         native_seek = os.lseek
 
         def growing(fd, position, whence):
@@ -162,8 +166,8 @@ class RegularFileReadTests(unittest.TestCase):
             return native_seek(fd, position, whence)
 
         with patch.object(file_io, "_VERIFY_CONTENT", True), \
-                patch.object(Path, "lstat", return_value=observed), \
-                patch.object(os, "fstat", return_value=observed), \
+                patch.object(Path, "lstat", autospec=True, side_effect=lambda path: observed if path == self.path else native_lstat(path)), \
+                patch.object(os, "fstat", side_effect=lambda fd: native_fstat(fd) if stat.S_ISDIR(native_fstat(fd).st_mode) else observed), \
                 patch.object(os, "lseek", side_effect=growing), \
                 self.assertRaisesRegex(FileReadError, "content verification"):
             read_regular_file(self.path, 3)

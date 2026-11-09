@@ -1,9 +1,10 @@
 # Установка и перенос Agent Harness
 
-Документация релиза **1.5.1**, сверена с реализацией **2026-11-02**.
-Установка подключает общие инструкции, три native-роли и семь skills к локальному
-профилю Codex. Операции выполняются явно; синхронизация GitHub сама профиль не
-обновляет. Настройки модели, provider, reasoning основного чата и безопасности
+Документация установки пакета **1.6.0**.
+Описание поведения не является подтверждением выпуска или квалификации среды.
+Установка подключает общие инструкции, три native-роли, семь skills и определение
+SessionStart hook к локальному профилю Codex. Операции выполняются явно;
+синхронизация GitHub сама профиль не обновляет. Настройки модели, provider, reasoning основного чата и безопасности
 сохраняются. Точные изменения TOML — в [справочнике конфигурации](docs/CONFIGURATION_RU.md).
 
 ## Требования и постоянные каталоги
@@ -117,12 +118,65 @@ py -3 tools/harness.py install --codex-home "$HarnessHome" --skills-home "$Harne
 | `agents/delivery_owner.toml`, `delivery_helper.toml`, `delivery_reviewer.toml` | Установить bundled native-роли: high / medium / high, без закрепления модели |
 | Skills home | Установить `agent-harness` и шесть `harness-*` skills, включая doc-author/doc-review с их ресурсами |
 | `harness-machine.json` в Codex home | Записать package root, version, overlay и state location |
+| `hooks.json` в Codex home | Добавить/обновить собственную SessionStart-группу, сохранив чужие handlers |
+| `agent-harness-hook.py` в Codex home | Создать статический launcher к `tools/session.py` выбранного пакета |
 | Private state | Сохранить `machine.json`, install history, byte backups и security metadata |
 
 Имеющийся непустой `AGENTS.override.md` получает managed block; пустой или
 отсутствующий override оставляет активным `AGENTS.md`. Чужие инструкции вокруг
 managed block сохраняются. Существующий чужой owned-файл либо ручное изменение
 установленного role/skill не перезаписываются автоматически.
+
+Hook и launcher входят в общий dry-run, backups, проверку конфликтов и rollback.
+План фиксирует digest определения handler, launcher и entrypoint. Повторная
+установка неизменного payload идемпотентна. Уже существующий unmanaged handler
+harness без явного adoption либо его подключение одновременно через config
+и hooks-файл блокируют план: сначала сопоставьте определения с diff. Установщик
+не удаляет чужие handlers и не принимает ручную установку как свою по одному совпадению команды.
+
+Для проверенного legacy wrapper есть install-only opt-in
+`--adopt-hook-sha256 EXPECTED_GROUP_DIGEST`. Сначала просмотрите ровно одну
+существующую harness SessionStart-группу и явно подтвердите её содержимое.
+Digest относится ко всей группе, а не к файлу `hooks.json` или только строке
+command. Canonical bytes: `json.dumps(group, ensure_ascii=False, indent=2,
+sort_keys=True) + "\n"`, затем UTF-8 и SHA-256 в lowercase hex. Это тот же формат,
+который использует `installation.canonical` для `handler_digest`.
+
+Из постоянного package root повторите dry-run и apply с одним проверенным
+значением; пути определены в шагах первоначальной установки:
+
+```bash
+HARNESS_HOOK_SHA256="<проверенный SHA-256 одной SessionStart-группы>"
+python3 tools/harness.py install --codex-home "$HARNESS_HOME" --skills-home "$HARNESS_SKILLS" --state-dir "$HARNESS_STATE" --adopt-hook-sha256 "$HARNESS_HOOK_SHA256"
+python3 tools/harness.py install --codex-home "$HARNESS_HOME" --skills-home "$HARNESS_SKILLS" --state-dir "$HARNESS_STATE" --adopt-hook-sha256 "$HARNESS_HOOK_SHA256" --apply
+```
+
+```powershell
+$HarnessHookSha256 = "<проверенный SHA-256 одной SessionStart-группы>"
+py -3 tools/harness.py install --codex-home "$HarnessHome" --skills-home "$HarnessSkills" --state-dir "$HarnessState" --adopt-hook-sha256 "$HarnessHookSha256"
+py -3 tools/harness.py install --codex-home "$HarnessHome" --skills-home "$HarnessSkills" --state-dir "$HarnessState" --adopt-hook-sha256 "$HarnessHookSha256" --apply
+```
+
+Adoption допускает ровно один command handler внутри выбранной группы.
+Смешанная группа с harness и пользовательскими handlers отклоняется даже при
+верном digest. Оператор сначала разделяет определения на отдельные группы,
+сохраняя matcher и порядок по требованиям клиента, затем заново проверяет
+содержимое и digest. Installer не удаляет и не переносит чужие handlers сам.
+Изменённая managed-группа без явного adoption остаётся конфликтом.
+
+Неверный digest, отсутствие или несколько harness-групп, concurrent edit и
+дублирующий config source блокируют план до target writes. Чужие группы
+сохраняются. Manifest записывает старую группу как `handler_before`, новую как
+`handler_after` и `adopted_group_digest`; обычный rollback восстанавливает legacy
+группу. Повтор того же apply с исходным digest идемпотентен только при точном
+совпадении текущего owned handler и сохранённого adoption receipt. Это разрешение
+обновить конкретное определение, без изменения client trust или автоматического
+доверия новой команде. Без флага сохраняется прежний отказ от unmanaged hook.
+
+Launcher использует Python executable, запустивший installer, и постоянный путь
+пакета. Linux-команда имеет shell quoting; Windows-команда поддерживает пути
+с пробелами и Unicode, а опасные для shell метасимволы в путях отклоняются.
+Событие поступает через stdin; его поля не добавляются в shell-команду.
 
 `harness-doc-author` ведёт документацию по фактическому коду/CLI, а
 `harness-doc-review` задаёт независимую content/visual проверку. Их наличие
@@ -132,11 +186,18 @@ managed block сохраняются. Существующий чужой owned-
 
 ## Структурная и native-проверка
 
+Успешный apply возвращает `hook_status=configured_trust_and_runtime_pending`.
+Он не редактирует внутреннюю trust database или `hooks.state` клиента и не включает
+trust bypass. Откройте новый процесс Codex, просмотрите команду и launcher через
+штатный `/hooks`, затем доверьте точное определение интерфейсом клиента.
+Изменение определения или script требует нового review. Проверьте вызов новым
+стартом сессии; наличие файлов и прямой запуск Python не доказывают callback Codex.
+
 | Наблюдение | Что подтверждает | Что ещё нужно проверить |
 |---|---|---|
 | `doctor` | Содержимое разрешённых полей, происхождение параметров, executable discovery | Реальный runtime/выбранный профиль |
-| `verify` → `structural_verified` | Manifest chain, backups/hashes, canonical installed targets и базовую согласованность | Загрузку клиентом и поведение агентов |
-| `verify --native` → `native_input_verified` | Успех новых CLI-процессов и policy marker/version во входе модели | Desktop hot reload, hosted Work, реальный spawn и выполнение задачи |
+| `verify` → `structural_verified` | Manifest chain, backups/hashes, parent bindings, canonical targets и hook definition | Trust, фактический callback клиента и поведение агентов |
+| `verify --native` → `native_input_verified` | Успех поддержанных CLI-probes и policy marker/version во входе модели | SessionStart callback, полный lifecycle, desktop hot reload и выполнение задачи |
 
 Для native probe нужен доступный `codex` в PATH. Создайте пустую папку вне
 рабочего проекта и вызовите новый процесс:
@@ -180,8 +241,9 @@ git pull --ff-only
 verify с прежними Codex home, skills home и private state. `--package-root` можно
 задать явно, если вызываете entrypoint из другого каталога. Установщик обновит
 свои ссылки на новый package root, если installed ownership и managed block
-проходят проверки. Обновление package само по себе меняет доступные по этим
-путям исходники; не считайте старую открытую сессию автоматически обновлённой.
+проходят проверки. Вместе с ними обновляется статический hook launcher;
+снова выполните review/trust штатным клиентским интерфейсом и проверку новой
+сессии. Обновление package само по себе меняет доступные по этим путям исходники; не считайте старую открытую сессию автоматически обновлённой.
 
 Примеры apply для обеих оболочек приведены выше; шаги обновления используют те
 же команды и явно выбранные каталоги. Для намеренного изменения child cap есть
@@ -268,8 +330,25 @@ py -3 tools/harness.py rollback --codex-home "$HarnessHome" --skills-home "$Harn
 ```
 
 `--manifest` не отключает integrity/конфликты и не гарантирует обход повреждённого
-machine pointer. Если discovery блокируется, сначала сопоставьте pointer,
-overlay и state с сохранёнными данными. Не придумывайте manifest или hashes.
+machine pointer. Используйте этот флаг только с текущим поддержанным installer.
+Новые install manifests имеют `schema_version=2` и
+`boundary_protocol=physical-parent-v2`; reader сохраняет поддержку legacy v1,
+не переписывая прежнюю chain. Обычный reader baseline v1 отвергает новый active
+manifest до изменения targets. Но старый бинарник с прямым `--manifest` может
+обойти собственную проверку версии: такой downgrade-путь не поддерживается.
+Не запускайте его на новой установке и не считайте смену package checkout
+доказательством безопасного отката состояния. Если discovery блокируется,
+сначала сопоставьте pointer, overlay и state с сохранёнными данными. Не придумывайте manifest или hashes.
+До изменения targets manifest сохраняет исходные target/parent identities;
+каждый target проходит `pending` → `publishing` → `applied`. Перед replace
+сохраняются identity подготовленного inode, security metadata и полная цепочка
+parents. `rollback --manifest` сверяет prepared-транзакцию после жёсткого
+завершения процесса между replace и записью результата. Same-content подмена
+target, изменение metadata или backup требуют сверки и не перезаписываются.
+Staging-файл и writer lock могут сохраниться после hard exit; сначала подтвердите
+завершение владельца и выполните операционную сверку. Автоматического удаления
+lock нет. На Windows fsync directory недоступен; POSIX hard-exit тесты не
+доказывают power-loss durability этой платформы.
 Подробный операционный порядок — [OPERATIONS](docs/OPERATIONS.md).
 
 ![Установка, проверка и откат](docs/diagrams/installation-recovery.svg)
@@ -294,7 +373,13 @@ flowchart TD
 
 </details>
 
-## Границы безопасности установки с 1.4.1
+## Физические границы установки
+
+До изменения targets проверяются их существующие ancestors, типы файлов и
+ожидаемые bytes/metadata. Root alias и промежуточные symlink/junction/reparse
+переходы по умолчанию запрещены; explicit policy для linked root не реализована.
+Используйте физический путь, а не автоматический `resolve` для обхода конфликта.
+Unsafe target блокирует план целиком; private lock/state I/O остаётся возможным.
 
 Целевые файлы должны быть обычными regular files. Symlink/reparse targets,
 FIFO, hardlinks и неподдержанные metadata отклоняются. Installer inputs
@@ -302,12 +387,25 @@ FIFO, hardlinks и неподдержанные metadata отклоняются.
 и final entry. На Windows дополнительно сравниваются два bounded чтения одного
 fd, поскольку timestamps могут обновляться с задержкой.
 
+На POSIX publication/delete привязаны к directory descriptors. Linux staging
+metadata изменяются через открытый inode; descriptor alias требует доступного
+`/proc/self/fd`, иначе операция отказывает. На Windows используются удерживаемые
+ancestor handles без разрешения share-delete; реальная junction/ACL/quoting
+квалификация Windows выполняется отдельно и не доказывается Linux-прогоном.
+
 На Linux сохраняются mode, uid/gid и точный набор доступных xattrs, включая
 POSIX ACL. На Windows проверяются DACL, owner/group и поддерживаемые обычные
 attributes; uncertain ownership и специальные attributes требуют отказа.
 Hardlinks, неподдержанные inode/platform flags и невозможность staging
 обнаруживаются до изменения targets. Путь metadata-preserving installation
 поддерживает Linux и Windows; macOS не заявляется поддержанным installer target.
+
+Legacy install manifest v2 связывает target с physical identity parent chain,
+installed digest, publication identity и backup. Замена parent другим каталогом
+блокирует install/reinstall/verify/rollback даже при byte-identical copies;
+копии в новом месте не удаляются как собственная установка. Legacy v1 не содержит
+исторического parent binding: reader проверяет текущие nofollow boundaries,
+но не выдумывает недостающую историю владения.
 
 Новые manifests и rollback journals сохраняют security metadata. Публикация
 связывает ownership с проверенным staging inode и ожидаемыми metadata. Поздняя
@@ -322,13 +420,35 @@ Linux-файлом `0600`, текущими uid/gid и отсутствием xa
 против другого процесса с теми же правами. Сохранение backup не заменяет резервное
 копирование важных пользовательских данных.
 
+Новые установки используют manifest v3 с `commit_protocol: active-binding-v1`.
+Старые readers v1/v2 остаются, но старый writer отказывает на v3 до изменения
+targets. Schema version установщика не связана с версией work-state или продукта.
+Commit доказывается проверенной цепочкой `active.json` → exact manifest, а не
+строкой `written_pending_native_verification`: native verification — отдельный
+последующий факт. До commit rollback проверяет publication identity и metadata
+во всех phases, включая final manifest и окно перед active replacement. Чужой
+same-bytes replacement сохраняется; совпадение bytes само по себе не даёт владения.
+
+После commit отдельный immutable `installs/<id>/commit.json` сохраняет исторический
+binding и checksum, поэтому смена active head не стирает доказательство предыдущей
+установки. Сам выбранный active pointer manifest для этого не переписывается.
+При позднем сбое `recovery.json` сохраняет causal error и незавершённые объекты;
+backups и pinned manifest остаются для reconciliation. Повреждённый commit receipt
+или неоднозначная chain требуют recovery без удаления targets. Настоящий committed
+rollback сохраняет прежнюю targeted policy и посторонние пользовательские edits.
+Проверки hard process exit не являются power-loss qualification. Текущие новые
+crash/ownership controls выполнены на Linux; настоящая Windows qualification
+вынесена отдельно.
+
 ## Необязательные возможности
 
 Релизный native-архив включает `harness-native` для Linux/Windows x86_64;
 compiler при его использовании не нужен. Source-only checkout может собрать
 helper через `python tools/build_native.py` с закреплённым Rust/C toolchain.
 `python tools/harness.py native status` показывает выбранный backend; Python
-snapshot fallback остаётся доступен при отсутствии helper. RepoMap требует
+snapshot fallback остаётся доступен при отсутствии helper. Наличие старого helper
+без capability snapshot scheme v2 даёт отказ с требованием rebuild, даже при той
+же версии продукта; такой отказ не скрывается Python fallback. RepoMap требует
 native backend. Для semantic code operations нужен language server языка;
 `python tools/harness.py code doctor` проверяет discovery без запуска серверов.
 LSP child живёт одну команду и завершается после неё.

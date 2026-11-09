@@ -39,14 +39,15 @@ def _adapter(value):
 
 
 def _print(value, style):
+    from .output import write_json, write_utf8
     if style == "yaml":
         from .strict_yaml import dumps
-        print(dumps(value), end="")
+        write_utf8(dumps(value))
     elif style == "json":
-        print(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
+        write_json(value)
     else:
         if "required_total" not in value:
-            print(json.dumps(value, ensure_ascii=False, indent=2))
+            write_json(value)
             return
         print(f"RUN {value['run_id']} | {value['status']} | attempt {value['attempt']}/{value['max_attempts']}")
         print(f"Acceptance: {value['required_passed']}/{value['required_total']} required criteria passed")
@@ -76,7 +77,13 @@ def _foreground(supervisor, callback):
 
 
 def dispatch(argv):
-    if argv and argv[0] in {"ledger", "memory", "format-bench"}:
+    if argv and argv[0] in {"ledger", "memory", "format-bench", "benchmark", "migrate"}:
+        if argv[0] == "migrate":
+            from .state_migration import dispatch as migration
+            return migration(argv[1:])
+        if argv[0] == "benchmark":
+            from .evaluation import dispatch as evaluation
+            return evaluation(argv[1:])
         if argv[0] == "ledger":
             from .execution_ledger import ledger_dispatch
             return ledger_dispatch(argv[1:])
@@ -87,12 +94,14 @@ def dispatch(argv):
         return benchmark(argv[1:])
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="action", required=True)
-    for action in ("start", "resume", "status", "watch", "stop", "report"):
+    for action in ("start", "resume", "status", "watch", "stop", "report", "mission-update"):
         p = commands.add_parser(action)
         p.add_argument("--run-dir", required=action != "start")
         p.add_argument("--state-dir", help="Global local state directory; shared model slot registry")
         p.add_argument("--format", choices=("text", "yaml", "json"), default="text")
         if action in {"start", "resume"}:
+            if action == "resume":
+                p.add_argument("--plan", help="Validated plan for a newly authorized mission generation")
             p.add_argument("--codex", help="Explicit executable or test adapter script; no shell interpolation")
         if action == "resume":
             p.add_argument("--repair-journal", action="store_true", help="Preserve and repair only an incomplete final journal append, then reconcile")
@@ -102,7 +111,11 @@ def dispatch(argv):
             p.add_argument("--contract", required=True)
             p.add_argument("--cwd", default=os.getcwd())
             p.add_argument("--plan", help="Explicit versioned task plan; semantic validation is mandatory")
+            p.add_argument("--max-planning-rounds", type=int, help="Only tighten managed contract2 plan-quality rounds")
             p.add_argument("--native-disabled-proof", help="Version/binary-bound native tools inventory proof for managed concurrency")
+        if action == "mission-update":
+            p.add_argument("--contract", required=True)
+            p.add_argument("--reason", required=True)
         if action == "status":
             p.add_argument("--summary", action="store_true")
         if action in {"status", "report"}:
@@ -115,6 +128,8 @@ def dispatch(argv):
     commands.add_parser("ledger", help="Version-bound execution facts; ledger --help")
     commands.add_parser("memory", help="Opt-in repository memory; memory --help")
     commands.add_parser("format-bench", help="Measured JSON/Markdown/TOON selection; format-bench --help")
+    commands.add_parser("benchmark", help="Offline frozen portfolio validation and paired accounting; benchmark --help")
+    commands.add_parser("migrate", help="Explicit v1 to v2 or --target-version 3 plan-quality upgrade; migrate --help")
     args = parser.parse_args(argv)
     try:
         from .supervisor import Supervisor, TERMINAL
@@ -122,7 +137,8 @@ def dispatch(argv):
         if args.action == "start":
             run_dir = Path(args.run_dir).absolute() if args.run_dir else state_dir / "runs" / ("work-" + uuid.uuid4().hex)
             supervisor = Supervisor.create(args.contract, run_dir=run_dir, cwd=args.cwd,
-                                           state_dir=state_dir, adapter=_adapter(args.codex))
+                                           state_dir=state_dir, adapter=_adapter(args.codex),
+                                           max_planning_rounds=args.max_planning_rounds)
             supervisor.plan_input = args.plan
             supervisor.native_disabled_proof = args.native_disabled_proof
             result = _foreground(supervisor, supervisor.start)
@@ -133,8 +149,11 @@ def dispatch(argv):
             supervisor = Supervisor(run_dir, state_dir=state_dir if args.state_dir else None,
                                     adapter=_adapter(args.codex) if hasattr(args, "codex") else None)
             if args.action == "resume":
+                supervisor.plan_input = args.plan
                 result = _foreground(supervisor, lambda: supervisor.resume(repair_journal=args.repair_journal, new_attempt=args.new_attempt,
                                            native_disabled_proof=args.native_disabled_proof))
+            elif args.action == "mission-update":
+                result = supervisor.update_mission(args.contract, reason=args.reason)
             elif args.action == "stop":
                 result = supervisor.stop(args.reason)
             elif args.action == "watch":

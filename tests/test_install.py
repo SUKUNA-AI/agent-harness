@@ -242,6 +242,7 @@ class InstallerTests(unittest.TestCase):
             shutil.copytree(source / name, self.package / name)
         (self.package / "tools").mkdir()
         (self.package / "tools/harness.py").write_text("# Installation-only fixture, no native execution claimed\n", encoding="utf-8")
+        (self.package / "tools/session.py").write_text("# Hook fixture, no native lifecycle claimed\n", encoding="utf-8")
         self.home = self.base / "профиль .codex"
         self.skills = self.base / "skills"
         self.state = self.base / "private state"

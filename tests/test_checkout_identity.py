@@ -123,19 +123,16 @@ class CheckoutIdentityTests(unittest.TestCase):
         self.assertEqual(child, checkout_identity(child))
         self.assertNotEqual(outside, checkout_identity(child))
 
-    def test_symlink_alias_uses_the_same_identity_and_lock(self):
+    def test_symlink_alias_identity_is_shared_but_snapshot_requires_physical_root(self):
         alias = self.base / "repo-alias"
         try:
             alias.symlink_to(self.repo, target_is_directory=True)
         except OSError as exc:
             self.skipTest(f"Directory symlinks unavailable: {exc}")
         self.assertEqual(self.repo, checkout_identity(alias / "src"))
-        run = self.run_fixture(self.first)
-        other = self.run_fixture(alias / "tests", "alias")
-        with run.workspace_lock():
-            with self.assertRaisesRegex(HarnessError, "Resource busy"):
-                with other.workspace_lock():
-                    self.fail("Symlink alias bypassed checkout ownership")
+        with self.assertRaisesRegex(HarnessError, "Unsafe snapshot"):
+            self.run_fixture(alias / "tests", "alias")
+        self.assertFalse((self.base / "alias").exists(), "refused root created persisted state")
 
     @unittest.skipUnless(os.name == "nt", "Windows filesystem case aliases")
     def test_windows_case_aliases_use_the_same_lock(self):

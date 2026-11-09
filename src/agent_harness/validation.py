@@ -28,18 +28,20 @@ class Inputs:
     def __init__(self):
         self.bytes_read = 0
 
-    def read(self, path):
+    def read(self, path, max_bytes=None):
         remaining = MAX_INPUT_BYTES - self.bytes_read
+        if max_bytes is not None:
+            remaining = min(remaining, max_bytes)
         descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0))
         with os.fdopen(descriptor, "rb") as source:
             observed = os.fstat(source.fileno())
             if not stat.S_ISREG(observed.st_mode):
                 raise ValueError("validation input must be a regular file")
             if observed.st_size > remaining:
-                raise InputLimit(f"validation inputs exceed {MAX_INPUT_BYTES} bytes")
+                raise InputLimit(f"validation inputs exceed {remaining} byte limit")
             value = source.read(remaining + 1)
         if len(value) > remaining:
-            raise InputLimit(f"validation inputs exceed {MAX_INPUT_BYTES} bytes")
+            raise InputLimit(f"validation inputs exceed {remaining} byte limit")
         self.bytes_read += len(value)
         return value
 
@@ -71,33 +73,154 @@ def json_equal(left, right):
     return left == right
 
 
-def _junit(data, definition):
-    import xml.etree.ElementTree as ET
+REPORT_MAX_BYTES = 2 * 1024 * 1024
+REPORT_MAX_DEPTH = 48
+REPORT_MAX_NODES = 100000
+JUNIT_PROFILE = "junit-harness-v2"
 
-    root = ET.fromstring(data)
+
+def validate_equals(value):
+    """The sole dynamic contract map; use the same JSON bounds in both paths."""
+    if type(value) is not dict or len(value) > 1000:
+        raise ValueError("reports.equals must be a bounded object")
+    if any(type(key) is not str or not 1 <= len(key) <= 1000 for key in value):
+        raise ValueError("reports.equals requires bounded string selectors")
+    _json_bounds(value)
+    if len(json.dumps(value, ensure_ascii=True, allow_nan=False).encode()) > REPORT_MAX_BYTES:
+        raise InputLimit("reports.equals exceeds byte limit")
+
+
+def _json_bounds(value, depth=0, nodes=None):
+    import math
+    nodes = [0] if nodes is None else nodes
+    nodes[0] += 1
+    if depth > REPORT_MAX_DEPTH or nodes[0] > REPORT_MAX_NODES:
+        raise InputLimit("JSON report exceeds depth/node limit")
+    if type(value) not in (dict, list, str, int, float, bool, type(None)):
+        raise ValueError("report value is not JSON")
+    if type(value) is str and len(value) > 262144:
+        raise InputLimit("JSON report exceeds string length limit")
+    if type(value) is float and not math.isfinite(value):
+        raise ValueError("non-finite report number")
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if type(key) is not str or key == "<<":
+                raise ValueError("invalid JSON-compatible contract key")
+            _json_bounds(key, depth + 1, nodes)
+            _json_bounds(child, depth + 1, nodes)
+    elif isinstance(value, list):
+        for child in value:
+            _json_bounds(child, depth + 1, nodes)
+
+
+def _json_report(data):
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise ValueError("duplicate JSON report key")
+            result[key] = value
+        return result
+    def constant(_):
+        raise ValueError("non-finite report number")
+    value = json.loads(data.decode("utf-8-sig"), object_pairs_hook=pairs, parse_constant=constant)
+    _json_bounds(value)
+    return value
+
+
+def _junit(data, definition):
+    """v2: unnamespaced or urn:junit suites, exact subtree aggregate counts.
+
+    Suite error/failure elements count as issues but not executed testcases.
+    Optional summary attributes must match observed subtree values; parent
+    aggregates are checked independently and never added to their children.
+    """
+    import xml.etree.ElementTree as ET
+    if len(data) > REPORT_MAX_BYTES:
+        raise InputLimit("JUnit report exceeds byte limit")
+    # Reject declarations even for UTF-16/32 encodings, before XML expansion.
+    if b"<!DOCTYPE" in data.replace(b"\x00", b"").upper() or b"<!ENTITY" in data.replace(b"\x00", b"").upper():
+        raise ValueError("DTD/entity declarations are forbidden")
+    parser = ET.XMLPullParser(events=("start", "end"))
+    depth = nodes = 0
+    root = None
+    namespace = None
+    for offset in range(0, len(data), 8192):
+        parser.feed(data[offset:offset + 8192])
+        for event, element in parser.read_events():
+            if event == "start":
+                depth += 1
+                nodes += 1
+                if depth > REPORT_MAX_DEPTH or nodes > REPORT_MAX_NODES:
+                    raise InputLimit("JUnit report exceeds depth/node limit")
+                if root is None:
+                    root = element
+                    namespace = "{urn:junit}" if element.tag.startswith("{urn:junit}") else ""
+                if element.tag.startswith("{") and not element.tag.startswith("{urn:junit}"):
+                    raise ValueError("unsupported JUnit namespace")
+                if namespace and not element.tag.startswith(namespace):
+                    raise ValueError("mixed JUnit namespaces")
+                element.tag = element.tag.removeprefix(namespace) if namespace else element.tag
+            else:
+                depth -= 1
+    parser.close()
+    if root is None or root.tag not in {"testsuite", "testsuites"}:
+        raise ValueError("unsupported JUnit root")
     required = [re.compile(pattern) for pattern in definition.get("required_cases", [])]
-    found, passed = [False] * len(required), [False] * len(required)
-    names = []
-    tests = skipped = failed = shortened_names = 0
-    for case in root.iter("testcase"):
-        tests += 1
-        name = f"{case.get('classname', '')}::{case.get('name', '')}"
-        status = case.get("status", "").strip().lower()
-        result = case.get("result", "").strip().lower()
-        is_skipped = (case.find("skipped") is not None or status in {"notrun", "skipped", "disabled"}
-                      or result in {"suppressed", "skipped"})
-        unknown = status not in {"", "run", "notrun", "skipped", "disabled"} or result not in {"", "completed", "suppressed", "skipped"}
-        is_failed = case.find("failure") is not None or case.find("error") is not None or unknown
-        skipped += is_skipped
-        failed += is_failed
-        if len(names) < CASE_SUMMARY_LIMIT:
-            shortened_names += len(name) > CASE_NAME_CHARS
-            names.append(name[:CASE_NAME_CHARS])
-        for index, pattern in enumerate(required):
-            if pattern.search(name):
-                found[index] = True
-                passed[index] |= not is_skipped and not is_failed
-    errors = []
+    found, passed = [False] * len(required), [True] * len(required)
+    names, case_ids, errors = [], [], []
+    shortened_names = 0
+
+    def count_attributes(element, counts):
+        for key, observed in counts.items():
+            if key in element.attrib:
+                raw = element.attrib[key]
+                if not re.fullmatch(r"[0-9]+", raw) or int(raw) != observed:
+                    errors.append("report_inconsistent: JUnit " + key + " count")
+
+    def suite(element, lineage, route=()):
+        nonlocal shortened_names
+        counts = dict.fromkeys(("tests", "skipped", "failures", "errors", "disabled"), 0)
+        lineage = [*lineage, element.get("name", element.tag)]
+        for occurrence, child in enumerate(element):
+            if child.tag == "testcase" and element.tag == "testsuite":
+                if any(item.tag not in {"failure", "error", "skipped", "system-out", "system-err", "properties"} for item in child):
+                    raise ValueError("unsupported JUnit testcase structure")
+                name = f"{child.get('classname', '')}::{child.get('name', '')}"
+                status = child.get("status", "").strip().lower()
+                result = child.get("result", "").strip().lower()
+                disabled = status == "disabled"
+                skipped = (child.find("skipped") is not None or status in {"notrun", "skipped", "disabled", "suppressed"}
+                           or result in {"suppressed", "skipped", "notrun", "disabled"})
+                unknown = status not in {"", "run", "notrun", "skipped", "disabled", "suppressed"} or result not in {"", "completed", "suppressed", "skipped", "notrun", "disabled"}
+                failure, error = child.find("failure") is not None, child.find("error") is not None or unknown
+                counts["tests"] += 1
+                counts["skipped"] += skipped
+                counts["disabled"] += disabled
+                counts["failures"] += failure
+                counts["errors"] += error
+                if len(names) < CASE_SUMMARY_LIMIT:
+                    shortened_names += len(name) > CASE_NAME_CHARS
+                    names.append(name[:CASE_NAME_CHARS])
+                    case_ids.append("/".join(map(str, (*route, occurrence))))
+                for index, pattern in enumerate(required):
+                    if pattern.search(name):
+                        found[index] = True
+                        passed[index] &= not skipped and not failure and not error
+            elif child.tag == "testsuite":
+                child_counts = suite(child, lineage, (*route, occurrence))
+                for key in counts:
+                    counts[key] += child_counts[key]
+            elif child.tag in {"failure", "error"}:
+                counts["failures" if child.tag == "failure" else "errors"] += 1
+            elif child.tag not in {"properties", "system-out", "system-err"}:
+                raise ValueError("unsupported JUnit suite structure")
+        count_attributes(element, counts)
+        return counts
+
+    counts = suite(root, [])
+    tests, skipped = counts["tests"], counts["skipped"]
+    failed = counts["failures"] + counts["errors"]
     if tests < definition.get("min_tests", 1):
         errors.append("test report collected too few cases")
     if skipped > definition.get("max_skipped", 0):
@@ -109,8 +232,9 @@ def _junit(data, definition):
             errors.append(f"mandatory case missing: {pattern.pattern}")
         elif not success:
             errors.append(f"mandatory case did not pass: {pattern.pattern}")
-    return errors, {"format": "junit", "cases": names, "tests": tests, "skipped": skipped,
-                    "failed": failed, "cases_truncated": tests > len(names) or bool(shortened_names),
+    return errors, {"format": "junit", "parser_profile": JUNIT_PROFILE, "cases": names, "case_ids": case_ids,
+                    "tests": tests, "skipped": skipped, "failed": failed,
+                    "cases_truncated": tests > len(names) or bool(shortened_names),
                     "cases_omitted": tests - len(names), "case_names_shortened": shortened_names}
 
 
@@ -158,13 +282,16 @@ def validate(request, *, literals=False, timeout=None):
             check_deadline()
             definition = item["definition"]
             try:
-                data = inputs.read(item["path"])
+                data = inputs.read(item["path"], max_bytes=REPORT_MAX_BYTES)
+                if len(data) > REPORT_MAX_BYTES:
+                    raise InputLimit("report exceeds byte limit")
                 if definition["format"] == "junit":
                     report_errors, report = _junit(data, definition)
                     errors.extend(report_errors)
                     reports.append(report)
                 elif definition["format"] == "json":
-                    value = json.loads(data.decode("utf-8-sig"))
+                    value = _json_report(data)
+                    validate_equals(definition.get("equals", {}))
                     for key, expected in definition.get("equals", {}).items():
                         cursor = value
                         for segment in key.split("."):

@@ -3,7 +3,10 @@
   "additionalProperties": false,
   "properties": {
     "schema_version": {
-      "const": 1
+      "enum": [
+        1,
+        2
+      ]
     },
     "id": {
       "type": "string",
@@ -110,7 +113,8 @@
         "cancelled",
         "blocked",
         "unknown_outcome",
-        "failed"
+        "failed",
+        "prepared"
       ]
     },
     "started_at": {
@@ -162,6 +166,123 @@
     "spawn_reason": {
       "type": "string",
       "maxLength": 16384
+    },
+    "node_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "plan_digest": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "attempt_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "owner_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "worker_checkout_ref": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "result_digest": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "completion_ref": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "integration_ref": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "invocation_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 16384
+      },
+      "maxItems": 128
+    },
+    "dependency_vector": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 16384
+      },
+      "maxItems": 128
+    },
+    "last_failure": {
+      "type": "string",
+      "maxLength": 2048
+    },
+    "failures": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "verified_ref": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "repair_base_tree": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40,64}$"
+    },
+    "retry_decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "repair",
+            "stop"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 2048
+        }
+      },
+      "required": [
+        "action",
+        "status",
+        "reason"
+      ]
     }
   },
   "required": [
@@ -184,5 +305,6 @@
     "stderr_offset",
     "checkpoint",
     "spawn_reason"
-  ]
+  ],
+  "title": "agent-state v1 legacy / v2 receipt-bound writer barrier"
 }

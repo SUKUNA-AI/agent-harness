@@ -1,0 +1,243 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 3
+    },
+    "manifest_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "measurement_kind": {
+      "enum": [
+        "synthetic",
+        "observed"
+      ]
+    },
+    "trial_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "outcome": {
+      "enum": [
+        "accepted",
+        "failed",
+        "cancelled",
+        "timeout",
+        "environment_error"
+      ]
+    },
+    "elapsed_seconds": {
+      "type": "number",
+      "minimum": 0
+    },
+    "usage_coverage": {
+      "enum": [
+        "complete",
+        "partial",
+        "unknown"
+      ]
+    },
+    "usage": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "invocation_id": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "scope": {
+            "const": "individual_attempt"
+          },
+          "phase": {
+            "enum": [
+              "initial",
+              "planner",
+              "worker",
+              "integration",
+              "reviewer",
+              "repair",
+              "retry"
+            ]
+          },
+          "status": {
+            "enum": [
+              "complete",
+              "partial",
+              "unavailable",
+              "conflicting"
+            ]
+          },
+          "input_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "output_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          }
+        },
+        "required": [
+          "invocation_id",
+          "scope",
+          "phase",
+          "status",
+          "input_tokens",
+          "output_tokens"
+        ]
+      }
+    },
+    "claimed_accepted": {
+      "type": "boolean"
+    },
+    "mandatory_nodes_skipped": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "duplicate_writes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "recovery": {
+      "enum": [
+        "not_applicable",
+        "succeeded",
+        "failed",
+        "unknown"
+      ]
+    },
+    "time_to_accepted_seconds": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "useful_retrieval": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "stale_reuse": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "hook_overhead_ms": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "evaluator_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "path",
+        "sha256"
+      ]
+    },
+    "grade_subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subject_version": {
+          "const": 1
+        },
+        "manifest_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "task_id": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "trial_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "candidate_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "candidate_scheme": {
+          "const": "ordinary-tree-no-git-v1"
+        },
+        "evaluator_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "evaluator_artifact_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "bundle_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "toolchain_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "subject_version",
+        "manifest_digest",
+        "task_id",
+        "trial_id",
+        "candidate_digest",
+        "candidate_scheme",
+        "evaluator_digest",
+        "evaluator_artifact_digest",
+        "bundle_digest",
+        "toolchain_digest"
+      ]
+    },
+    "evaluator_input_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  },
+  "required": [
+    "schema_version",
+    "manifest_digest",
+    "measurement_kind",
+    "trial_id",
+    "outcome",
+    "elapsed_seconds",
+    "usage_coverage",
+    "usage",
+    "claimed_accepted",
+    "mandatory_nodes_skipped",
+    "duplicate_writes",
+    "recovery",
+    "time_to_accepted_seconds",
+    "useful_retrieval",
+    "stale_reuse",
+    "hook_overhead_ms",
+    "evaluator_receipt",
+    "grade_subject",
+    "evaluator_input_digest"
+  ]
+}

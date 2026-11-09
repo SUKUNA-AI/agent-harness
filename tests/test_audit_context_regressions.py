@@ -28,7 +28,7 @@ class ContextAuditRegressions(unittest.TestCase):
         self.identity = repository_identity(self.repo)
         self.current = provenance_for(self.repo, snapshot({"cwd": str(self.repo)}))
 
-    def test_fallback_cutoff_counts_non_source_files_as_incomplete(self):
+    def test_snapshot_inventory_does_not_lose_source_after_non_source_files(self):
         root = self.base / "inventory"
         root.mkdir()
         for index in range(4097):
@@ -40,11 +40,11 @@ class ContextAuditRegressions(unittest.TestCase):
                 patch("agent_harness.native.backend_info", return_value={"available": False}):
             names, partial, method = _files(root)
             result = query_repository(root, "related-tests", target="auth.py")
-        self.assertEqual(names, [])
-        self.assertTrue(partial)
-        self.assertEqual(method, "bounded_file_lookup_rg_unavailable")
-        self.assertFalse(result["complete_inventory"])
-        self.assertEqual(result["results"], [])
+        self.assertEqual(names, ["tests/test_auth.py"])
+        self.assertFalse(partial)
+        self.assertEqual(method, "snapshot_inventory")
+        self.assertTrue(result["complete_inventory"])
+        self.assertIn("tests/test_auth.py", {row["file"] for row in result["results"]})
 
     def test_small_complete_fallback_inventory_remains_complete(self):
         (self.repo / "test_auth.py").write_text("from auth import validate_token\n", encoding="utf-8")
@@ -162,7 +162,7 @@ class ContextAuditRegressions(unittest.TestCase):
         memory, episode = self.episode_fixture()
         episode["evidence_refs"].reverse()
         memory.record_episode(episode)
-        self.assertEqual(len(memory.recall("two-checks", self.current)["verified_facts"]), 1)
+        self.assertEqual(len(memory.recall("two-checks", self.current)["current_observations"]), 1)
         Path(episode["evidence_refs"][1]["path"]).write_text('{"status":"failed"}', encoding="utf-8")
         recalled = memory.recall("two-checks", self.current)
         self.assertEqual(recalled["verified_facts"], [])
@@ -181,7 +181,9 @@ class PathSanitizationRegressions(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="AuditHarnessSupervisorLongPath123-")
         self.addCleanup(self.temp.cleanup)
         self.base = Path(self.temp.name).resolve()
-        self.parent = self.base / "regression-fixtures" / "independent-execution-checks" / "ordinary-local-workspace"
+        # Компонент короче 48 символов безопасен отдельно, но гарантирует энтропию
+        # сырого пути выше порога независимо от случайного суффикса tempfile.
+        self.parent = self.base / "Aa0Bb1Cc2Dd3Ee4Ff5Gg6Hh7Ii8Jj9" / "regression-fixtures" / "independent-execution-checks" / "ordinary-local-workspace"
         self.parent.mkdir(parents=True)
         # Synthetic high-entropy data, not a real provider token or credential.
         self.opaque = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789aB"
