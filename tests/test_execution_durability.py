@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from managed_process_fixture import BoundFixtureCodexAdapter as CodexAdapter, bound_fake_script
-from agent_harness.strict_yaml import dump
+from agent_harness.strict_yaml import dump, load
 from agent_harness.supervisor import Supervisor
 from agent_harness.core import HarnessError
 from agent_harness.execution_receipts import validate_record
@@ -425,9 +425,16 @@ print(json.dumps(result))
                 root = Path(temp)
                 killed = subprocess.run([sys.executable, "-c", script, str(tests), str(root), boundary], capture_output=True, timeout=30)
                 self.assertEqual(killed.returncode, -9, killed.stderr.decode())
-                recovered = subprocess.run([sys.executable, "-c", resume, str(tests), str(root)], capture_output=True, timeout=40)
+                original_deadline = load(root / "private" / "run" / "state.yaml")["deadline"]
+                watchdog = load(root / "task.yaml")["budgets"]["max_wall_seconds"]
+                # Recovery can use the fixture's wall budget. The child enforces the persisted deadline.
+                recovered = subprocess.run(
+                    [sys.executable, "-c", resume, str(tests), str(root)],
+                    capture_output=True, timeout=watchdog,
+                )
                 self.assertEqual(recovered.returncode, 0, recovered.stderr.decode())
                 result = json.loads(recovered.stdout)
                 self.assertEqual(result["status"], "ACCEPTED", result)
+                self.assertEqual(result["deadline"], original_deadline)
                 self.assertEqual((result["metrics"]["input_tokens"], result["metrics"]["output_tokens"]), (40, 12))
                 self.assertEqual((root / "fake.calls").read_text().splitlines(), ["exec"] * 4)
