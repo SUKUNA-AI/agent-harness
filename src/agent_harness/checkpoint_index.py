@@ -215,6 +215,14 @@ class CheckpointIndex:
         diagnostics, selected, cache = [], [], {}
         with observer_lock(self.root / ".lock", purpose="checkpoint index selection", timeout=self.limits["deadline_ms"] / 1000):
             inventory, complete = self._inventory(deadline, metrics)
+            # A complete inventory containing only the excluded checkpoint
+            # establishes that there is no foreign context to rank or read.
+            if (complete and exclude_session is not None and cursor is None and not rebuild
+                    and inventory.keys() == {exclude_session + ".yaml"}):
+                metrics.update(inventory_complete=True, scan_complete=True, selection_scope="all_foreign_records",
+                               index_generation=None, invalid_records=0, next_cursor=None, terminal_diagnostic=None,
+                               wall_ms=(time.monotonic() - start) * 1000, cpu_ms=(time.process_time() - cpu) * 1000)
+                return selected, diagnostics, metrics
             prior = self._load_index(metrics)
             current = (prior is not None and prior["limits_digest"] == digest(self.limits)
                        and prior["inventory"] == inventory and prior["inventory_complete"] and complete)

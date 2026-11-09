@@ -21,7 +21,7 @@ from .failure_policy import PreparationFailure, PREPARATION_TARGETS, PREPARATION
 from .file_io import ParentDirectory, read_regular_file, same_directory
 from .strict_yaml import validate, MAX_BYTES
 from .supervisor_store import atomic_write
-from .agent_lifecycle import LEASE_SCHEMA
+from .agent_lifecycle import LEASE_SCHEMA, MANAGED_SLOT_NAMES
 
 HASH = {"type": "string", "pattern": "^[a-f0-9]{64}$"}
 TEXT = {"type": "string", "maxLength": 16384}
@@ -77,7 +77,7 @@ EVENT_SCHEMAS = {
         attempt={"type": "integer", "minimum": 1}, previous_attempts_used=INTEGER,
         preparation_id=NULL_HASH, repair={"type": "boolean"}, thread_id=NULL_TEXT, prompt_digest=HASH)),
     "root_model_reservation_bound": _schema("root_model_reservation_bound", dict(reservation_id=HASH,
-        binding_index={"type": "integer", "minimum": 1}, slot_name={"type": "string", "pattern": "^slot-[0-4]\\.yaml$"},
+        binding_index={"type": "integer", "minimum": 1}, slot_name={"type": "string", "enum": list(MANAGED_SLOT_NAMES)},
         lease=LEASE_SCHEMA, slot_identity=STAMP)),
     "root_model_reservation_release_authorized": _schema("root_model_reservation_release_authorized", dict(
         reservation_id=HASH, binding_index={"type": "integer", "minimum": 1}, slot_lease_digest=HASH,

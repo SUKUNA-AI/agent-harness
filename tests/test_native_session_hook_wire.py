@@ -167,7 +167,7 @@ class NativeHookWireTests(unittest.TestCase):
             self.assertEqual(view['reason_code'], 'BUDGET_TOO_SMALL')
             self.assertEqual(view['required_context'], 'not_delivered')
         else:
-            self.assertEqual(view['packet']['required']['root'], str(self.root))
+            self.assertTrue(session.packet_path(view['packet'], 'root').samefile(self.root))
             self.assertEqual(view['packet']['required']['constraints'], session.SESSION_CONSTRAINTS)
         metadata = list((self.state/'native-sessions').glob('*/session.json'))
         self.assertLessEqual(len(metadata), 1)

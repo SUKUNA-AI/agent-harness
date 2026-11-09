@@ -347,10 +347,13 @@ def session_packet(state, *, root=None, goal=None, session=None, note=None,
                 raise HarnessError("STALE_OPERATION_REPLAY: context changed or unavailable; preserve receipt and request a fresh handoff")
             # The Python API has the same complete transport bound as the CLI.
             json_bytes(packet_envelope(packet), max_bytes=max_bytes)
-            context = replay_context(memory, ledger, current, session, goal, row, own_checkpoint)
             references = [ref for ref in operation.get("input_refs", []) if ref["kind"] == "context_replay"]
-            if (not context["complete"] or len(references) != 1
-                    or references[0]["content_digest"] != digest(context)):
+            if len(references) != 1:
+                raise HarnessError("STALE_OPERATION_REPLAY: original context proof unavailable; request a fresh handoff")
+            context = replay_context(memory, ledger, current, session, goal, row, own_checkpoint)
+            if not context["complete"]:
+                raise HarnessError("STALE_OPERATION_REPLAY: context proof incomplete on replay; request a fresh handoff")
+            if references[0]["content_digest"] != digest(context):
                 raise HarnessError("STALE_OPERATION_REPLAY: context proof changed or unavailable; request a fresh handoff")
             return packet
         if generation_conflict:
@@ -461,16 +464,18 @@ def session_packet(state, *, root=None, goal=None, session=None, note=None,
             "constraints": "Memory true; Ledger inform; no model calls; observations are not authority"},
             current, actor="native-session-adapter")
         if operation_path:
+            context = replay_context(memory, ledger, current, session, goal, committed_checkpoint, own_checkpoint)
+            references = [{"kind": "checkpoint_request", "id": operation_id, "content_digest": request_digest, "scope": "session"},
+                          input_ref("source", current["snapshot_id"], current, "project"),
+                          input_ref("goal", str(generation), {"goal": goal, "generation": generation}, "session")]
+            if context["complete"]:
+                references.append(input_ref("context_replay", session, context, "session"))
             operation = {"schema_version": 2, "record_type": "native_checkpoint_operation", "operation_id": operation_id,
                 "committed": True, "request_digest": request_digest, "packet_path": str(packet_path), "packet_digest": digest(packet),
                 **envelope(record_id="checkpoint-operation-" + digest(operation_id)[:32],
                     project_id=current["repository_identity"], producer_id="native-session-adapter", producer_kind="native_checkpoint_adapter",
                     producer_module=__name__, generation=metadata["receipt_generation"],
-                    input_refs=[{"kind": "checkpoint_request", "id": operation_id, "content_digest": request_digest, "scope": "session"},
-                                input_ref("source", current["snapshot_id"], current, "project"),
-                                input_ref("goal", str(generation), {"goal": goal, "generation": generation}, "session"),
-                                input_ref("context_replay", session,
-                                    replay_context(memory, ledger, current, session, goal, committed_checkpoint, own_checkpoint), "session")])}
+                    input_refs=references)}
             operation["payload_digest"] = digest({key: operation[key] for key in OPERATION_V1_SCHEMA["properties"] if key != "schema_version"})
             seal(operation)
             sanitized(operation)

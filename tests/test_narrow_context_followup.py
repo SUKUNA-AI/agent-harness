@@ -149,6 +149,28 @@ class NarrowContextFollowup(unittest.TestCase):
         self.assertTrue(updated["index_hit"])
         self.assertGreater(updated["index_generation"], warm["index_generation"])
 
+    def test_complete_own_only_inventory_needs_no_index_or_record_read(self):
+        self.memory.update_short_term(self.short("own"))
+        index = CheckpointIndex(self.memory.root, self.project)
+        with patch.object(index, "_load_index", side_effect=AssertionError("unexpected index read")), \
+                patch.object(index, "_read_record", side_effect=AssertionError("unexpected record read")):
+            rows, diagnostics, metrics = index.select(exclude_session="own")
+        self.assertEqual((rows, diagnostics), ([], []))
+        self.assertTrue(metrics["inventory_complete"] and metrics["scan_complete"])
+        self.assertEqual(metrics["inventory_entries_examined"], 1)
+        self.assertEqual(metrics["records_examined"], 0)
+        self.assertIsNone(metrics["next_cursor"])
+
+        capped = CheckpointIndex(self.memory.root, self.project, limits={"max_inventory_entries": 1})
+        _, diagnostics, metrics = capped.select(exclude_session="own")
+        self.assertFalse(metrics["scan_complete"])
+        self.assertIn({"reason": "foreign_scan_bound", "complete": False}, diagnostics)
+
+        self.memory.update_short_term(self.short("other"))
+        rows, _, metrics = index.select(exclude_session="own")
+        self.assertEqual([row["id"] for row, _ in rows], ["other"])
+        self.assertGreater(metrics["source_bytes_read"], 0)
+
     def test_corrupt_index_rebuild_and_partial_cursor_do_not_claim_global_latest(self):
         for i in range(4):
             self.memory.update_short_term(self.short("entry-" + str(i)))

@@ -237,6 +237,32 @@ class RootPreparationTests(unittest.TestCase):
             self.assertEqual(resumed.resume()['status'],'ACCEPTED')
             self.assertEqual(self.calls(),b'exec\n')
 
+    def test_sixth_slot_reservation_resumes_without_duplicate_dispatch(self):
+        owner = self.fixture(attempts=1)
+        deadline = owner.state["deadline"]
+        registry = GlobalSlots(owner.state_dir)
+        with ExitStack() as stack:
+            occupied = []
+            for number in range(5):
+                lease = stack.enter_context(registry.acquire(f"fixture-{number}", "other", "owner"))
+                stack.callback(lease.complete)
+                occupied.append(lease)
+            before = {lease.name: registry.store.path(lease.name).read_bytes() for lease in occupied}
+            reservation = self.interrupted_reservation(owner, before_counter=True)
+            bindings = protocol.reservation_bindings(owner, reservation)
+            self.assertEqual([item["slot_name"] for item in bindings], ["slot-5.yaml"])
+            self.assertEqual(self.calls(), b"")
+
+            resumed = Supervisor(owner.path, adapter=self.adapter)
+            result = resumed.resume()
+            self.assertEqual(result["status"], "ACCEPTED", self.adapter.failure_summary(result))
+            self.assertEqual(result["global_model_slots"], MAX_MANAGED_MODEL_SLOTS)
+            self.assertEqual(resumed.state["deadline"], deadline)
+            intent, = (row for row in resumed.receipts().records() if row["record_type"] == "invocation_intent")
+            self.assertEqual(intent["invocation_id"], reservation["invocation_id"])
+            self.assertEqual(self.calls(), b"exec\n")
+            self.assertEqual({name: registry.store.path(name).read_bytes() for name in before}, before)
+
     def test_changed_optional_prompt_context_blocks_without_retarget_or_second_reservation(self):
         owner=self.fixture(memory=True)
         reservation=self.interrupted_reservation(owner);deadline=owner.state['deadline']

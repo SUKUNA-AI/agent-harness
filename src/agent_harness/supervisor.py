@@ -1059,7 +1059,7 @@ class Supervisor:
             and any(observed.get(k) != state.get(k) for k in ("cwd", "source_cwd", "core_run", "integration_worktree", "contract_digest", "candidate_digest")))
         # Read-only reconstruction does not rewrite the authoritative journal.
         accounting = self.receipts().reconcile_usage()
-        from .agent_lifecycle import GlobalSlots
+        from .agent_lifecycle import GlobalSlots, MAX_MANAGED_MODEL_SLOTS
         registry = GlobalSlots(self.state_dir, create=False)
         inventory = registry.inventory()
         active = [row for row in inventory if row["child_alive"]]
@@ -1070,7 +1070,7 @@ class Supervisor:
             "required_passed": sum(c["status"] == "passed" for c in required), "required_total": len(required),
             "acceptance": state["acceptance"], "thread_id": state["thread_id"],
             "last_progress_at": state["last_progress_at"], "cwd": state["cwd"],
-            "source_cwd": state["source_cwd"], "global_model_slots": 5,
+            "source_cwd": state["source_cwd"], "global_model_slots": MAX_MANAGED_MODEL_SLOTS,
             "revision": state["revision"], "baseline_digest": state["baseline_digest"],
             "environment": state["environment"], "budgets": self.contract["budgets"],
             "recorded_status": state["status"],

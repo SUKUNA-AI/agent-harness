@@ -26,6 +26,7 @@ LEASE_SCHEMA = {"type": "object", "additionalProperties": False,
                 "required": ["schema_version", "run_id", "task_id", "role", "identity", "created_at", "lease_id", "status", "child_identity"]}
 
 MAX_MANAGED_MODEL_SLOTS = 12
+MANAGED_SLOT_NAMES = tuple(f"slot-{slot}.yaml" for slot in range(MAX_MANAGED_MODEL_SLOTS))
 MAX_CONCURRENT_REVIEWERS = 3
 
 
@@ -143,8 +144,7 @@ class GlobalSlots:
         if self.store is None:
             return []
         rows = []
-        for slot in range(MAX_MANAGED_MODEL_SLOTS):
-            name = "slot-" + str(slot) + ".yaml"
+        for slot, name in enumerate(MANAGED_SLOT_NAMES):
             if not self.store.path(name).exists():
                 continue
             value = self.store.read(name, LEASE_SCHEMA)
@@ -171,8 +171,8 @@ class GlobalSlots:
                 continue
             if row.get("tree_cleanup_required") and completion["payload"]["process_tree_stopped"] is not True:
                 continue
-            name = "slot-" + str(row["slot"]) + ".yaml"
-            with _os_lock(self.store.root / ("slot-" + str(row["slot"]) + ".guard")):
+            name = MANAGED_SLOT_NAMES[row["slot"]]
+            with _os_lock(self.store.root / (Path(name).stem + ".guard")):
                 value = self.store.read(name, LEASE_SCHEMA)
                 if value["lease_id"] != row["lease_id"] or identity_alive(value["child_identity"]):
                     raise HarnessError("Model slot changed during completion reconciliation")
@@ -242,8 +242,8 @@ class GlobalSlots:
                 with admission:
                     if role != "reviewer" or sum(row["unresolved"] and row["role"] == "reviewer"
                                                        for row in self.inventory()) < MAX_CONCURRENT_REVIEWERS:
-                        for slot in range(MAX_MANAGED_MODEL_SLOTS):
-                            guard = self.store.root / ("slot-" + str(slot) + ".guard")
+                        for name in MANAGED_SLOT_NAMES:
+                            guard = self.store.root / (Path(name).stem + ".guard")
                             if guard.is_symlink():
                                 raise HarnessError("Unsafe model slot guard")
                             context = _os_lock(guard)
@@ -253,7 +253,6 @@ class GlobalSlots:
                                 if "busy" in str(error).lower():
                                     continue
                                 raise
-                            name = "slot-" + str(slot) + ".yaml"
                             try:
                                 check_admission()
                                 if self.store.path(name).exists():

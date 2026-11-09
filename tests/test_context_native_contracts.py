@@ -17,7 +17,7 @@ from agent_harness.runner import run_check, gate
 from agent_harness.context_reducer import reduce, retrieve_recordset
 from agent_harness.execution_ledger import provenance_for, validity
 from agent_harness.memory import Memory, typed_reference
-from agent_harness.native_session import session_packet, hook_packet, current_provenance
+from agent_harness.native_session import session_packet, hook_packet, current_provenance, packet_path
 from agent_harness.native_observability import observe, status, verification_bridge
 from agent_harness.repomap_queries import query_repository
 from agent_harness.strict_yaml import load
@@ -214,6 +214,24 @@ class Contracts(unittest.TestCase):
         with self.assertRaisesRegex(HarnessError, "OPERATION_ID_CONFLICT"):
             session_packet(self.state, session=identifier, note="Different", next_step="Review", operation_id="checkpoint-one")
 
+    def test_incomplete_context_still_commits_one_checkpoint_and_receipt(self):
+        identifier = self.start()["required"]["session"]
+        request = dict(session=identifier, note="Completed check", next_step="Review", operation_id="incomplete")
+        with patch("agent_harness.native_session.replay_context", return_value={"complete": False}):
+            packet = session_packet(self.state, **request)
+        directory = self.state / "native-sessions" / identifier
+        operation = directory / "operation-incomplete.yaml"
+        receipt = load(operation)
+        self.assertTrue(receipt["committed"])
+        self.assertNotIn("context_replay", {ref["kind"] for ref in receipt["input_refs"]})
+        checkpoint = self.state / "memory" / packet["required"]["repository_identity"] / "short_term" / (identifier + ".yaml")
+        events = set((directory / "ledger" / "events").glob("*.yaml"))
+        before = {path: path.read_bytes() for path in (operation, checkpoint, directory / "session.json", *events)}
+        with self.assertRaisesRegex(HarnessError, "original context proof unavailable"):
+            session_packet(self.state, **request)
+        self.assertEqual({path: path.read_bytes() for path in before}, before)
+        self.assertEqual(set((directory / "ledger" / "events").glob("*.yaml")), events)
+
     def test_utf8_ascii_pipe_and_bound(self):
         unicode_root = self.base / "Проект中文😀"
         unicode_root.mkdir()
@@ -222,7 +240,7 @@ class Contracts(unittest.TestCase):
             env={**os.environ, "PYTHONIOENCODING": "ascii"}, capture_output=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertLessEqual(len(result.stdout) + 1, 2048)
-        self.assertEqual(json.loads(result.stdout)["root"], str(unicode_root))
+        self.assertTrue(packet_path(json.loads(result.stdout)["packet"], "root").samefile(unicode_root))
         with self.assertRaises(UnicodeEncodeError):
             session_packet(self.base / "bad-state", root=self.root, goal="bad\ud800")
         self.assertFalse((self.base / "bad-state").exists())
