@@ -138,8 +138,8 @@ policy во входе модели; фактический SessionStart callbac
 Для управляемого цикла подготовьте **private contract** с целью, разрешёнными
 write scopes, executable acceptance checks и бюджетами. Пример contract и
 пошаговый tutorial — [Execution Supervisor](docs/EXECUTION_SUPERVISOR_RU.md).
-Для managed memory явно задайте `memory: true`, `ledger: inform`:
-upstream default памяти — `false`.
+Для managed memory явно задайте `memory: true`, `ledger: inform`.
+Default памяти зависит от версии контракта: v1 — `false`, v2 — `true`.
 
 Команды из package root; замените абсолютные пути. На Windows используйте
 `py -3` и пути Windows:
