@@ -63,9 +63,11 @@ accepted task в проверенном report.
 
 Contract: [work schema](../schemas/work-contract.schema.json). Defaults:
 max_attempts3 (initial edit включён), managed concurrency1, max_wall_seconds7200,
-turn_timeout_seconds1800, mode native, ledger inform. Default `memory` — `false`
-для contract v1 и `true` для contract v2; явное значение сохраняется. Global cap
-managed sessions5; contract может понизить до1. Max tokens проверяется по native
+turn_timeout_seconds1800, mode native, ledger inform. Default `memory`:
+contract v1 — `false`, contract v2 — `true`; явное значение сохраняется.
+В managed-контрактах указывайте `memory: true` и `ledger: inform` явно.
+Общий лимит — 12 managed sessions, из них одновременно не более 3 reviewer.
+Параллельность конкретного run задаёт contract. Max tokens проверяется по native
 reported usage на границах turns, не внутри скрытого model runtime.
 
 `inputs` — до 128 объектов `{path, sha256?}`; `path` абсолютный ordinary file,
