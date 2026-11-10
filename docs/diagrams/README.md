@@ -15,7 +15,7 @@ acceptance и восстановления в пределах исходных 
 
 | Просмотреть SVG | Редактируемый source | Объяснение и Mermaid source | Реализация |
 | --- | --- | --- | --- |
-| [Задача, исполнители и приёмка](task-delivery.svg) | [.drawio](task-delivery.drawio) | [README.md](../../README.md), Mermaid #1 | [orchestration.py](../../src/agent_harness/orchestration.py), [runner.py](../../src/agent_harness/runner.py) |
+| [Задача, исполнители и приёмка](task-delivery.svg) | [.drawio](task-delivery.drawio) | [Задача, исполнители и приёмка](#task-delivery-mermaid), Mermaid #1 | [orchestration.py](../../src/agent_harness/orchestration.py), [runner.py](../../src/agent_harness/runner.py) |
 | [Установка, проверка и откат](installation-recovery.svg) | [.drawio](installation-recovery.drawio) | [SETUP_RU.md](../../SETUP_RU.md), Mermaid #1 | [installation.py](../../src/agent_harness/installation.py) |
 | [Слои исполнения 1.6.1](runtime-architecture.svg) | [.drawio](runtime-architecture.drawio) | [Архитектура](../ARCHITECTURE_RU.md), Mermaid #1 | [supervisor.py](../../src/agent_harness/supervisor.py), [native_session.py](../../src/agent_harness/native_session.py), [core.py](../../src/agent_harness/core.py) |
 | [Выбор источника контекста](context-routing.svg) | [.drawio](context-routing.drawio) | [Архитектура](../ARCHITECTURE_RU.md), Mermaid #2 | [context.py](../../src/agent_harness/context.py), [repo_map.py](../../src/agent_harness/repo_map.py), [lsp.py](../../src/agent_harness/lsp.py) |
@@ -31,6 +31,38 @@ acceptance и восстановления в пределах исходных 
 | [Durable execution: intent, receipt и gate](durable-execution.svg) | [.drawio](durable-execution.drawio) | [Stabilization](../STABILIZATION_RU.md), Mermaid #1 | [execution_receipts.py](../../src/agent_harness/execution_receipts.py), [dependency_commit.py](../../src/agent_harness/dependency_commit.py) |
 | [Память, provenance и retrieval](memory-provenance.svg) | [.drawio](memory-provenance.drawio) | [Memory/context](../MEMORY_AND_CONTEXT_RU.md), Mermaid #1 | [execution_ledger.py](../../src/agent_harness/execution_ledger.py), [memory.py](../../src/agent_harness/memory.py), [context_reducer.py](../../src/agent_harness/context_reducer.py) |
 | [LSP rename: preview, apply и recovery](lsp-rename.svg) | [.drawio](lsp-rename.drawio) | [LSP](../LSP_RU.md), Mermaid #1 | [lsp.py](../../src/agent_harness/lsp.py), [rename.py](../../src/agent_harness/rename.py) |
+
+<a id="task-delivery-mermaid"></a>
+
+## Задача, исполнители и приёмка
+
+Схема показывает выбор прямого выполнения или независимых исполнителей,
+общую интеграцию, проверку и возврат подтверждённых дефектов владельцам.
+[SVG](task-delivery.svg) и [редактируемый XML](task-delivery.drawio) представляют
+тот же поток.
+
+<details>
+<summary>Mermaid source той же схемы</summary>
+
+```mermaid
+flowchart TD
+    Request["Цель и ограничения пользователя"] --> Scope["Основной агент: scope и критерии"]
+    Scope --> Split{"Есть независимые части и slots?"}
+    Split -->|"Нет"| Direct["Прямое выполнение"]
+    Split -->|"Да"| Briefs["План, общий контекст и отдельные scopes"]
+    Briefs --> OwnerA["Владелец A: отдельный worktree"]
+    Briefs --> OwnerB["Владелец B: отдельный worktree"]
+    OwnerA --> Integrate["Интеграция общего candidate"]
+    OwnerB --> Integrate
+    Direct --> Integrate
+    Integrate --> Review["Проверка; независимое ревью по необходимости"]
+    Review --> Findings{"Остались подтверждённые дефекты?"}
+    Findings -->|"Да"| Repair["Одна сводка исправлений владельцам"]
+    Repair --> Integrate
+    Findings -->|"Нет"| Accept["Актуальные evidence и итоговая приёмка"]
+```
+
+</details>
 
 ## Как обновить схему
 
