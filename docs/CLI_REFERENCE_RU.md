@@ -1,4 +1,4 @@
-# Справочник CLI — 1.6.0
+# Справочник CLI — 1.6.1
 
 Этот справочник описывает текущие аргументы парсера и значения по умолчанию.
 Практический полный сценарий — [эксплуатация](OPERATIONS.md#полный-локальный-пример),
@@ -289,7 +289,7 @@ Optional MCP — отдельный read-only интерфейс metadata, см.
 [format_bench.py](../src/agent_harness/format_bench.py). При расхождении установленного
 `--help` с этой страницей сначала сверяйте версию/путь запускаемого пакета.
 
-## Операции исполнения и native-контекста в 1.6.0
+## Операции исполнения и native-контекста в 1.6.1
 
 `work migrate --run-dir RUN --expected-generation N` даёт dry-run. Apply требует
 `--apply --expected-plan-digest SHA`; `--recover OPERATION_ID` явно завершает

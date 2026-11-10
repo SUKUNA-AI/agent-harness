@@ -1,4 +1,4 @@
-# Динамические агенты и DAG — 1.6.0
+# Динамические агенты и DAG — 1.6.1
 
 [Supervisor](EXECUTION_SUPERVISOR_RU.md) · [Координация](ORCHESTRATION_RU.md) · [Приёмка](ACCEPTANCE.md)
 

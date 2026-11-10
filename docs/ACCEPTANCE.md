@@ -1,4 +1,4 @@
-# Приёмка и виды доказательств — 1.6.0
+# Приёмка и виды доказательств — 1.6.1
 
 Supervisor применяет тот же gate после завершения model edit phase. Required
 criteria проходят независимо от model exit/status; optional failure остаётся
@@ -10,7 +10,7 @@ recovery marker блокирует актуальную приёмку до яв
 Универсальный пакет, его подключение к клиенту и результат конкретной задачи
 принимаются отдельно. Этот документ задаёт критерии; фактические результаты
 связываются с текущим commit и разрешённым private evidence.
-[release notes 1.6.0](RELEASE_NOTES_1.6.0.md) описывают текущий интерфейс и границы поставки.
+[release notes 1.6.1](RELEASE_NOTES_1.6.1.md) описывают текущий интерфейс и границы поставки.
 `not_run`, `unknown`, `unavailable`, `skipped` и `unverified` не означают passed.
 Полный работающий fixture с JSON contract/evidence —
 [эксплуатация](OPERATIONS.md#полный-локальный-пример).

@@ -1,4 +1,4 @@
-# Контекст, snapshots и native backend — 1.6.0
+# Контекст, snapshots и native backend — 1.6.1
 
 Эта страница помогает выбрать минимальный инструмент для чтения проекта и
 понять его стоимость. Полные flags/defaults/exit codes —

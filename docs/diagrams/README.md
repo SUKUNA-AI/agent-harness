@@ -1,4 +1,4 @@
-# Редактируемые диаграммы 1.6.0
+# Редактируемые диаграммы 1.6.1
 
 [Индекс документации](../INDEX.md) · [Архитектура](../ARCHITECTURE_RU.md)
 
@@ -8,7 +8,7 @@
 раскрываемым блоком. Во всех трёх представлениях должны совпадать узлы, связи,
 условия и подписи. Для просмотра SVG не нужны draw.io, JavaScript или сеть.
 
-В 1.6.0 добавлены отдельные схемы native-сессии, verified task flow и durable
+В 1.6.1 добавлены отдельные схемы native-сессии, verified task flow и durable
 receipts. Обзорные схемы обновлены для SessionStart, plan-quality gate, node
 acceptance и восстановления в пределах исходных budgets. Схема показывает
 контракт поведения; она не является подтверждением прохождения runtime gates.
@@ -17,7 +17,7 @@ acceptance и восстановления в пределах исходных 
 | --- | --- | --- | --- |
 | [Задача, исполнители и приёмка](task-delivery.svg) | [.drawio](task-delivery.drawio) | [README.md](../../README.md), Mermaid #1 | [orchestration.py](../../src/agent_harness/orchestration.py), [runner.py](../../src/agent_harness/runner.py) |
 | [Установка, проверка и откат](installation-recovery.svg) | [.drawio](installation-recovery.drawio) | [SETUP_RU.md](../../SETUP_RU.md), Mermaid #1 | [installation.py](../../src/agent_harness/installation.py) |
-| [Слои исполнения 1.6.0](runtime-architecture.svg) | [.drawio](runtime-architecture.drawio) | [Архитектура](../ARCHITECTURE_RU.md), Mermaid #1 | [supervisor.py](../../src/agent_harness/supervisor.py), [native_session.py](../../src/agent_harness/native_session.py), [core.py](../../src/agent_harness/core.py) |
+| [Слои исполнения 1.6.1](runtime-architecture.svg) | [.drawio](runtime-architecture.drawio) | [Архитектура](../ARCHITECTURE_RU.md), Mermaid #1 | [supervisor.py](../../src/agent_harness/supervisor.py), [native_session.py](../../src/agent_harness/native_session.py), [core.py](../../src/agent_harness/core.py) |
 | [Выбор источника контекста](context-routing.svg) | [.drawio](context-routing.drawio) | [Архитектура](../ARCHITECTURE_RU.md), Mermaid #2 | [context.py](../../src/agent_harness/context.py), [repo_map.py](../../src/agent_harness/repo_map.py), [lsp.py](../../src/agent_harness/lsp.py) |
 | [Выбор snapshot backend](snapshot-backends.svg) | [.drawio](snapshot-backends.drawio) | [Архитектура](../ARCHITECTURE_RU.md), Mermaid #3 | [native.py](../../src/agent_harness/native.py), [core.py](../../src/agent_harness/core.py) |
 | [Checkpoint, handoff и свежесть](context-recovery.svg) | [.drawio](context-recovery.drawio) | [Архитектура](../ARCHITECTURE_RU.md), Mermaid #4 | [core.py](../../src/agent_harness/core.py), [presentation.py](../../src/agent_harness/presentation.py) |

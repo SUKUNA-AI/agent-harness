@@ -1,4 +1,4 @@
-# Архитектура Native Agent Harness 1.6.0
+# Архитектура Native Agent Harness 1.6.1
 
 [Индекс](INDEX.md) · [README](../README.md) · [CLI](CLI_REFERENCE_RU.md)
 
@@ -10,7 +10,7 @@ Harness сочетает штатное исполнение Codex с локал
 
 ## 1. Кто исполняет работу
 
-В 1.6.0 foreground control plane включает `supervisor.py`, транспорт
+В 1.6.1 foreground control plane включает `supervisor.py`, транспорт
 `codex_execution.py`, durable `supervisor_store.py` и `strict_yaml.py`.
 Native SessionStart работает отдельно через `native_session.py` и не
 запускает supervisor. Для managed contract v2 `plan_quality.py` проверяет
@@ -20,7 +20,7 @@ Native SessionStart работает отдельно через `native_session
 [Execution Supervisor](EXECUTION_SUPERVISOR_RU.md). Ledger/memory/context:
 [Memory](MEMORY_AND_CONTEXT_RU.md); DAG/worktrees: [Dynamic](DYNAMIC_AGENTS_RU.md).
 
-![Слои исполнения 1.6.0](diagrams/runtime-architecture.svg)
+![Слои исполнения 1.6.1](diagrams/runtime-architecture.svg)
 
 [Редактировать в draw.io](diagrams/runtime-architecture.drawio) · [Все схемы](diagrams/README.md)
 

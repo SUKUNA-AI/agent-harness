@@ -153,7 +153,7 @@ Hook получает только cwd/native session ID/source; цель bootst
 или чужое устройство. Уже открытый чат не доказывает загрузку новых hooks.
 Никакие model/provider/effort, permissions или compaction settings не меняются.
 
-## Контракты native-контекста в 1.6.0
+## Контракты native-контекста в 1.6.1
 
 Generic hook сохраняет explicit active goal; отдельный `goal-update` требует
 expected generation. Checkpoint принимает устойчивый `--operation-id` для

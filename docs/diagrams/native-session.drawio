@@ -106,7 +106,7 @@
         <mxCell id="Revalidate" value="Retrieval и применимые проверки;&#10;история не становится PASS" style="rounded=1;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=10;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
           <mxGeometry x="780" y="1450" width="300" height="86" as="geometry" />
         </mxCell>
-        <mxCell id="footer" value="1.6.0 • обзор; required unknown/skipped не становятся PASS" style="text;html=0;align=left;fontFamily=Arial;fontSize=13;fontColor=#526A82;" parent="1" vertex="1">
+        <mxCell id="footer" value="1.6.1 • обзор; required unknown/skipped не становятся PASS" style="text;html=0;align=left;fontFamily=Arial;fontSize=13;fontColor=#526A82;" parent="1" vertex="1">
           <mxGeometry x="30" y="1565" width="1140" height="30" as="geometry" />
         </mxCell>
       </root>

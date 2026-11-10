@@ -1,6 +1,6 @@
 # Установка и перенос Agent Harness
 
-Документация установки пакета **1.6.0**.
+Документация установки пакета **1.6.1**.
 Описание поведения не является подтверждением выпуска или квалификации среды.
 Установка подключает общие инструкции, три native-роли, семь skills и определение
 SessionStart hook к локальному профилю Codex. Операции выполняются явно;
@@ -17,9 +17,9 @@ SessionStart hook к локальному профилю Codex. Операции
 MCP и plugin подключаются отдельно по конкретной задаче.
 
 Возьмите checkout либо
-[полный ZIP 1.6.0](https://github.com/SUKUNA-AI/agent-harness/releases/download/v1.6.0/agent-harness-1.6.0.zip).
+[полный ZIP 1.6.1](https://github.com/SUKUNA-AI/agent-harness/releases/download/v1.6.1/agent-harness-1.6.1.zip).
 Сверьте `SHA256SUMS`, `release-manifest.json` и source revision из
-[описания выпуска](docs/RELEASE_NOTES_1.6.0.md). Архив исходников GitHub
+[описания выпуска](docs/RELEASE_NOTES_1.6.1.md). Архив исходников GitHub
 и релизный архив с native-бинарниками различаются. Сохраните распакованный пакет
 в постоянной папке: bootstrap, роли и skills ссылаются на его policy/workflows.
 Не устанавливайте из временной загрузки, которую затем удалите.

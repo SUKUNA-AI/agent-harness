@@ -1,4 +1,4 @@
-# Execution Supervisor — 1.6.0
+# Execution Supervisor — 1.6.1
 
 [Индекс](INDEX.md) · [CLI](CLI_REFERENCE_RU.md) · [Форматы состояния](STATE_FORMATS_AND_MIGRATION_RU.md)
 
@@ -289,7 +289,7 @@ limit для скрытого inference внутри turn. Неизвестны�
 Дополнительные ограничения режима managed описаны в
 [Dynamic Agents](DYNAMIC_AGENTS_RU.md).
 
-## Сохраняемое исполнение в 1.6.0
+## Сохраняемое исполнение в 1.6.1
 
 Work-state v2 ввёл связь полного persisted plan с immutable invocation,
 completion и integration receipts. Текущий новый managed run с work-contract v2

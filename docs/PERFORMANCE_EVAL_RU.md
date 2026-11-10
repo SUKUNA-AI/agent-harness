@@ -1,4 +1,4 @@
-# Метрики и эксперименты — 1.6.0
+# Метрики и эксперименты — 1.6.1
 
 [Источники](SOURCES_AND_EVALS.md) · [Memory/context](MEMORY_AND_CONTEXT_RU.md)
 
@@ -109,7 +109,7 @@ evidence hashes и residual limitations. Required `not_run`, `skipped`,
 usage описывайте по актуальному runtime; не выдавайте schema field за
 гарантированный hard backend limit.
 
-## Applicability и portfolio в 1.6.0
+## Applicability и portfolio в 1.6.1
 
 Alias installed/null fingerprint не разрешает automatic TOON. Receipt v2
 связывает route/config, client binary/build, evaluator/template, data/shape и

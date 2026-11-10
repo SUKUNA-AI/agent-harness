@@ -1,4 +1,4 @@
-# Ledger, память и контекст — 1.6.0
+# Ledger, память и контекст — 1.6.1
 
 [Supervisor](EXECUTION_SUPERVISOR_RU.md) · [CLI](CLI_REFERENCE_RU.md) · [Оценка](PERFORMANCE_EVAL_RU.md)
 
@@ -234,7 +234,7 @@ TOON остаётся optional input representation. Условия измере
 
 ## Разделение source, evidence и presentation
 
-Версия 1.6.0 проверяет полный snapshot до compact details. Source-current
+Версия 1.6.1 проверяет полный snapshot до compact details. Source-current
 self-report выдаётся как current observation, verified facts требуют allowlisted
 core verifier receipt и current evidence lifecycle. Typed namespace не выбирает
 первую запись при bare-ID collision. Corrupt optional foreign record изолируется;

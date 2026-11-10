@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="1200" height="1130" viewBox="0 0 1200 1130" role="img" aria-labelledby="title desc">
   <title id="title">Выбор snapshot backend</title>
-  <desc id="desc">Agent Harness 1.6.0. Текстовое описание и Mermaid находятся в связанном руководстве.</desc>
+  <desc id="desc">Agent Harness 1.6.1. Текстовое описание и Mermaid находятся в связанном руководстве.</desc>
   <rect width="1200" height="1130" fill="#FFFFFF" />
   <defs>
     <marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse">
@@ -101,6 +101,6 @@
     <tspan x="980.0" y="737.0">запуска через Python</tspan>
   </text>
   <text x="30" y="1110" font-family="Arial, sans-serif" font-size="13" text-anchor="start" fill="#18324F">
-    <tspan x="30" y="1110.0">1.6.0 • обзор; required unknown/skipped не становятся PASS</tspan>
+    <tspan x="30" y="1110.0">1.6.1 • обзор; required unknown/skipped не становятся PASS</tspan>
   </text>
 </svg>
