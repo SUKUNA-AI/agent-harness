@@ -233,7 +233,7 @@ def _verify_qualification_ref(supervisor, binding, *, require_execution=False, s
         execution_log=execution_log)
 
 
-def _configured(supervisor, selected, *, root, role, node_id, attempt_id):
+def _configured(supervisor, selected, *, root, role, node_id, attempt_id, read_context=None):
     """Configure first, then ask the native verifier for fresh strong claims.
 
     This helper does not reserve a model/planning slot or mutate run state. Its
@@ -266,6 +266,11 @@ def _configured(supervisor, selected, *, root, role, node_id, attempt_id):
     configure = getattr(adapter, "with_tool_config", None)
     if native and callable(configure):
         adapter = configure(native, root=root)
+    if read_context:
+        configure_reads = getattr(adapter, "with_read_context", None)
+        if backend != "opencode" or profile_role not in {"reviewer", "planner"} or not callable(configure_reads):
+            raise HarnessError("BLOCKED_NOT_QUALIFIED: exact read-only context grants unavailable")
+        adapter = configure_reads(read_context)
     elif profile["id"] != "baseline" and not callable(configure):
         raise HarnessError("BLOCKED_NOT_QUALIFIED: backend lacks tool configuration support")
     qualify = getattr(adapter, "qualify", None)
@@ -313,7 +318,7 @@ def admit_reviewer(supervisor):
         root=supervisor.state["cwd"], role="reviewer", node_id="@review-admission", attempt_id="admission")[0]
 
 
-def prepare(supervisor, selected, *, root, role, node_id, attempt_id, worktree=None, prior=None):
+def prepare(supervisor, selected, *, root, role, node_id, attempt_id, worktree=None, prior=None, read_context=None):
     """Fresh native qualification before model admission; source-bound receipt.
 
     `prior` is required on exact resume and checked before any model slot. The
@@ -328,7 +333,8 @@ def prepare(supervisor, selected, *, root, role, node_id, attempt_id, worktree=N
                 raise HarnessError("EXACT_RESUME_DRIFT: saved tool receipt changed")
             _verify_qualification_ref(supervisor, saved)
         adapter, profile, readiness, native, capabilities, root, cache, graph = _configured(
-            supervisor, selected, root=root, role=role, node_id=node_id, attempt_id=attempt_id)
+            supervisor, selected, root=root, role=role, node_id=node_id, attempt_id=attempt_id,
+            read_context=read_context)
         info = root.stat()
         identity = {"backend": backend, "executable": list(getattr(adapter, "executable", ())),
             "binary_sha256": capabilities.get("binary_sha256", "unobserved"), "version": capabilities.get("version", "unobserved"),

@@ -100,6 +100,27 @@ class ToolingQualificationWiringTests(unittest.TestCase):
         self.assertIn("qualify", fixture.observations)
         self.assertFalse(self.fake.with_suffix(".calls").exists())
 
+    def test_exact_read_context_is_configured_before_native_qualification_without_a_model_slot(self):
+        supervisor = self.create(profile=False)
+        supervisor.load()
+        fixture = NativeVerifierFixture(self.opencode.executable)
+        supervisor.adapter["opencode"] = fixture
+        paths = [self.source / "left.py"]
+        def configure_reads(adapter, values):
+            adapter.observations.append("read-context")
+            clone = copy.copy(adapter)
+            clone.read_context = list(values)
+            return clone
+        with patch.object(NativeVerifierFixture, "with_read_context", configure_reads, create=True):
+            configured, _ = prepare(supervisor, {"backend": "opencode"}, root=self.source,
+                role="reviewer", node_id="@review", attempt_id="context-1", read_context=paths)
+            self.assertEqual(fixture.observations[:6], ["base-caps", "configure", "read-context", "qualify", "verify", "fresh-caps"])
+            self.assertEqual(configured.adapter.read_context, paths)
+            with self.assertRaisesRegex(HarnessError, "read-only context grants unavailable"):
+                prepare(supervisor, {"backend": "opencode"}, root=self.source,
+                    role="owner", node_id="left", attempt_id="context-worker", read_context=paths)
+        self.assertFalse(self.fake.with_suffix(".calls").exists())
+
     def test_readonly_reviewer_admission_does_not_upgrade_state_or_reserve_round(self):
         # Use the real verified-flow state so an accidental round reservation
         # or tooling-state migration is observable.

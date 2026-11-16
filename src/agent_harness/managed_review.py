@@ -7,7 +7,7 @@ from pathlib import Path
 import time
 from typing import Any, TypedDict, cast
 
-from .agent_lifecycle import GlobalSlots, guard_invocations, invocation_timeout, post_invocation_guard, InvocationUnresolved
+from .agent_lifecycle import GlobalSlots, guard_invocations, invocation_timeout, post_invocation_guard, InvocationUnresolved, git
 from .codex_execution import MAX_EVENT_BYTES, MAX_LOG_BYTES
 from .core import HarnessError, digest
 from .file_io import read_regular_file
@@ -39,6 +39,49 @@ class InvalidRawVerdict(ValueError):
     """A persisted response violates the bounded reviewer output protocol."""
     def __init__(self, reason):
         super().__init__("Invalid final-review raw verdict: " + reason)
+
+
+def _readonly_context(supervisor, run, schema, candidate):
+    """Explicit frozen review inputs; never expose the private run directory."""
+    attempt = Path(run.attempt_dir())
+    files = [attempt / name for name in ("candidate.json", "baseline.json", "toolchains.json")]
+    checks = attempt / "checks"
+    if checks.exists():
+        files.extend(sorted(p for p in checks.rglob("*")
+            if (p.is_file() or p.is_symlink()) and all(not part.startswith(".") for part in p.relative_to(checks).parts)))
+    files.append(Path(schema))
+    directory = attempt / "review-context"
+    directory.mkdir(mode=0o700, exist_ok=True)
+    difference = git(supervisor.state["cwd"], "diff", "--no-ext-diff", "--no-textconv", "--binary",
+        supervisor.state["revision"], "--")
+    if len(difference) > 4 * 1024 * 1024:
+        raise HarnessError("Read-only combined diff exceeds review context bound")
+    diff_path = directory / "combined.diff"
+    if diff_path.exists():
+        if read_regular_file(diff_path, max_bytes=4 * 1024 * 1024) != difference:
+            raise HarnessError("Frozen combined review diff changed")
+    else:
+        atomic_write(diff_path, difference, exclusive=True)
+    files.append(diff_path)
+    if len(files) > 127:
+        raise HarnessError("Read-only review context exceeds file count bound")
+    entries, size = [], 0
+    for path in files:
+        raw = read_regular_file(path, max_bytes=4 * 1024 * 1024)
+        size += len(raw)
+        if size > 16 * 1024 * 1024:
+            raise HarnessError("Read-only review context exceeds total byte bound")
+        entries.append({"path": str(path), "sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)})
+    manifest = {"schema_version": 1, "candidate_digest": candidate["digest"],
+        "base_revision": supervisor.state["revision"], "files": entries, "combined_diff": str(diff_path)}
+    manifest_path = directory / "manifest.json"
+    data = (json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    if manifest_path.exists():
+        if read_regular_file(manifest_path, max_bytes=4 * 1024 * 1024) != data:
+            raise HarnessError("Frozen read-only review context changed")
+    else:
+        atomic_write(manifest_path, data, exclusive=True)
+    return [*files, manifest_path], {"manifest": str(manifest_path), "files": entries, "combined_diff": str(diff_path)}
 
 
 def _raw_verdict(raw, schema="managed-review.schema.json"):
@@ -312,20 +355,7 @@ def review_candidate(supervisor, run, candidate):
             return None
         review_adapter = supervisor._adapter()
         tool_ref = None
-        if ("review_execution" in supervisor.contract or "execution" in supervisor.contract
-                or any("execution" in row for row in supervisor.store.read(supervisor.state["plan_path"], "agent-plan.tooling.v1.schema.json")["tasks"])):
-            from .execution import prepare as prepare_execution, selection
-            try:
-                review_adapter, tool_ref = prepare_execution(supervisor, selection(supervisor.contract, review=True),
-                    root=supervisor.state["cwd"], role="reviewer", node_id="@review",
-                    attempt_id="review-" + str(len(all_intents) + 1))
-            except HarnessError as error:
-                supervisor.transition("BLOCKED_ENVIRONMENT", str(error))
-                return None
         backend = supervisor.contract.get("review_execution", {}).get("backend", "codex")
-        if backend == "codex" and not review_adapter.capabilities().get("output_schema"):
-            supervisor.transition("BLOCKED_ENVIRONMENT", "Fresh final review needs structured output capability")
-            return None
         if binding:
             schema = Path(_bound_schema(binding))
         else:
@@ -336,17 +366,35 @@ def review_candidate(supervisor, run, candidate):
                     raise HarnessError("Final-review output schema integrity conflict")
             else:
                 atomic_write(schema, data, exclusive=True)
+        context_paths, read_context = _readonly_context(supervisor, run, schema, candidate) if backend == "opencode" else (None, None)
+        if ("review_execution" in supervisor.contract or "execution" in supervisor.contract
+                or any("execution" in row for row in supervisor.store.read(supervisor.state["plan_path"], "agent-plan.tooling.v1.schema.json")["tasks"])):
+            from .execution import prepare as prepare_execution, selection
+            try:
+                review_adapter, tool_ref = prepare_execution(supervisor, selection(supervisor.contract, review=True),
+                    root=supervisor.state["cwd"], role="reviewer", node_id="@review",
+                    attempt_id="review-" + str(len(all_intents) + 1),
+                    **({"read_context": context_paths} if context_paths else {}))
+            except HarnessError as error:
+                supervisor.transition("BLOCKED_ENVIRONMENT", str(error))
+                return None
+        if backend == "codex" and not review_adapter.capabilities().get("output_schema"):
+            supervisor.transition("BLOCKED_ENVIRONMENT", "Fresh final review needs structured output capability")
+            return None
         # This is a fresh session: the integrator's exact thread remains intact
         # for bounded repairs by the same combined-candidate owner.
         prompt = compile_packet(supervisor, "HARNESS_FINAL_REVIEW\nReview the final frozen candidate read-only. "
             "Compare the ORIGINAL mission against all requirements, outputs, combined diff and raw evidence. "
             "Do not edit, spawn, change settings, commit or publish. Return only structured schema output. "
-            "Use changes_requested for defects and blocked for missing evidence. Read every required part.", {
+            "Use changes_requested for defects and blocked for missing evidence. Read every required part. "
+            + ("Read raw evidence using only the exact read_context.files paths; directory scans are denied. "
+               "Use the supervisor check outputs without rerunning commands. Return one JSON object without code fences. " if read_context else ""), {
                 "goal": supervisor.contract["task"]["objective"], "task": supervisor.contract["task"],
                 "mission": supervisor.contract.get("mission"),
                 "plan": supervisor.store.read(supervisor.state["plan_path"], "agent-plan.tooling.v1.schema.json"),
                 "acceptance": supervisor.contract["acceptance"], "candidate_digest": candidate["digest"],
                 "raw_evidence": str(run.attempt_dir()),
+                **({"read_context": read_context} if read_context else {}),
                 "coverage": supervisor.plan_progress().get("requirements"),
                 "prior_reviewer_failure": prior_failure,
                 "completion_policy": binding,
