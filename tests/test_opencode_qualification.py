@@ -423,8 +423,14 @@ class LiveOpenCodeQualificationTests(unittest.TestCase):
                     self.assertEqual(result["status"], "completed", result)
                     self.assertTrue(any(request["sensitive_marker_observed"] for request in requests[1:]),
                         "The actual native read must deliver the declared evidence to the provider")
-                else:
+                elif tool == "read":
                     self.assertFalse(any(request["sensitive_marker_observed"] for request in requests))
+                else:
+                    # The hostile response itself already contains edit.old's
+                    # marker, so its later presence is not a read-leak signal.
+                    self.assertNotIn("edit", [item["function"]["name"] for item in requests[0]["tools"]])
+                    log = Path(result["logs"]["stdout"]).read_text()
+                    self.assertTrue(result["status"] != "completed" or '"status":"error"' in log or '"status": "error"' in log)
 
     def test_forged_guard_plugin_id_is_denied_before_module_evaluation(self):
         with self.native_case() as (base, root, qualified, requests):
