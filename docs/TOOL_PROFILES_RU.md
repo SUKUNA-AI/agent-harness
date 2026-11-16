@@ -129,7 +129,10 @@ settings digest, index bytes/digest/path и время. Замена исход�
 
 Несовпадение даёт `STALE_GRAPH_INDEX`; `required=False` возвращает только
 `HISTORICAL_ONLY` с причинами. Проверка повторно сверяет actual current source.
-Reviewer получает уже построенный индекс; build не выполняется внутри reviewer.
+`preflight_profile(..., graph_index=receipt)` требует полный verified provenance receipt.
+Профиль с `index.required: true` без него блокируется до запуска dependency
+процессов; при stale binding также BLOCKED. Reviewer получает уже построенный
+индекс; build не выполняется внутри reviewer.
 Граф не заменяет чтение импортов/вызовов, dependency checks, tests и gate.
 
 ## ast-grep

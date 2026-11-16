@@ -251,6 +251,27 @@ class ToolProfileTests(unittest.TestCase):
             verify_graph_index(receipt, frozen)
         self.assertEqual(verify_graph_index(receipt, frozen, required=False)["status"], "HISTORICAL_ONLY")
 
+    def test_required_graph_readiness_blocks_before_process_without_current_binding(self):
+        profile = self.profile()
+        profile["index"] = {"required": True, "policy": "frozen_source", "provider": "graphify"}
+        missing = preflight_profile(profile, "codex", self.source)
+        self.assertEqual(missing["status"], "BLOCKED")
+        self.assertIn("REQUIRED_GRAPH_INDEX_MISSING", missing["reason"])
+        self.assertEqual(missing["servers"], [])
+        frozen = source_snapshot(self.source)
+        fixture = FIXTURES / "fake_graphify.py"
+        graph = build_graph_index(self.source, frozen, self.root / "artifacts",
+            [sys.executable, str(fixture), "{source_root}", "{index_output}"],
+            tool_version="fixture-graphify 1", version_argv=[sys.executable, str(fixture), "--version"])
+        current = preflight_profile(profile, "codex", self.source, graph_index=graph)
+        self.assertEqual(current["status"], "READY", current)
+        self.assertEqual(current["graph_index"]["identity"], graph["identity"])
+        (self.source / "symbol.py").write_text("CHANGED = True\n")
+        stale = preflight_profile(profile, "codex", self.source, graph_index=graph)
+        self.assertEqual(stale["status"], "BLOCKED")
+        self.assertEqual(stale["servers"], [])
+        self.assertIn("STALE_GRAPH_INDEX", stale["reason"])
+
     def test_graph_artifacts_cannot_pollute_source(self):
         with self.assertRaises(HarnessError):
             build_graph_index(self.source, source_snapshot(self.source), self.source / "index",

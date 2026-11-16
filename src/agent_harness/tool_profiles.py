@@ -279,7 +279,7 @@ def inspect_cli(dependency, *, timeout=10):
     return {"id": dependency["id"], "status": "NOT_AVAILABLE", "reason": "executable/version unavailable or unsupported"}
 
 
-def preflight_profile(profile, backend, root, role="worker", *, cache_root=None):
+def preflight_profile(profile, backend, root, role="worker", *, cache_root=None, graph_index=None):
     """Live dependency diagnostics, explicitly separate from client attestation."""
     from .tooling_probe import probe_server
     profile = load_profile(profile)
@@ -290,6 +290,18 @@ def preflight_profile(profile, backend, root, role="worker", *, cache_root=None)
         "client_catalog_verified": False, "acceptance": "not_performed"}
     try:
         _role(profile, backend, role)
+        index_policy = profile.get("index", {})
+        if index_policy.get("required") and graph_index is None:
+            raise HarnessError("REQUIRED_GRAPH_INDEX_MISSING: bind a verified frozen-source index receipt before dispatch")
+        if graph_index is not None:
+            if not isinstance(graph_index, dict):
+                raise HarnessError("Graph index binding must be a full provenance receipt")
+            from .tooling_provenance import source_snapshot, verify_graph_index
+            verify_graph_index(graph_index, source_snapshot(root))
+            if index_policy and graph_index.get("provider") != index_policy.get("provider"):
+                raise HarnessError("Graph index provider differs from profile")
+            receipt["graph_index"] = {key: graph_index[key] for key in
+                ("identity", "index_digest", "source_snapshot_digest", "index_path")}
         for dep in profile["cli"]:
             observed = inspect_cli(dep, timeout=profile["timeouts"]["startup"])
             receipt["cli"].append(observed)
