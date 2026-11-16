@@ -276,9 +276,11 @@ def execute_managed(supervisor, *, recovering=False):
         if tooling_enabled(contract, proposed):
             if proposed is not None:
                 validate(proposed, "agent-plan.tooling.v1.schema.json")
-            backend = contract.get("review_execution", {}).get("backend", "codex")
-            if supervisor._adapter(backend).capabilities().get("reviewer_isolation_qualified") is not True:
-                supervisor.transition("BLOCKED_ENVIRONMENT", "BLOCKED_NOT_QUALIFIED: tooling DAG requires effective final-reviewer isolation before planning/worker admission")
+            from .execution import admit_reviewer
+            try:
+                admit_reviewer(supervisor)
+            except (HarnessError, OSError, ValueError) as error:
+                supervisor.transition("BLOCKED_ENVIRONMENT", "Tooling final-reviewer admission before planning/worker admission: " + str(error))
                 return supervisor._loop()
             ensure_tooling_state(supervisor, plan=proposed)
     except (HarnessError, OSError, ValueError) as error:
@@ -365,9 +367,11 @@ def execute_managed(supervisor, *, recovering=False):
     tooling = ("execution" in contract or "review_execution" in contract
                or any("execution" in node for node in plan["tasks"]))
     if tooling:
-        review_backend = contract.get("review_execution", {}).get("backend", "codex")
-        if supervisor._adapter(review_backend).capabilities().get("reviewer_isolation_qualified") is not True:
-            supervisor.transition("BLOCKED_ENVIRONMENT", "BLOCKED_NOT_QUALIFIED: tooling DAG requires effective final-reviewer isolation before worker admission")
+        from .execution import admit_reviewer
+        try:
+            admit_reviewer(supervisor)
+        except (HarnessError, OSError, ValueError) as error:
+            supervisor.transition("BLOCKED_ENVIRONMENT", "Tooling final-reviewer admission before worker admission: " + str(error))
             return supervisor._loop()
     # No proven per-request upper bounds exist. Serialize budgeted dispatch and
     # check complete coverage before each call; do not claim a backend hard cap.

@@ -121,62 +121,162 @@ class ProfileExecution:
         return result
 
 
+def _qualification_ref(supervisor, adapter, role):
+    receipt = getattr(adapter, "qualification_receipt", None)
+    if not callable(receipt):
+        if callable(getattr(adapter, "qualify", None)):
+            raise HarnessError("BLOCKED_NOT_QUALIFIED: backend has no immutable qualification receipt")
+        return None
+    ref = receipt()
+    if ref is None:
+        if callable(getattr(adapter, "qualify", None)):
+            raise HarnessError("BLOCKED_NOT_QUALIFIED: backend qualification receipt missing")
+        return None
+    if not isinstance(ref, dict) or set(ref) != {"path", "sha256"}:
+        raise HarnessError("Invalid native qualification reference")
+    role = {"owner": "worker", "helper": "worker", "architect": "planner"}.get(role, role)
+    validate({**ref, "role": role}, _schema("tool-execution.schema.json")["properties"]["client_qualification"])
+    path = Path(ref["path"])
+    if not path.is_absolute() or ".." in path.parts:
+        raise HarnessError("Native qualification reference must be an absolute owned path")
+    try:
+        relative = path.relative_to(supervisor.path).as_posix()
+    except ValueError as error:
+        raise HarnessError("Native qualification reference escaped private run store") from error
+    result = {"path": relative, "sha256": ref["sha256"], "role": role}
+    validate(result, _schema("tool-execution.schema.json")["properties"]["client_qualification"])
+    if hashlib.sha256(read_regular_file(supervisor.store.path(relative), max_bytes=4 * 1024 * 1024)).hexdigest() != ref["sha256"]:
+        raise HarnessError("Native qualification receipt bytes changed")
+    return result
+
+
+def _verify_qualification_ref(supervisor, binding, *, require_execution=False, session_id=None, catalog_artifacts=None):
+    """Persisted evidence verifies closure; it never grants native capabilities."""
+    ref = binding.get("client_qualification")
+    if ref is None:
+        return
+    path = supervisor.store.path(ref["path"])
+    if hashlib.sha256(read_regular_file(path, max_bytes=4 * 1024 * 1024)).hexdigest() != ref["sha256"]:
+        raise HarnessError("Native qualification evidence changed")
+    if binding["identity"]["backend"] != "opencode":
+        raise HarnessError("Unsupported native qualification evidence backend")
+    try:
+        from .opencode_qualification import verify_qualification_evidence
+    except ImportError as error:
+        raise HarnessError("Native qualification evidence verifier unavailable") from error
+    verify_qualification_evidence({"path": str(path), "sha256": ref["sha256"]},
+        root=Path(binding["identity"]["root"]), role=ref["role"],
+        require_execution=require_execution, session_id=session_id, catalog_artifacts=catalog_artifacts)
+
+
+def _configured(supervisor, selected, *, root, role, node_id, attempt_id):
+    """Configure first, then ask the native verifier for fresh strong claims.
+
+    This helper does not reserve a model/planning slot or mutate run state. Its
+    bounded qualification artifacts belong to the existing private run store.
+    """
+    from .tool_profiles import load_profile, preflight_profile, render_codex, render_opencode
+    from .strict_yaml import load
+    validate_selection(selected)
+    profile_role = {"owner": "worker", "helper": "worker", "architect": "planner"}.get(role, role)
+    backend = selected.get("backend", "codex")
+    adapter = supervisor._adapter(backend)
+    capabilities = adapter.capabilities(deadline=supervisor.state["deadline"])
+    if capabilities.get("status") == "unsupported":
+        raise HarnessError("UNSUPPORTED_CAPABILITY: " + backend + " version " + str(capabilities.get("version", "unknown")))
+    if capabilities.get("status") not in {"observed", "qualified"}:
+        raise HarnessError("Backend capability preflight unavailable")
+    profile = load_profile(selected.get("tool_profile"))
+    if supervisor.remaining() <= 0:
+        raise HarnessError("Absolute task deadline expired before tool readiness")
+    root = canonical_directory(root)
+    cache = supervisor.path / "tool-cache" / node_id.replace("@", "_")
+    graph = load(selected["graph_index"]["path"]) if selected.get("graph_index") else None
+    readiness = preflight_profile(profile, backend, root, profile_role, cache_root=cache, graph_index=graph)
+    if readiness["status"] != "READY":
+        raise HarnessError("TOOL_PROFILE_NOT_READY: " + json.dumps(readiness, ensure_ascii=False))
+    if supervisor.remaining() <= 0:
+        raise HarnessError("Absolute task deadline expired during tool readiness")
+    native = (render_codex if backend == "codex" else render_opencode)(profile, root, role=profile_role, cache_root=cache)
+    configure = getattr(adapter, "with_tool_config", None)
+    if native and callable(configure):
+        adapter = configure(native, root=root)
+    elif profile["id"] != "baseline" and not callable(configure):
+        raise HarnessError("BLOCKED_NOT_QUALIFIED: backend lacks tool configuration support")
+    qualify = getattr(adapter, "qualify", None)
+    if callable(qualify):
+        remaining = supervisor.remaining()
+        if remaining <= 0:
+            raise HarnessError("Absolute task deadline expired before backend qualification")
+        adapter = qualify(root=root, role=profile_role,
+            evidence_dir=cache / "qualification" / attempt_id, timeout=min(remaining, 120))
+        verify = getattr(adapter, "verify_qualification", None)
+        if not callable(verify):
+            raise HarnessError("BLOCKED_NOT_QUALIFIED: backend qualification has no verifier")
+        verify(root=root, role=profile_role)
+        # Qualification may inject a core-owned pre-turn catalog guard. Hash
+        # the final native configuration, not the earlier renderer fragment.
+        native = deepcopy(getattr(adapter, "tool_config", getattr(adapter, "_tool_config", native)))
+    capabilities = adapter.capabilities(deadline=supervisor.state["deadline"])
+    if capabilities.get("status") not in {"observed", "qualified"}:
+        raise HarnessError("BLOCKED_NOT_QUALIFIED: configured backend capability preflight unavailable")
+    if backend == "opencode" and capabilities.get("managed_leaf_qualified") is not True:
+        raise HarnessError("BLOCKED_NOT_QUALIFIED: OpenCode managed leaf isolation is not live qualified")
+    for name in selected.get("required_capabilities", []):
+        if capabilities.get(name) is not True:
+            raise HarnessError("BLOCKED_NOT_QUALIFIED: required backend capability " + name)
+    if profile["servers"] and capabilities.get("effective_tool_catalog") is not True:
+        raise HarnessError("BLOCKED_NOT_QUALIFIED: execution-bound effective MCP catalog is unqualified; diagnostic catalog is insufficient")
+    if callable(qualify):
+        if capabilities.get("effective_tool_catalog") is not True:
+            raise HarnessError("BLOCKED_NOT_QUALIFIED: native verifier lacks effective catalog evidence")
+        validate(capabilities.get("effective_catalog_digest"),
+            _schema("tool-execution.schema.json")["properties"]["identity"]["properties"]["catalog_digest"])
+        _qualification_ref(supervisor, adapter, profile_role)
+    if role == "reviewer" and capabilities.get("reviewer_isolation_qualified") is not True:
+        raise HarnessError("BLOCKED_NOT_QUALIFIED: effective reviewer catalog, shell, plugins and MCP isolation need live enforcement")
+    if supervisor.remaining() <= 0:
+        raise HarnessError("Absolute task deadline expired during backend qualification")
+    return adapter, profile, readiness, native, capabilities, root, cache, graph
+
+
+def admit_reviewer(supervisor):
+    """Read-only final-review admission before planning/worker reservations."""
+    return _configured(supervisor, selection(supervisor.contract, review=True),
+        root=supervisor.state["cwd"], role="reviewer", node_id="@review-admission", attempt_id="admission")[0]
+
+
 def prepare(supervisor, selected, *, root, role, node_id, attempt_id, worktree=None, prior=None):
-    """Fresh readiness before model admission; immutable source-bound receipt.
+    """Fresh native qualification before model admission; source-bound receipt.
 
     `prior` is required on exact resume and checked before any model slot. The
     existing process/ownership recovery remains authoritative and precedes this.
     """
-    from .tool_profiles import load_profile, profile_digest, preflight_profile, render_codex, render_opencode
-    validate_selection(selected)
-    profile_role = {"owner": "worker", "helper": "worker", "architect": "planner"}.get(role, role)
+    from .tool_profiles import profile_digest
     backend = selected.get("backend", "codex")
     try:
-        adapter = supervisor._adapter(backend)
-        capabilities = adapter.capabilities(deadline=supervisor.state["deadline"])
-        if capabilities.get("status") == "unsupported":
-            raise HarnessError("UNSUPPORTED_CAPABILITY: " + backend + " version " + str(capabilities.get("version", "unknown")))
-        if capabilities.get("status") not in {"observed", "qualified"}:
-            raise HarnessError("Backend capability preflight unavailable")
-        if backend == "opencode" and capabilities.get("managed_leaf_qualified") is not True:
-            raise HarnessError("BLOCKED_NOT_QUALIFIED: OpenCode managed leaf isolation is not live qualified")
-        for name in selected.get("required_capabilities", []):
-            if capabilities.get(name) is not True:
-                raise HarnessError("BLOCKED_NOT_QUALIFIED: required backend capability " + name)
-        profile = load_profile(selected.get("tool_profile"))
-        if supervisor.remaining() <= 0:
-            raise HarnessError("Absolute task deadline expired before tool readiness")
-        root = canonical_directory(root)
+        if prior:
+            saved = supervisor.store.read(prior["path"], "tool-execution.schema.json")
+            if digest(saved) != prior["digest"]:
+                raise HarnessError("EXACT_RESUME_DRIFT: saved tool receipt changed")
+            _verify_qualification_ref(supervisor, saved)
+        adapter, profile, readiness, native, capabilities, root, cache, graph = _configured(
+            supervisor, selected, root=root, role=role, node_id=node_id, attempt_id=attempt_id)
         info = root.stat()
-        cache = supervisor.path / "tool-cache" / node_id.replace("@", "_")
-        from .strict_yaml import load
-        graph = load(selected["graph_index"]["path"]) if selected.get("graph_index") else None
-        readiness = preflight_profile(profile, backend, root, profile_role, cache_root=cache, graph_index=graph)
-        if readiness["status"] != "READY":
-            raise HarnessError("TOOL_PROFILE_NOT_READY: " + json.dumps(readiness, ensure_ascii=False))
-        if supervisor.remaining() <= 0:
-            raise HarnessError("Absolute task deadline expired during tool readiness")
-        if profile["servers"] and capabilities.get("effective_tool_catalog") is not True:
-            raise HarnessError("BLOCKED_NOT_QUALIFIED: execution-bound effective MCP catalog is unqualified; diagnostic catalog is insufficient")
-        native = (render_codex if backend == "codex" else render_opencode)(profile, root, role=profile_role, cache_root=cache)
-        if role == "reviewer" and capabilities.get("reviewer_isolation_qualified") is not True:
-            raise HarnessError("BLOCKED_NOT_QUALIFIED: effective reviewer catalog, shell, plugins and MCP isolation need live enforcement")
-        configure = getattr(adapter, "with_tool_config", None)
-        if native and callable(configure):
-            adapter = configure(native, root=root)
-        elif profile["id"] != "baseline" and not callable(configure):
-            raise HarnessError("BLOCKED_NOT_QUALIFIED: backend lacks tool configuration support")
         identity = {"backend": backend, "executable": list(getattr(adapter, "executable", ())),
             "binary_sha256": capabilities.get("binary_sha256", "unobserved"), "version": capabilities.get("version", "unobserved"),
             "profile_id": profile["id"], "profile_version": profile["version"], "profile_digest": profile_digest(profile),
             "effective_config_digest": digest(native), "configuration_inputs_digest": _configuration_identity(adapter, root),
-            "catalog_digest": readiness["catalog_digest"], "required_dependencies": readiness["required_dependencies"],
+            "catalog_digest": capabilities.get("effective_catalog_digest", readiness["catalog_digest"]),
+            "required_dependencies": readiness["required_dependencies"],
             "root": str(root), "directory_identity": [info.st_dev, info.st_ino],
             "worktree_digest": digest(worktree) if worktree else None,
             "selection_digest": digest(selected), "graph_index_digest": digest(graph) if graph else None, "cache_root": str(cache),
             "launch_files_digest": _launch_identity(adapter, profile, root, cache),
             "dependency_fingerprint": digest({"servers": [{k: row[k] for k in ("id", "executable", "binary_sha256", "server_info", "catalog") if k in row}
                 for row in readiness["servers"]], "cli": readiness["cli"]})}
+        if capabilities.get("effective_catalog_digest"):
+            identity["diagnostic_catalog_digest"] = readiness["catalog_digest"]
         if prior:
             saved = supervisor.store.read(prior["path"], "tool-execution.schema.json")
             if digest(saved) != prior["digest"] or saved["identity"] != identity:
@@ -192,6 +292,9 @@ def prepare(supervisor, selected, *, root, role, node_id, attempt_id, worktree=N
             "attempt_id": attempt_id, "repository_identity": supervisor.repository_identity(),
             "base_revision": worktree["base_revision"] if worktree else supervisor.state["revision"],
             "source_snapshot_digest": source, "identity": identity, "readiness": "READY", "created_at": now()}
+        qualification = _qualification_ref(supervisor, adapter, role)
+        if qualification is not None:
+            receipt["client_qualification"] = qualification
         path = "tooling/" + node_id.replace("@", "_") + "/" + attempt_id + "-" + digest(receipt) + ".yaml"
         supervisor.store.write(path, receipt, "tool-execution.schema.json", exclusive=True)
         ref = {"path": path, "digest": digest(receipt)}
@@ -239,6 +342,27 @@ def evidence_errors(supervisor):
         errors.append("Root tooling provenance lost immutable invocation binding")
     if required - seen:
         errors.append("Required execution tool receipts missing or modified")
+    for checksum, binding in bindings.items():
+        try:
+            completions = [row for row in records if row["record_type"] == "completion"
+                and row.get("capability_receipt_ref") == checksum and row["payload"]["outcome"] == "completed"]
+            if completions:
+                for completion in completions:
+                    session_id = completion["payload"].get("thread_id")
+                    if binding.get("client_qualification") and not session_id:
+                        raise HarnessError("Native qualification execution session missing")
+                    catalog_artifacts = None
+                    if binding.get("client_qualification"):
+                        from .execution_receipts import verify_tool_artifacts
+                        catalog_artifacts = verify_tool_artifacts(supervisor, completion)
+                        if not catalog_artifacts:
+                            raise HarnessError("Native execution catalog has no immutable completion artifact")
+                    _verify_qualification_ref(supervisor, binding, require_execution=True,
+                        session_id=session_id, catalog_artifacts=catalog_artifacts)
+            else:
+                _verify_qualification_ref(supervisor, binding)
+        except (HarnessError, OSError, ValueError, ImportError):
+            errors.append("Native client qualification evidence missing, changed or execution unconfirmed")
     intents = {row["invocation_id"]: row for row in records if row["record_type"] == "invocation_intent"}
     for row in records:
         ref = row.get("capability_receipt_ref")
@@ -275,5 +399,16 @@ def revalidate(adapter, binding, selected):
             or _binary_hash(transport.executable[0]) != value["binary_sha256"]):
         raise NotDispatched("EXACT_RESUME_DRIFT: execution inputs changed before dispatch")
     cache = value["cache_root"]
+    verify = getattr(transport, "verify_qualification", None)
+    if binding.get("client_qualification") and not callable(verify):
+        raise NotDispatched("Native qualification verifier missing before dispatch")
+    if callable(verify):
+        ref = binding.get("client_qualification")
+        if ref is None:
+            raise NotDispatched("Native qualification binding missing before dispatch")
+        verify(root=root, role=ref["role"])
+        actual = getattr(transport, "qualification_receipt", lambda: None)()
+        if actual != {"path": str(Path(value["cache_root"]).parents[1] / ref["path"]), "sha256": ref["sha256"]}:
+            raise NotDispatched("Native qualification reference changed before dispatch")
     if _launch_identity(transport, load_profile(selected.get("tool_profile")), root, cache) != value["launch_files_digest"]:
         raise NotDispatched("EXACT_RESUME_DRIFT: executable or required dependency files changed")

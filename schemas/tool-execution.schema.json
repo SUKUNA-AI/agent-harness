@@ -139,6 +139,10 @@
         "cache_root": {
           "type": "string",
           "maxLength": 16384
+        },
+        "diagnostic_catalog_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
         }
       },
       "required": [
@@ -169,6 +173,33 @@
     "created_at": {
       "type": "string",
       "format": "utc"
+    },
+    "client_qualification": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "role": {
+          "enum": [
+            "worker",
+            "reviewer",
+            "planner"
+          ]
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "role"
+      ]
     }
   },
   "required": [
