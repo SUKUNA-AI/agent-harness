@@ -15,7 +15,7 @@ from agent_harness.strict_yaml import StrictYAMLError, dumps, loads
 from agent_harness.tool_profiles import (builtin_profiles, load_profile, preflight_profile,
     profile_digest, render_codex, render_opencode, resolved_servers)
 from agent_harness.tooling_probe import ProbeFailure, StdioProbe, probe_server
-from agent_harness.tooling_provenance import build_graph_index, source_snapshot, verify_graph_index
+from agent_harness.tooling_provenance import ast_grep_migrate, build_graph_index, source_snapshot, verify_graph_index
 
 FIXTURES = Path(__file__).resolve().parent / "tooling"
 
@@ -201,6 +201,42 @@ class ToolProfileTests(unittest.TestCase):
         Path(receipt["index_path"]).write_text("tampered")
         with self.assertRaisesRegex(HarnessError, "index_bytes_drift"):
             verify_graph_index(receipt, current)
+
+    def test_ast_grep_migration_requires_scans_scope_and_real_regression(self):
+        (self.source / "calc.py").write_text("result = old_api(41)\n")
+        result = ast_grep_migrate(self.source, ["calc.py"],
+            pattern="old_api($A)", rewrite="new_api($A)", language="python",
+            executable=[sys.executable, str(FIXTURES / "fake_ast_grep.py")],
+            checks=[[sys.executable, "-c", "from pathlib import Path; scope={'new_api':lambda value:value+1}; exec(Path('calc.py').read_text(),scope); assert scope['result']==42"]])
+        self.assertEqual(result["status"], "verified_migration")
+        self.assertEqual(result["initial_scan"]["count"], 1)
+        self.assertEqual(result["old_pattern_scan"]["count"], 0)
+        self.assertEqual(result["new_pattern_scan"]["count"], 1)
+        self.assertEqual(result["changed_paths"], ["calc.py"])
+        self.assertEqual(result["tests"][0]["exit_code"], 0)
+        self.assertIn("fixture", result["tool"]["version"])
+        self.assertNotIn("accepted", result["acceptance"])
+
+    def test_ast_grep_success_cannot_hide_failed_independent_test(self):
+        (self.source / "calc.py").write_text("result = old_api(41)\n")
+        with self.assertRaisesRegex(HarnessError, "regression test failed"):
+            ast_grep_migrate(self.source, ["calc.py"], pattern="old_api($A)",
+                rewrite="new_api($A)", language="python",
+                executable=[sys.executable, str(FIXTURES / "fake_ast_grep.py")],
+                checks=[[sys.executable, "-c", "raise SystemExit(3)"]])
+        self.assertIn("new_api", (self.source / "calc.py").read_text())
+
+    def test_graph_old_manifest_does_not_bypass_current_source_verification(self):
+        frozen = source_snapshot(self.source)
+        fixture = FIXTURES / "fake_graphify.py"
+        receipt = build_graph_index(self.source, frozen, self.root / "artifacts",
+            [sys.executable, str(fixture), "{source_root}", "{index_output}"],
+            tool_version="fixture-graphify 1", version_argv=[sys.executable, str(fixture), "--version"])
+        self.assertTrue(Path(receipt["frozen_source_path"]).is_dir())
+        (self.source / "symbol.py").write_text("CHANGED = True\n")
+        with self.assertRaisesRegex(HarnessError, "current_source_drift"):
+            verify_graph_index(receipt, frozen)
+        self.assertEqual(verify_graph_index(receipt, frozen, required=False)["status"], "HISTORICAL_ONLY")
 
     def test_graph_artifacts_cannot_pollute_source(self):
         with self.assertRaises(HarnessError):

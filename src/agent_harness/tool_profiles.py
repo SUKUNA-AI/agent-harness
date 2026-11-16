@@ -148,7 +148,11 @@ def _roots(root, cache_root):
     cache_root = Path(cache_root)
     if not cache_root.is_absolute():
         raise HarnessError("Tool cache requires an absolute path")
-    return canonical, str(cache_root)
+    _parents(cache_root)
+    if cache_root.exists():
+        _ordinary(cache_root, directory=True)
+    # Even a shared operator cache base gets a separate mutable worktree namespace.
+    return canonical, str(cache_root / digest(canonical)[:16])
 
 
 def _expand(value, root, cache):
@@ -256,7 +260,15 @@ def inspect_cli(dependency, *, timeout=10):
                 continue
             if dependency["id"] == "ast-grep" and not re.search(r"ast-grep\s+\d", output):
                 continue
-            return {"id": dependency["id"], "status": "READY", "executable": str(Path(executable).resolve()),
+            capabilities = dependency.get("capabilities", [])
+            if capabilities:
+                help_result = _contained_capture([executable, "--help"], timeout=timeout)
+                help_text = help_result.stdout.decode("utf-8", errors="replace")
+                if help_result.returncode or len(help_text) > 65536 or any(capability not in help_text for capability in capabilities):
+                    continue
+            from .codex_execution import sanitized
+            output = sanitized(output)
+            return {"id": dependency["id"], "status": "READY", "capabilities": list(capabilities), "executable": str(Path(executable).resolve()),
                 "binary_sha256": file_hash(Path(executable).resolve()), "version": output[:4096]}
         except (OSError, HarnessError, subprocess.TimeoutExpired):
             continue

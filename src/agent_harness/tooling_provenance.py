@@ -205,17 +205,36 @@ def ast_grep_migrate(root, paths, *, pattern, rewrite, language, checks, executa
         _parents(root / path)
         _ordinary(root / path)
         targets.append(path.as_posix())
-    identity = inspect_cli({"id": "ast-grep", "commands": [executable] if executable else ["ast-grep", "sg"], "version_args": ["--version"]})
-    if identity["status"] != "READY":
-        raise HarnessError("AST_GREP_NOT_AVAILABLE: installed command is missing or not ast-grep")
-    command = identity["executable"]
-    help_result = _contained_capture([command, "run", "--help"], timeout=min(timeout, 15))
+    if isinstance(executable, (list, tuple)):
+        # Explicit wrapper argv supports portable fixture testing and installed
+        # launchers. Every ordinary wrapper input is content-bound too.
+        if not executable or any(not isinstance(v, str) or not v or "\x00" in v for v in executable):
+            raise HarnessError("Invalid ast-grep executable argv")
+        resolved = shutil.which(executable[0])
+        if resolved is None:
+            raise HarnessError("AST_GREP_NOT_AVAILABLE: wrapper executable missing")
+        command = [str(Path(resolved).resolve()), *executable[1:]]
+        version = _contained_capture([*command, "--version"], timeout=min(timeout, 15))
+        version_text = version.stdout.decode("utf-8", errors="replace").strip()
+        import re
+        if version.returncode or len(version_text) > 4096 or not re.search(r"ast-grep\s+\d", version_text):
+            raise HarnessError("AST_GREP_NOT_AVAILABLE: wrapper is not ast-grep")
+        identity = {"id": "ast-grep", "status": "READY", "executable": command[0],
+            "binary_sha256": file_hash(command[0]), "version": version_text,
+            "wrapper_inputs": {str(Path(v).resolve()): file_hash(Path(v).resolve()) for v in command
+                               if Path(v).is_absolute() and Path(v).is_file()}}
+    else:
+        identity = inspect_cli({"id": "ast-grep", "commands": [executable] if executable else ["ast-grep", "sg"], "version_args": ["--version"]})
+        if identity["status"] != "READY":
+            raise HarnessError("AST_GREP_NOT_AVAILABLE: installed command is missing or not ast-grep")
+        command = [identity["executable"]]
+    help_result = _contained_capture([*command, "run", "--help"], timeout=min(timeout, 15))
     help_text = help_result.stdout.decode("utf-8", errors="replace")
     if help_result.returncode or any(flag not in help_text for flag in ("--pattern", "--rewrite", "--update-all", "--json")):
         raise HarnessError("Unsupported ast-grep structural rewrite CLI")
 
     def scan(value):
-        result = _contained_capture([command, "run", "--pattern", value, "--lang", language, "--json=compact", *targets], cwd=str(root), timeout=timeout)
+        result = _contained_capture([*command, "run", "--pattern", value, "--lang", language, "--json=compact", *targets], cwd=str(root), timeout=timeout)
         if result.returncode not in (0, 1) or len(result.stdout) > MAX_SOURCE_BYTES:
             raise HarnessError("ast-grep scan failed")
         matches = json.loads(result.stdout)
@@ -227,7 +246,7 @@ def ast_grep_migrate(root, paths, *, pattern, rewrite, language, checks, executa
     original = scan(pattern)
     if not original["count"]:
         raise HarnessError("No original structural matches; migration evidence is vacuous")
-    changed = _contained_capture([command, "run", "--pattern", pattern, "--rewrite", rewrite,
+    changed = _contained_capture([*command, "run", "--pattern", pattern, "--rewrite", rewrite,
         "--lang", language, "--update-all", *targets], cwd=str(root), timeout=timeout)
     after = source_snapshot(root)
     actual_changes = changed_paths(before, after)
