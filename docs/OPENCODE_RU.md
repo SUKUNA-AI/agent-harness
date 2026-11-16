@@ -59,6 +59,20 @@ V2 добавляет некоторые native tools, включая `skill` и
 model-visible snapshot; управлять harness-owned worktree через native tool нельзя.
 Guard не изменяет модель, provider, prompt или ответ.
 
+У V2 нет native `--output-schema`: adapter добавляет саму JSON Schema перед
+исходным task packet как ограниченную инструкцию формата ответа. Capability
+`output_schema` остаётся false; supervisor отдельно валидирует полученный JSON.
+Schema с prompt должны укладываться в существующий общий byte budget.
+
+Для final reviewer supervisor может передать `with_read_context(paths)` до
+квалификации: до 128 exact canonical ordinary files, не более 4 MiB на файл и
+16 MiB суммарно. Directories и symlinks отклоняются. Native permissions разрешают
+только соответствующие parent boundaries; core guard допускает внешнее чтение
+исключительно объявленного файла с прежними device/inode, размером и SHA256.
+Соседние файлы, внешний glob/grep и запись остаются запрещены. Manifest входит
+в proof и повторно проверяется перед dispatch и в acceptance gate. Worker не
+получает такое исключение; API поддержан только для reviewer/planner.
+
 Runtime JSONL содержит session/model IDs и catalog, без prompts, headers и keys.
 Adapter возвращает `catalog_artifacts`; completion закрепляет их SHA256.
 `verify_qualification_evidence(..., require_execution=True, session_id=...,

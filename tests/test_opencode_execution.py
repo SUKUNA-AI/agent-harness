@@ -247,6 +247,29 @@ class OpenCodeExecutionTests(unittest.TestCase):
         with self.assertRaisesRegex(HarnessError, 'native subagents'):
             self.adapter.argv('task', native_children=True)
 
+    def test_output_schema_is_delivered_before_original_packet_without_claiming_native_enforcement(self):
+        schema = self.root / "verdict.schema.json"
+        value = {"type": "object", "required": ["verdict"],
+                 "properties": {"verdict": {"enum": ["approved", "rejected"]}}, "additionalProperties": False}
+        schema.write_text(json.dumps(value))
+        packet = 'Review the candidate.\n{"goal":"review","required_verdict_version":1}'
+        rendered = self.adapter.argv(packet, output_schema=schema)[-1]
+        self.assertTrue(rendered.endswith(packet))
+        self.assertIn('"required":["verdict"]', rendered)
+        self.assertIn("Do not use Markdown fences", rendered)
+        self.assertFalse(self.adapter.capabilities()["output_schema"])
+
+    def test_output_schema_rejects_invalid_json_and_combined_prompt_overflow(self):
+        schema = self.root / "verdict.schema.json"
+        for raw in ('{"type":"object","type":"string"}', '{"value":NaN}', '"not-a-schema"'):
+            with self.subTest(raw=raw):
+                schema.write_text(raw)
+                with self.assertRaises(HarnessError):
+                    self.adapter.argv("task", output_schema=schema)
+        schema.write_text(json.dumps({"description": "x" * 23000, "type": "object"}))
+        with self.assertRaisesRegex(HarnessError, "byte budget"):
+            self.adapter.argv("task" * 1000, output_schema=schema)
+
     def test_environment_clone_is_bounded_and_does_not_require_codex_home(self):
         source = OpenCodeAdapter(self.executable)
         clone = source.with_environment({'PATH': os.defpath, 'HOME': str(self.root)})

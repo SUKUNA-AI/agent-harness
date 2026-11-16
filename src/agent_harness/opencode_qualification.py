@@ -69,9 +69,20 @@ export default {id:"agent-harness.execution-guard",async setup(ctx) {
   const root=fs.realpathSync(ctx.location.directory);
   if(root!==spec.root || process.env.PWD!==root) throw new Error("HARNESS_GUARD_WORKTREE_MISMATCH");
   const allowed=new Set(spec.allowed_tools), latest=new Map();let sequence=0;
+  const readContext=new Map((spec.read_context??[]).map(item=>[item.path,item]));
+  const inside=target=>target===root || target.startsWith(root+path.sep);
+  const contextFileOK=target=>{
+    const item=readContext.get(target);
+    if(!item)throw new Error("HARNESS_GUARD_READ_CONTEXT_UNDECLARED");
+    const info=fs.lstatSync(target,{bigint:true});
+    if(!info.isFile() || info.isSymbolicLink() || info.dev!==BigInt(item.device) || info.ino!==BigInt(item.inode) || info.size!==BigInt(item.size)
+        || fs.realpathSync(target)!==target || crypto.createHash("sha256").update(fs.readFileSync(target)).digest("hex")!==item.sha256)
+      throw new Error("HARNESS_GUARD_READ_CONTEXT_DRIFT");
+  };
   const sourceOK=()=>{
     const value=crypto.createHash("sha256").update(fs.readFileSync(spec.guard_source_path)).digest("hex");
     if(value!==spec.guard_source_digest)throw new Error("HARNESS_GUARD_SOURCE_DRIFT");
+    for(const item of readContext.values())contextFileOK(item.path);
   };
   const connectedOK=async()=>{
     if(!(spec.connected_servers??[]).length)return;
@@ -131,6 +142,28 @@ export default {id:"agent-harness.execution-guard",async setup(ctx) {
   await ctx.tool.hook("execute.before",event=>{
     sourceOK();
     if(!allowed.has(event.tool))throw new Error("HARNESS_GUARD_EXECUTION_DENIED:"+event.tool);
+    if(["read","glob","grep","edit"].includes(event.tool)) {
+      const input=event.input??{};
+      const requested=input.path??input.filePath??input.file_path??(event.tool==="glob"||event.tool==="grep"?".":null);
+      if(typeof requested!=="string")throw new Error("HARNESS_GUARD_TOOL_PATH_MISSING");
+      const absolute=path.resolve(root,requested);
+      let target;try{target=fs.realpathSync(absolute)}catch{target=absolute}
+      if(!inside(target)) {
+        if(event.tool!=="read")throw new Error("HARNESS_GUARD_EXTERNAL_TOOL_DENIED");
+        contextFileOK(target);
+      }
+      if(event.tool==="glob" && typeof input.pattern==="string"
+          && (path.isAbsolute(input.pattern)||input.pattern.split(/[\\/]/).includes("..")))
+        throw new Error("HARNESS_GUARD_EXTERNAL_GLOB_DENIED");
+    }
+  });
+  await ctx.permission.hook("evaluate",event=>{
+    if(event.action!=="read")return;
+    for(const resource of event.resources) {
+      const requested=path.resolve(root,resource);
+      let target;try{target=fs.realpathSync(requested)}catch{target=requested}
+      if(!inside(target))try{contextFileOK(target)}catch{event.effect="deny";event.message="HARNESS_GUARD_READ_CONTEXT_DENIED"}
+    }
   });
   await ctx.session.hook("experimental.ws.handshake",()=>{throw new Error("HARNESS_GUARD_UNQUALIFIED_WEBSOCKET")});
   await ctx.session.hook("http.request",async event=>{
@@ -275,7 +308,48 @@ def input_identity(adapter, root):
         "launcher_files": launchers, "argv": list(adapter.executable),
         "root": {"path": str(root), "device": info.st_dev, "inode": info.st_ino},
         "tool_config_digest": digest(adapter.tool_config), "config_sources": sources,
-        "environment_digest": digest(environment)}
+        "environment_digest": digest(environment),
+        "read_context": read_context_manifest([item["path"] for item in getattr(adapter, "read_context", ())])}
+
+
+def read_context_manifest(paths):
+    """A caller may name files, never directories or wildcard capabilities."""
+    if not isinstance(paths, (list, tuple)) or len(paths) > 128:
+        raise HarnessError("Read context requires at most 128 exact file paths")
+    result, seen, total = [], set(), 0
+    for value in paths:
+        if not isinstance(value, (str, Path)) or not Path(value).is_absolute():
+            raise HarnessError("Read context requires canonical absolute file paths")
+        path = Path(value)
+        try:
+            raw = read_regular_file(path, max_bytes=4 * 1024 * 1024)
+        except (OSError, ValueError) as error:
+            raise HarnessError("Read context requires bounded ordinary files: " + str(error)) from error
+        canonical = str(path.resolve(strict=True))
+        if canonical != str(path) or canonical in seen or any(c in canonical for c in "*?\0"):
+            raise HarnessError("Read context requires unique canonical ordinary files")
+        seen.add(canonical)
+        total += len(raw)
+        if total > 16 * 1024 * 1024:
+            raise HarnessError("Read context total byte budget exceeded")
+        info = path.stat()
+        result.append({"path": canonical, "device": str(info.st_dev), "inode": str(info.st_ino),
+            "size": len(raw), "sha256": hashlib.sha256(raw).hexdigest()})
+    return sorted(result, key=lambda item: item["path"])
+
+
+def _verify_read_context(manifest):
+    if (not isinstance(manifest, list) or any(not isinstance(item, dict)
+            or set(item) != {"path", "device", "inode", "size", "sha256"}
+            or not isinstance(item["path"], str)
+            or any(not isinstance(item[key], str) or re.fullmatch(r"0|[1-9][0-9]*", item[key]) is None
+                for key in ("device", "inode"))
+            or type(item["size"]) is not int or item["size"] < 0
+            or not isinstance(item["sha256"], str) or re.fullmatch(r"[a-f0-9]{64}", item["sha256"]) is None
+            for item in manifest)):
+        raise HarnessError("Malformed native read-context manifest")
+    if read_context_manifest([item["path"] for item in manifest]) != manifest:
+        raise HarnessError("Native read-context source identity changed")
 
 
 @dataclass(frozen=True)
@@ -573,6 +647,14 @@ def qualify(adapter, *, root, role, evidence_dir, session_id=None, timeout=60):
     root = canonical_directory(root)
     config = deepcopy(adapter.tool_config)
     agent, allowed = _allowed_tools(config, role)
+    read_context = list(getattr(adapter, "read_context", ()))
+    _verify_read_context(read_context)
+    if read_context:
+        if role not in {"reviewer", "planner"}:
+            raise HarnessError("Declared external read context requires a read-only role")
+        config["agents"][agent]["permissions"].extend({"action": "external_directory",
+            "resource": str(Path(parent) / "*"), "effect": "allow"}
+            for parent in sorted({str(Path(item["path"]).parent) for item in read_context}))
     environment = dict(adapter.environment if adapter.environment is not None else os.environ)
     environment["PWD"] = str(root)
     initial = input_identity(adapter, root)
@@ -581,7 +663,7 @@ def qualify(adapter, *, root, role, evidence_dir, session_id=None, timeout=60):
     evidence_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     if evidence_dir == root or root in evidence_dir.parents:
         raise HarnessError("Native qualification evidence must be outside the worker worktree")
-    stable = digest({"root": str(root), "role": role, "config": config,
+    stable = digest({"root": str(root), "role": role, "config": config, "read_context": read_context,
         "binary": initial["binary"]["sha256"], "guard": hashlib.sha256(GUARD_SOURCE.encode()).hexdigest()})
     guard_dir = evidence_dir.parent / ("guard-" + stable[:32])
     guard_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -594,6 +676,7 @@ def qualify(adapter, *, root, role, evidence_dir, session_id=None, timeout=60):
     spec_path, probe_path = folder / "guard-spec.json", folder / "probe.jsonl"
     spec = {"schema_version": 1, "proof_id": secrets.token_hex(24), "root": str(root), "role": role,
         "agent": agent, "allowed_tools": allowed, "runtime_dir": str(runtime_dir),
+        "read_context": read_context,
         "phase": "qualification", "probe_path": str(probe_path), "marker": secrets.token_hex(24),
         "readiness_timeout_ms": min(30000, int(timeout * 1000)),
         "guard_source_path": str(guard_dir / "index.js"), "guard_source_digest": files[0]["sha256"]}
@@ -715,6 +798,7 @@ def qualify(adapter, *, root, role, evidence_dir, session_id=None, timeout=60):
             "spec_path": str(spec_path), "runtime_dir": str(runtime_dir), "catalog": catalog,
             "catalog_digest": digest(catalog), "permissions": permissions,
             "mcp_status": mcp_status,
+            "read_context": read_context,
             "exact_resume": {"same_session_after_cli_restart": True, "prior_marker_observed": True,
                 "missing_session_refused": True, "provider_inference": False},
             "created_at": datetime.now(timezone.utc).isoformat()}
@@ -747,12 +831,21 @@ def verify_qualification_evidence(ref, *, root, role, require_execution=False,
     proof = _json(raw)
     fields = {"schema_version", "kind", "proof_id", "role", "root", "agent", "identity", "guard_source_digest",
               "artifacts", "spec_path", "runtime_dir", "catalog", "catalog_digest", "permissions", "mcp_status", "exact_resume", "created_at"}
+    if isinstance(proof, dict) and "read_context" in proof:
+        fields.add("read_context")
     if (not isinstance(proof, dict) or set(proof) != fields or proof["schema_version"] != 1
             or proof["kind"] != "opencode-native-core-qualification"
+            or not isinstance(proof["identity"], dict)
             or proof["root"] != str(canonical_directory(root)) or proof["role"] != role
             or proof["guard_source_digest"] != hashlib.sha256(GUARD_SOURCE.encode()).hexdigest()
             or digest(proof["catalog"]) != proof["catalog_digest"]):
         raise HarnessError("Native qualification source/subject changed")
+    read_context = proof.get("read_context", [])
+    _verify_read_context(read_context)
+    if proof["identity"].get("read_context", []) != read_context:
+        raise HarnessError("Native read-context input identity changed")
+    if read_context and role not in {"reviewer", "planner"}:
+        raise HarnessError("Native read-context role changed")
     artifacts = proof["artifacts"]
     if not isinstance(artifacts, list) or len(artifacts) != 4:
         raise HarnessError("Native qualification artifact closure incomplete")
@@ -770,6 +863,8 @@ def verify_qualification_evidence(ref, *, root, role, require_execution=False,
             or spec.get("guard_source_digest") != proof["guard_source_digest"]
             or spec.get("guard_source_path") not in seen):
         raise HarnessError("Native guard specification subject changed")
+    if spec.get("read_context", []) != read_context:
+        raise HarnessError("Native guard read-context manifest changed")
     if not require_execution:
         return proof
     if not session_id or not isinstance(catalog_artifacts, list) or not 1 <= len(catalog_artifacts) <= 64:

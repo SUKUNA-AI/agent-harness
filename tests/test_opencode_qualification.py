@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from agent_harness.core import HarnessError, digest, identity_alive, process_identity
 from agent_harness.opencode_execution import OpenCodeAdapter
 from agent_harness.opencode_qualification import (GUARD_PACKAGE, GUARD_SOURCE, _allowed_tools,
-    _capture_owned, _write_owned, check_session, input_identity, verify_qualification_evidence)
+    _capture_owned, _write_owned, check_session, input_identity, read_context_manifest, verify_qualification_evidence)
 from agent_harness.tool_profiles import render_opencode
 
 
@@ -35,6 +35,38 @@ class OpenCodeQualificationTests(unittest.TestCase):
         self.root.mkdir()
         self.evidence = self.base / "proof"
         self.evidence.mkdir()
+
+    def test_read_context_accepts_only_bounded_exact_ordinary_files_and_detects_drift(self):
+        evidence = self.base / "check.log"
+        evidence.write_text("verified check\n")
+        manifest = read_context_manifest([evidence])
+        self.assertEqual(manifest[0]["path"], str(evidence))
+        self.assertEqual(manifest[0]["sha256"], hashlib.sha256(evidence.read_bytes()).hexdigest())
+        for paths in ([self.base], [evidence, evidence], ["relative.log"], [evidence] * 129):
+            with self.subTest(paths=str(paths)[:100]), self.assertRaises((HarnessError, OSError)):
+                read_context_manifest(paths)
+        alias = self.base / "alias.log"
+        try:
+            alias.symlink_to(evidence)
+        except OSError:
+            pass
+        else:
+            with self.assertRaises((HarnessError, OSError)):
+                read_context_manifest([alias])
+        ref, proof = self.fixture_proof()
+        spec_path = Path(proof["spec_path"])
+        spec = json.loads(spec_path.read_bytes())
+        spec["read_context"] = manifest
+        spec_path.write_text(json.dumps(spec))
+        proof["artifacts"][-1]["sha256"] = hashlib.sha256(spec_path.read_bytes()).hexdigest()
+        proof["read_context"] = manifest
+        proof["identity"]["read_context"] = manifest
+        Path(ref["path"]).unlink()
+        ref = _write_owned(ref["path"], proof)
+        verify_qualification_evidence(ref, root=self.root, role="reviewer")
+        evidence.write_text("changed check\n")
+        with self.assertRaisesRegex(HarnessError, "read-context source identity"):
+            verify_qualification_evidence(ref, root=self.root, role="reviewer")
 
     def fixture_proof(self):
         """Only exercises persisted evidence validation; never issues flags."""
@@ -214,7 +246,7 @@ def local_provider(*, forced_tool=None, forced_input=None, sensitive_marker=None
 class LiveOpenCodeQualificationTests(unittest.TestCase):
     @contextmanager
     def native_case(self, *, forced_tool=None, mcp=False, external_read=False, request_hook=None,
-                    git_worktree=False, role="reviewer"):
+                    git_worktree=False, role="reviewer", read_context=False, context_access="declared"):
         arguments = {}
         marker = "HARNESS-EXTERNAL-FIXTURE-NOT-A-CREDENTIAL"
         with tempfile.TemporaryDirectory() as td, local_provider(forced_tool=forced_tool,
@@ -237,14 +269,17 @@ class LiveOpenCodeQualificationTests(unittest.TestCase):
                 (root / "protected.txt").write_text("BEFORE\n")
             outside = base / "outside.txt"
             outside.write_text(marker)
+            sibling = base / "sibling.txt"
+            sibling.write_text(marker + "-SIBLING")
             if external_read:
-                arguments.update(path=str(outside))
+                arguments.update(path=str(outside if context_access == "declared" else sibling))
             elif forced_tool == "read":
                 arguments.update(path=str(root / "protected.txt"))
             elif forced_tool == "shell":
                 arguments.update(command="printf unexpected > shell-forbidden.txt")
             elif forced_tool == "edit":
-                arguments.update(path=str(root / "protected.txt"), edits=[{"old": "BEFORE", "new": "AFTER"}])
+                arguments.update(path=str(outside if read_context else root / "protected.txt"),
+                    edits=[{"old": marker if read_context else "BEFORE", "new": "AFTER"}])
             elif forced_tool == "subagent":
                 arguments.update(agent="general", text="Create forbidden.txt")
             elif forced_tool == "opencode_worktree_remove":
@@ -277,6 +312,8 @@ class LiveOpenCodeQualificationTests(unittest.TestCase):
                         "forbidden_tools": ["write_file", "execute_command"], "required_tools": ["search_symbol"],
                         "startup_timeout": 3, "tool_timeout": 3}]}
             adapter = OpenCodeAdapter(environment=environment).with_tool_config(render_opencode(profile, root, role=role), root=root)
+            if read_context:
+                adapter = adapter.with_read_context([outside])
             try:
                 qualified = adapter.qualify(root=root, role=role, evidence_dir=base / "proof" / "first", timeout=60)
                 self.assertEqual(requests, [], "Qualification must not reach the scripted endpoint")
@@ -372,6 +409,22 @@ class LiveOpenCodeQualificationTests(unittest.TestCase):
             self.assertTrue(requests)
             self.assertTrue(all(not request["sensitive_marker_observed"] for request in requests))
             self.assertTrue(result.get("process_tree_stopped"), result)
+
+    def test_declared_external_read_context_is_readable_but_sibling_and_writes_are_denied(self):
+        for tool, target in (("read", "declared"), ("read", "sibling"), ("edit", "declared")):
+            with self.subTest(tool=tool, target=target), self.native_case(forced_tool=tool,
+                    external_read=tool == "read", read_context=True, context_access=target) as (base, root, qualified, requests):
+                result = qualified.run("Read the declared evidence, then reply native-qualified", cwd=root, timeout=12,
+                    read_only=True, log_dir=base / "logs")
+                self.assertTrue(requests)
+                self.assertTrue(result.get("process_tree_stopped"), result)
+                self.assertEqual((base / "outside.txt").read_text(), "HARNESS-EXTERNAL-FIXTURE-NOT-A-CREDENTIAL")
+                if tool == "read" and target == "declared":
+                    self.assertEqual(result["status"], "completed", result)
+                    self.assertTrue(any(request["sensitive_marker_observed"] for request in requests[1:]),
+                        "The actual native read must deliver the declared evidence to the provider")
+                else:
+                    self.assertFalse(any(request["sensitive_marker_observed"] for request in requests))
 
     def test_forged_guard_plugin_id_is_denied_before_module_evaluation(self):
         with self.native_case() as (base, root, qualified, requests):

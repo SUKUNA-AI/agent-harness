@@ -220,6 +220,15 @@ class OpenCodeAdapter(CodexAdapter):
         self.tool_config_path = None
         self.tool_root = None
         self._native_qualification = None
+        self.read_context = ()
+
+    def with_read_context(self, paths):
+        """Declare immutable ordinary files; only a read-only qualifier grants access."""
+        from .opencode_qualification import read_context_manifest
+        clone = copy.copy(self)
+        clone.read_context = tuple(read_context_manifest(paths))
+        clone._native_qualification = None
+        return clone
 
     def with_environment(self, environment):
         if type(self) is not OpenCodeAdapter:
@@ -396,9 +405,25 @@ class OpenCodeAdapter(CodexAdapter):
         if reasoning_effort is not None:
             raise HarnessError("UNSUPPORTED_CAPABILITY: OpenCode has no model-independent reasoning-effort flag")
         if output_schema is not None:
-            read_regular_file(output_schema, max_bytes=2 * 1024 * 1024)
-            # OpenCode has no --output-schema. The supervisor still validates
-            # final JSON against its original schema; a prompt is no proof.
+            try:
+                schema = json.loads(read_regular_file(output_schema, max_bytes=MAX_PROMPT_BYTES).decode("utf-8-sig"),
+                    object_pairs_hook=_duplicate_free,
+                    parse_constant=lambda _: (_ for _ in ()).throw(ValueError("Nonfinite JSON")))
+            except (ValueError, UnicodeError, RecursionError) as error:
+                raise HarnessError("OpenCode output schema must be strict JSON") from error
+            if not isinstance(schema, (dict, bool)):
+                raise HarnessError("OpenCode output schema must be a JSON object or boolean")
+            # V2 has no native --output-schema enforcement. Supply the actual
+            # schema as bounded guidance; the independent supervisor validator
+            # remains authoritative. Keep the original packet's last line.
+            prompt = ("Return exactly one JSON value conforming to the JSON Schema below. "
+                "Do not use Markdown fences or add text outside that JSON value. "
+                "The supervisor will independently validate the result.\n"
+                "<harness-output-schema>\n"
+                + json.dumps(schema, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+                + "\n</harness-output-schema>\n\n" + prompt)
+            if len(prompt.encode()) > MAX_PROMPT_BYTES:
+                raise HarnessError("OpenCode output schema and prompt exceed the byte budget")
         argv = [*self.executable, "run", "--standalone", "--format", "json"]
         if session_id is not None:
             argv += ["--session", session_id]
