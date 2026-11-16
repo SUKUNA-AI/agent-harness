@@ -65,6 +65,21 @@ def validate_suppression(proof_path, capabilities):
         raise HarnessError("Native child tools are still available; use native/single mode")
 
 
+def _requires_codex_suppression(contract, proposed):
+    """A qualified OpenCode-only wave does not execute the default Codex adapter.
+
+    The explicit proposal has already passed tooling schema validation. Unknown
+    or legacy plans retain their original admission requirement, while each
+    configured OpenCode worker must still prove its own native leaf isolation.
+    """
+    from .tooling_state import enabled
+    from .execution import selection
+    if not isinstance(proposed, dict) or not enabled(contract, proposed):
+        return True
+    return any(selection(contract, node).get("backend", "codex") == "codex"
+               for node in proposed["tasks"])
+
+
 def _plan_path(supervisor):
     from .plan_quality import enabled
     if enabled(supervisor):
@@ -286,7 +301,8 @@ def execute_managed(supervisor, *, recovering=False):
     except (HarnessError, OSError, ValueError) as error:
         supervisor.transition("BLOCKED_AMBIGUOUS", "Tooling planning admission failed: " + str(error))
         return supervisor._loop()
-    if contract["budgets"]["max_concurrent_managed_agents"] > 1:
+    if (contract["budgets"]["max_concurrent_managed_agents"] > 1
+            and _requires_codex_suppression(contract, proposed)):
         try:
             proof_path = getattr(supervisor, "native_disabled_proof", None)
             if proof_path is None and supervisor.store.path("native-suppression-proof.yaml").exists():

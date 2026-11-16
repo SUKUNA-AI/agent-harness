@@ -48,15 +48,31 @@ def selection(contract, node=None, *, review=False):
 def _configuration_identity(adapter, root):
     """Hash config bytes only; never persist auth or configuration values."""
     env = getattr(adapter, "environment", None) or os.environ
-    home = Path(env.get("CODEX_HOME", Path.home() / ".codex"))
-    paths = [home / "config.toml"]
+    user_home = Path(env.get("HOME", env.get("USERPROFILE", str(Path.home()))))
+    codex_home = Path(env.get("CODEX_HOME", user_home / ".codex"))
+    paths = [codex_home / "config.toml"]
     # Include the whole project chain, including untrusted config, so later
     # trust/config changes cannot silently change a resumed invocation.
     for parent in [root, *root.parents]:
         paths.extend([parent / ".codex" / "config.toml", parent / "opencode.json", parent / "opencode.jsonc",
                       parent / ".opencode" / "opencode.json", parent / ".opencode" / "opencode.jsonc"])
-    xdg = Path(env.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "opencode"
+    xdg = Path(env.get("XDG_CONFIG_HOME", user_home / ".config")) / "opencode"
     paths.extend([xdg / "opencode.json", xdg / "opencode.jsonc"])
+    # Native V2 also loads explicitly selected files/directories. These may
+    # select a different model or provider without changing the tool fragment.
+    for key in ("OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR"):
+        if not env.get(key):
+            continue
+        raw = env[key]
+        if raw == "~":
+            path = user_home
+        elif raw.startswith(("~/", "~\\")):
+            path = user_home / raw[2:]
+        else:
+            path = Path(raw)
+        path = path if path.is_absolute() else root / path
+        paths.extend([path / "opencode.json", path / "opencode.jsonc"]
+                     if key == "OPENCODE_CONFIG_DIR" else [path])
     result = {}
     for path in dict.fromkeys(paths):
         if path.exists() or path.is_symlink():
