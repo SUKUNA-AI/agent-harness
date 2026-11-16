@@ -518,8 +518,11 @@ class Supervisor:
         if self.contract["mode"] == "native" and "execution" in self.contract:
             from .execution import prepare as prepare_execution, selection
             try:
-                adapter, tool_ref = prepare_execution(self, selection(self.contract), root=self.state["cwd"],
-                    role="owner", node_id="@root", attempt_id="attempt-" + str(self._pending_attempt_number),
+                selected = selection(self.contract)
+                policy_role = ("reviewer" if selected.get("backend", "codex") == "opencode"
+                               and self.contract["task"]["read_only"] else "owner")
+                adapter, tool_ref = prepare_execution(self, selected, root=self.state["cwd"],
+                    role=policy_role, node_id="@root", attempt_id="attempt-" + str(self._pending_attempt_number),
                     prior=self.state.get("tool_provenance") if repair else None)
                 if repair and self.state.get("tool_source_checkpoint") != self.provenance()["snapshot_id"]:
                     raise NotDispatched("EXACT_RESUME_DRIFT: source changed since last process checkpoint")

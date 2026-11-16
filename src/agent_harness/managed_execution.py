@@ -549,8 +549,10 @@ def execute_managed(supervisor, *, recovering=False):
         uses_tools = "execution" in contract or "execution" in node
         adapter, tool_ref = supervisor._adapter(), None
         if uses_tools:
+            policy_role = ("reviewer" if selected.get("backend", "codex") == "opencode"
+                           and node["read_only"] else node["role"])
             adapter, tool_ref = prepare_execution(supervisor, selected, root=record["path"],
-                role=node["role"], node_id=name, attempt_id=name + "-" + str(agent["attempts_used"] + 1),
+                role=policy_role, node_id=name, attempt_id=name + "-" + str(agent["attempts_used"] + 1),
                 worktree=record, prior=agent.get("tool_provenance") if agent["thread_id"] else None)
             if agent["thread_id"] and (not agent.get("tool_source_checkpoint") or input_digest != agent["tool_source_checkpoint"]):
                 raise NotDispatched("EXACT_RESUME_DRIFT: source checkpoint missing or changed since last confirmed process")
