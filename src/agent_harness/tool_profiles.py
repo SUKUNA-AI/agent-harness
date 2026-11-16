@@ -239,11 +239,17 @@ def render_opencode(profile, root, *, cache_root=None, role="worker"):
     """OpenCode V2 only: no V1 permission/task/bash configuration."""
     profile = load_profile(profile)
     _role(profile, "opencode", role)
+    if role == "planner" and (any(set(server["allowed_tools"]) != set(server["read_only_tools"])
+            for server in profile["servers"]) or profile.get("browser") or profile.get("documents")):
+        raise HarnessError("OpenCode planner requires audited read-only tools")
     servers = {}
-    rules = []
-    if role == "reviewer":
-        rules += [{"action": "*", "resource": "*", "effect": "deny"}]
-        rules += [{"action": action, "resource": "*", "effect": "allow"} for action in ("read", "glob", "grep")]
+    # A native subagent denial does not stop an arbitrary shell from launching
+    # another model CLI. Qualified leaves use native file tools; the supervisor
+    # owns compilers/tests and other argv-based checks.
+    rules = [{"action": "*", "resource": "*", "effect": "deny"}]
+    rules += [{"action": action, "resource": "*", "effect": "allow"} for action in ("read", "glob", "grep")]
+    if role == "worker":
+        rules.append({"action": "edit", "resource": "*", "effect": "allow"})
     for spec in resolved_servers(profile, root, cache_root=cache_root):
         item = {"type": "local" if spec["transport"] == "stdio" else "remote",
             "codemode": False, "pool": False,
@@ -261,12 +267,14 @@ def render_opencode(profile, root, *, cache_root=None, role="worker"):
         rules.extend({"action": prefix + "_" + re.sub(r"[^A-Za-z0-9_]", "_", tool),
             "resource": "*", "effect": "allow"} for tool in spec["allowed_tools"])
     rules.extend({"action": action, "resource": "*", "effect": "deny"}
-        for action in ("subagent", "execute", "external_directory"))
-    if role == "reviewer":
+        for action in ("subagent", "execute", "external_directory", "shell", "skill"))
+    if role in {"reviewer", "planner"}:
         rules.extend({"action": action, "resource": "*", "effect": "deny"} for action in ("shell", "edit"))
     return {"default_agent": "harness-leaf", "mcp": {"servers": servers}, "agents": {"harness-leaf": {"mode": "primary", "permissions": rules}},
         "policies": [{"action": "tool.use", "resource": "subagent:*", "effect": "deny"},
-                     {"action": "plugin.use", "resource": "*", "effect": "deny"}]}
+                     {"action": "plugin.use", "resource": "*", "effect": "deny"},
+                     {"action": "mcp.use", "resource": "*", "effect": "deny"},
+                     *({"action": "mcp.use", "resource": name, "effect": "allow"} for name in sorted(servers))]}
 
 
 def inspect_cli(dependency, *, timeout=10):

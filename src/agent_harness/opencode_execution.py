@@ -61,6 +61,9 @@ class OpenCodeEventNormalizer:
         self.closed_steps = set()
         self.final_reason = None
         self.failed = False
+        self.usage_observed = False
+        self.usage_totals = {key: 0 for key in ("input_tokens", "output_tokens", "cached_input_tokens", "reasoning_tokens")}
+        self.usage_known = {key: True for key in self.usage_totals}
 
     def feed(self, value):
         if not isinstance(value, dict) or value.get("type") not in JSON_TYPES:
@@ -103,6 +106,28 @@ class OpenCodeEventNormalizer:
             self.final_reason = part.get("reason")
             if self.final_reason not in {"stop", "tool-calls", "length", "content-filter", "error", "other", "unknown"}:
                 raise ValueError("Unknown OpenCode finish reason")
+            tokens = part.get("tokens")
+            self.usage_observed |= isinstance(tokens, dict)
+            tokens = tokens if isinstance(tokens, dict) else {}
+            cache = tokens.get("cache") if isinstance(tokens.get("cache"), dict) else {}
+            valid = lambda value: type(value) is int and value >= 0
+            inputs = [tokens.get("input"), cache.get("read"), cache.get("write")]
+            outputs = [tokens.get("output"), tokens.get("reasoning")]
+            total_input = sum(inputs) if all(valid(value) for value in inputs) else None
+            total_output = sum(outputs) if all(valid(value) for value in outputs) else None
+            # V2 input is uncached and output excludes reasoning. Its qL
+            # serializer also replaces wholly missing SDK usage with zeros.
+            # Do not mistake that fallback for a fully measured model turn.
+            unknown_zero = total_input == total_output == 0
+            for key, count in (("input_tokens", total_input if total_input != 0 else None),
+                               ("output_tokens", total_output),
+                               ("cached_input_tokens", cache.get("read")), ("reasoning_tokens", tokens.get("reasoning"))):
+                if unknown_zero:
+                    count = None
+                if valid(count):
+                    self.usage_totals[key] += count
+                else:
+                    self.usage_known[key] = False
         if event_type == "tool_use":
             tool = part.get("tool")
             if not isinstance(tool, str) or not tool or tool in FORBIDDEN_LEAF_TOOLS:
@@ -126,7 +151,10 @@ class OpenCodeEventNormalizer:
             return []
         if not self.session_id or self.step is not None or self.final_reason != "stop":
             raise ValueError("OpenCode EOF does not prove a complete execution")
-        return [{"type": "turn.completed", "backend": "opencode"}]
+        event = {"type": "turn.completed", "backend": "opencode"}
+        if self.usage_observed:
+            event["usage"] = {key: value if self.usage_known[key] else None for key, value in self.usage_totals.items()}
+        return [event]
 
 
 def _read_opencode_stream(source, name, target, inbox):
@@ -191,6 +219,7 @@ class OpenCodeAdapter(CodexAdapter):
         self.tool_config_digest = None
         self.tool_config_path = None
         self.tool_root = None
+        self._native_qualification = None
 
     def with_environment(self, environment):
         if type(self) is not OpenCodeAdapter:
@@ -207,6 +236,9 @@ class OpenCodeAdapter(CodexAdapter):
             if env.get("OPENCODE_CONFIG_CONTENT") not in (None, raw):
                 raise HarnessError("OpenCode environment clone conflicts with its tool profile")
             env["OPENCODE_CONFIG_CONTENT"] = raw
+            if self.tool_root is not None:
+                env["PWD"] = self.tool_root
+                env.pop("OPENCODE_SESSION_ID", None)
             clone.environment = _environment(env)
         return clone
 
@@ -229,14 +261,47 @@ class OpenCodeAdapter(CodexAdapter):
         if env.get("OPENCODE_CONFIG_CONTENT") and env["OPENCODE_CONFIG_CONTENT"] != raw:
             raise HarnessError("Existing OPENCODE_CONFIG_CONTENT conflicts; no implicit user override")
         env["OPENCODE_CONFIG_CONTENT"] = raw
+        if clone.tool_root is not None:
+            # V2 resolves its default location from PWD as well as process cwd.
+            # An inherited supervisor PWD can otherwise select another checkout.
+            env["PWD"] = clone.tool_root
+            env.pop("OPENCODE_SESSION_ID", None)
         clone.environment = _environment(env)
         return clone
 
     def _qualification(self):
-        # No operator flag, CLI self-report or fixture receipt can turn this
-        # into a live qualification. Add a tested core verifier before enabling.
+        proof = self._native_qualification
+        if proof is not None:
+            try:
+                self.verify_qualification()
+                return dict(proof.flags)
+            except (OSError, ValueError, HarnessError):
+                pass
         return {"managed_leaf_qualified": False, "exact_resume_qualified": False,
-                "reviewer_isolation_qualified": False}
+                "reviewer_isolation_qualified": False, "effective_tool_catalog": False}
+
+    def qualify(self, *, root, role, evidence_dir, session_id=None, timeout=60):
+        from .opencode_qualification import qualify
+        return qualify(self, root=root, role=role, evidence_dir=evidence_dir,
+            session_id=session_id, timeout=timeout)
+
+    def qualification_receipt(self):
+        if self._native_qualification is None:
+            raise HarnessError("BLOCKED_NOT_QUALIFIED: no core-issued native qualification")
+        return copy.deepcopy(self._native_qualification.receipt)
+
+    def verify_qualification(self, *, root=None, role=None):
+        from .opencode_qualification import verify_qualification_evidence
+        proof = self._native_qualification
+        root = root if root is not None else self.tool_root
+        if (proof is None or root is None or not proof.valid(self, root)
+                or role is not None and proof.role != role):
+            raise HarnessError("EXACT_RESUME_DRIFT: native qualification inputs changed or expired")
+        verify_qualification_evidence(proof.receipt, root=root, role=proof.role)
+
+    def effective_tool_catalog(self):
+        self.verify_qualification()
+        return copy.deepcopy(list(self._native_qualification.catalog))
 
     def capabilities(self, *, deadline=None):
         values = {}
@@ -264,9 +329,12 @@ class OpenCodeAdapter(CodexAdapter):
                 "session_export": "export" in values["session"], "output_schema": False,
                 "resume_output_schema": False, "configured_settings": {},
                 "native_children_disabled": qualification["managed_leaf_qualified"] and supported,
-                "qualification_status": "BLOCKED_NOT_QUALIFIED",
-                "suppression_proof": "Live effective permissions, catalog, negative tests and exact resume are unqualified",
-                "tool_config_digest": self.tool_config_digest, **qualification}
+                "qualification_status": "QUALIFIED" if qualification["managed_leaf_qualified"] and supported else "BLOCKED_NOT_QUALIFIED",
+                "suppression_proof": "Core-issued native permissions and pre-dispatch catalog guard" if qualification["managed_leaf_qualified"] else "Live effective permissions, catalog, negative tests and exact resume are unqualified",
+                "tool_config_digest": self.tool_config_digest,
+                "effective_catalog_digest": digest(list(self._native_qualification.catalog)) if self._native_qualification is not None else None,
+                **({"qualification_ref": self.qualification_receipt()} if self._native_qualification is not None else {}), **qualification,
+                "connected_mcp_servers": list(qualification.get("connected_mcp_servers", ())) }
         except (OSError, ValueError, HarnessError, subprocess.TimeoutExpired) as error:
             return {"status": "unavailable", "backend": self.backend, "reason": type(error).__name__,
                     "native_children_disabled": False, **self._qualification()}
@@ -336,6 +404,9 @@ class OpenCodeAdapter(CodexAdapter):
             argv += ["--session", session_id]
         if self.tool_config is not None and self.tool_config.get("default_agent"):
             argv += ["--agent", self.tool_config["default_agent"]]
+        if session_id is None:
+            # Native automatic title generation is another provider request.
+            argv += ["--title", "Harness managed execution"]
         argv.append(prompt)
         if os.name == "nt" and len(subprocess.list2cmdline(argv)) > 30000:
             raise HarnessError("OpenCode Windows argv byte budget exceeded")
@@ -359,6 +430,9 @@ class OpenCodeAdapter(CodexAdapter):
         return argv
 
     def run(self, prompt, *, cwd, **options):
+        native_proof = self._native_qualification
+        runtime_path = None
+        transport = self
         try:
             self.preflight(prompt, **{k: v for k, v in options.items() if k in {
                 "session_id", "output_schema", "native_children", "read_only", "write_authorized", "allow_non_git", "reasoning_effort"}})
@@ -368,9 +442,38 @@ class OpenCodeAdapter(CodexAdapter):
                 actual = json.loads(read_regular_file(self.tool_config_path, max_bytes=1024 * 1024), object_pairs_hook=_duplicate_free)
                 if digest(actual) != self.tool_config_digest:
                     raise HarnessError("OpenCode tool profile artifact drift")
+            if native_proof is not None:
+                from .opencode_qualification import NativeServer, check_session
+                if options.get("session_id") is not None:
+                    import time
+                    remaining = options.get("timeout", 600)
+                    with NativeServer(self, cwd, deadline=time.monotonic() + min(15, remaining)) as server:
+                        check_session(server, options["session_id"], cwd)
+                proof = json.loads(read_regular_file(native_proof.receipt["path"], max_bytes=4 * 1024 * 1024))
+                runtime_path = Path(proof["runtime_dir"]) / ("execution-" + __import__("uuid").uuid4().hex + ".jsonl")
+                transport = copy.copy(self)
+                environment = dict(self.environment)
+                environment["HARNESS_OPENCODE_GUARD_RUNTIME"] = str(runtime_path)
+                environment["PWD"] = str(Path(cwd).resolve())
+                transport.environment = _environment(environment)
         except (HarnessError, OSError, ValueError) as error:
             raise NotDispatched(str(error)) from error
-        result = super().run(prompt, cwd=cwd, **options)
+        result = super(OpenCodeAdapter, transport).run(prompt, cwd=cwd, **options)
         result["backend"] = self.backend
         result["tool_config_digest"] = self.tool_config_digest
+        if native_proof is not None:
+            artifacts = []
+            if runtime_path.exists():
+                raw = read_regular_file(runtime_path, max_bytes=16 * 1024 * 1024)
+                artifacts = [{"path": str(runtime_path), "sha256": hashlib.sha256(raw).hexdigest()}]
+                result["catalog_artifacts"] = artifacts
+            if result["status"] == "completed":
+                from .opencode_qualification import verify_qualification_evidence
+                try:
+                    verify_qualification_evidence(native_proof.receipt, root=cwd, role=native_proof.role,
+                        require_execution=True, session_id=result.get("thread_id"), catalog_artifacts=artifacts,
+                        execution_log={"path": result["logs"]["stdout"], "sha256": result["log_sha256"]["stdout"]})
+                except (HarnessError, OSError, ValueError) as error:
+                    result.update(status="unknown_outcome", outcome_known=False,
+                        error="Native pre-dispatch catalog audit is unverified: " + str(error))
         return result

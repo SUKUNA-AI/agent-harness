@@ -89,6 +89,7 @@ if mode=='late':event('text',part=part('text',text='late'))
 
 class FixtureOpenCodeAdapter(OpenCodeAdapter):
     """Fixture-only verifier; deliberately unavailable from the production CLI."""
+    qualify = None
     def _qualification(self):
         return {"managed_leaf_qualified": True, "exact_resume_qualified": True,
                 "reviewer_isolation_qualified": True}
@@ -302,6 +303,32 @@ print("{}")
         normalizer.feed(value('step_start', 'b'))
         normalizer.feed(value('step_finish', 'b', reason='stop'))
         self.assertEqual(normalizer.finish()[0]['type'], 'turn.completed')
+
+    def test_native_usage_includes_cached_input_writes_and_reasoning(self):
+        normalizer = OpenCodeEventNormalizer()
+        for index, tokens in enumerate((
+                {'input': 1357, 'output': 13, 'reasoning': 51, 'cache': {'read': 0, 'write': 0}},
+                {'input': 81, 'output': 111, 'reasoning': 0, 'cache': {'read': 2560, 'write': 0}},
+                {'input': 4, 'output': 4, 'reasoning': 0, 'cache': {'read': 0, 'write': 1302}})):
+            message = 'msg_' + str(index)
+            normalizer.feed({'type': 'step_start', 'sessionID': 'ses_usage', 'part': {'messageID': message}})
+            normalizer.feed({'type': 'step_finish', 'sessionID': 'ses_usage', 'part': {
+                'messageID': message, 'reason': 'stop' if index == 2 else 'tool-calls', 'tokens': tokens}})
+        usage = normalizer.finish()[0]['usage']
+        self.assertEqual(usage, {'input_tokens': 1357 + 2641 + 1306, 'output_tokens': 64 + 111 + 4,
+            'cached_input_tokens': 2560, 'reasoning_tokens': 51})
+
+    def test_native_missing_or_zero_fallback_usage_is_unknown(self):
+        for tokens in (None, {'input': 0, 'output': 0, 'reasoning': 0, 'cache': {'read': 0, 'write': 0}},
+                {'input': 7, 'output': 2}):
+            normalizer = OpenCodeEventNormalizer()
+            normalizer.feed({'type': 'step_start', 'sessionID': 'ses_usage', 'part': {'messageID': 'msg_usage'}})
+            part = {'messageID': 'msg_usage', 'reason': 'stop'}
+            if tokens is not None:
+                part['tokens'] = tokens
+            normalizer.feed({'type': 'step_finish', 'sessionID': 'ses_usage', 'part': part})
+            usage = normalizer.finish()[0].get('usage')
+            self.assertTrue(usage is None or usage['input_tokens'] is None and usage['output_tokens'] is None)
 
     @unittest.skipUnless(os.environ.get('HARNESS_LIVE_OPENCODE') == '1' and shutil.which('opencode'),
                          'BLOCKED_NOT_QUALIFIED: opt-in real OpenCode standalone/config/permission/resume qualification required')
