@@ -350,6 +350,15 @@ runtime catalog artifacts и JSONL, а final gate проверяет покры�
 native step. Logical owner с read-only контрактом получает reviewer tool policy,
 сохраняя прежнюю роль и quota accounting.
 
+Для final reviewer OpenCode supervisor публикует вне candidate immutable
+combined diff и manifest, затем передаёт точный список файлов проверки и schema.
+Backend разрешает только эти внешние read-only файлы с SHA256/device/inode
+binding. Соседние файлы, внешние glob/grep и любые записи остаются запрещены.
+Ownership tokens и внутренние staging files не входят в reviewer context.
+При превышении file/byte bounds review блокируется без обрезания evidence.
+OpenCode получает JSON-схему в ограниченном prompt; backend не заявляет native
+structured output enforcement, а supervisor самостоятельно валидирует ответ.
+
 При `work resume --run-dir /private/run` сначала действуют прежние ownership и
 process reconciliation, затем заново проверяются backend/profile/config/catalog/
 worktree identities. Drift даёт `EXACT_RESUME_DRIFT`; новая сессия не называется

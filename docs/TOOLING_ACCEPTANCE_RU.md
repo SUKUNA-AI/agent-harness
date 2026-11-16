@@ -104,9 +104,10 @@ PowerShell: сначала `$env:HARNESS_LIVE_CODEX_CATALOG='1'`, затем т�
 
 Opt-in OpenCode suite использует установленный CLI, изолированные HOME/XDG,
 реальный native permission/plugin/MCP runtime и локальный scripted model
-endpoint. Он не требует платного ключа. На Linux с 2.2.5 все восемь native live
-сценариев прошли, включая worker в настоящем detached Git worktree и отказ
-незапрошенного native worktree remove. Это отдельно от доступа к OpenRouter.
+endpoint. Он не требует платного ключа. На Linux с 2.2.5 проверены девять native
+live сценариев, включая detached Git worktree, отказ native worktree remove
+и точечный read-only доступ к evidence с отказом чтения соседнего файла и записи.
+Это отдельно от доступа к OpenRouter.
 Без opt-in, CLI или local listen тесты имеют явную причину skip/block, которая
 не считается qualification другой машины. `tools qualify --backend opencode`
 сохраняет bounded native preflight без inference в указанном private каталоге.

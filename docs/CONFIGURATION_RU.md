@@ -232,3 +232,10 @@ session persistence. В процессе исполнения private plugin п�
 клиент не получает допуск. `OPENCODE_CONFIG`, `OPENCODE_CONFIG_DIR`, actual HOME
 и content overrides входят в проверку config drift. Модель по умолчанию
 автоматически не заменяется.
+
+Исторические `execution-receipt.schema.json` и `execution-receipt.v2.schema.json`
+остаются побайтно неизменными. Completion с `payload.tool_artifacts` проходит
+закрытый `execution-receipt.tooling.v1.schema.json` или `.tooling.v2.schema.json`:
+нужны capability binding и ссылки на hashes artifacts в `input_refs`. Это
+расширение существующего tooling state v4 и того же JSONL journal. Старые
+records не переписываются, их поля, YAML-байты и digests сохраняются.
