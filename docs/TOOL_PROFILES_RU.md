@@ -76,8 +76,11 @@ slot. Stdio probe создаёт свой contained процесс, выполн
 process identity, cwd, live catalog и его digest. Это диагностическое соединение
 уже закрыто после probe; оно не доказывает будущее соединение model client.
 
-`client_catalog_verified: false` явно запрещает трактовать диагностический
-receipt как effective catalog Codex/OpenCode. Backend должен самостоятельно
+`client_catalog_verified: false` в stdio dependency receipt явно запрещает
+трактовать его как effective catalog Codex/OpenCode. `tools catalog` дополнительно
+может запустить штатный Codex app-server в disposable home без auth и model turn;
+отдельный `client_catalog` описывает только этот ephemeral диагностический thread,
+а `qualified_for_exec: false` запрещает переносить его вывод на следующий exec. Backend должен самостоятельно
 квалифицировать ограничения и фактические tools. Reviewer при отсутствии этого
 доказательства блокируется. Prompt и read-only hint не заменяют enforcement.
 Отрицательные тесты probe проверяют его собственную границу; они не являются
@@ -168,8 +171,10 @@ context isolation и cleanup. До live qualification профиль возвр�
 
 `documents` имеет явный `local-only|remote` mode, input/output roots, byte/time
 bounds. По умолчанию local-only. Наличие Docling CLI и offline env flags не
-доказывает запрет сетевых вызовов. До квалифицированного offline conversion runner
-local-only возвращает `BLOCKED_NOT_QUALIFIED`; никакого скрытого remote fallback.
+доказывает запрет сетевых вызовов. Контролируемый conversion runner ещё не реализован/квалифицирован. Оба режима
+возвращают `BLOCKED_NOT_QUALIFIED`, `requested_conversion_mode` и
+`actual_conversion_mode: not_run`; remote не обходит path/byte/time ограничения.
+Никакого скрытого remote fallback.
 [Docling usage](https://docling-project.github.io/docling/usage/).
 
 ## Диагностика отказов
@@ -193,3 +198,36 @@ acceptance. Native client support HTTP не означает qualified harness p
 Целевые тесты: `python -m unittest discover -s tests -p test_tool_profiles.py -v`.
 Тесты не требуют моделей, токенов, браузера, Serena или Graphify. Fixture tool
 versions явно содержат `fixture`; их PASS не квалифицирует реальные клиенты.
+
+## CLI для frozen graph artifacts
+
+Команды в существующем namespace `tools`:
+
+```text
+python tools/harness.py tools snapshot --root /absolute/source --output /private/source.yaml
+python tools/harness.py tools index-verify --root /absolute/source --receipt /private/graph/RECEIPT.graph-receipt.yaml
+python tools/harness.py tools index-verify --root /absolute/source --receipt /private/graph/RECEIPT.graph-receipt.yaml --historical
+```
+
+`index-build` принимает `--root`, `--snapshot`, `--artifact-dir`,
+`--command-json`, `--tool-version`; optional `--version-argv-json`,
+`--settings-json` (default `{}`), `--timeout` (seconds, default 120). JSON argv
+передаётся отдельным аргументом без shell. В command обязательны `{source_root}`
+и `{index_output}`. Реальные Graphify flags сначала сверяются с установленным
+help; harness их не угадывает. Private output directories создаются отдельно.
+
+Для воспроизведения механизма **без live Graphify** можно использовать
+`tests/tooling/fake_graphify.py` с точным `fixture-graphify 1` и явным Python argv:
+
+```text
+python tools/harness.py tools index-build --root /absolute/source --snapshot /private/source.yaml --artifact-dir /private/graph --command-json '["python","/absolute/package/tests/tooling/fake_graphify.py","{source_root}","{index_output}"]' --tool-version 'fixture-graphify 1' --version-argv-json '["python","/absolute/package/tests/tooling/fake_graphify.py","--version"]'
+```
+
+Это проверка fixture builder, а не квалификация реального Graphify. Путь
+receipt выводится через artifact identity: `ARTIFACT_DIR/IDENTITY.graph-receipt.yaml`.
+У `tools check|catalog|smoke` флаг `--graph-index RECEIPT` передаёт полный receipt
+в fresh provenance verification; отсутствующий required index не расходует
+model slot. У contract/node selection `execution.graph_index` хранит абсолютный
+путь ordinary YAML receipt. Сам profile указывает `index.required: true`.
+После source edits нужен новый snapshot/build; `--historical` оставляет явный
+`HISTORICAL_ONLY` и не разрешает mandatory reuse.

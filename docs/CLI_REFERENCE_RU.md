@@ -49,14 +49,19 @@ code. Полный managed JSON обычно форматирован;
 | `tools show` | `--profile ID_OR_ABSOLUTE_YAML`, `--backend codex\|opencode`, обязательный `--root`; нормализованный policy и native config |
 | `tools dry-run` | Те же флаги; deterministic config/digests без записи |
 | `tools check` | Те же флаги; installed dependencies и live stdio MCP readiness |
-| `tools catalog` | Те же флаги; live advertised catalog, policy projection и digest; `client_catalog_verified: false` |
+| `tools catalog` | Те же флаги; dependency catalog и отдельный no-model Codex app-server audit; результат привязан к disposable диагностическому thread |
 | `tools smoke` | Те же флаги; backend help/version, dependency probes и OpenCode standalone probe; без model calls |
+| `tools snapshot` | `--root P --output NEW_PRIVATE_YAML`; actual source manifest вне source |
+| `tools index-build` | `--root P --snapshot F --artifact-dir P --command-json JSON --tool-version V`; optional `--version-argv-json`, `--settings-json`, `--timeout` (120s) |
+| `tools index-verify` | `--root P --receipt F`, optional `--historical`; повторная проверка source/artifact/builder bytes |
 | `tools apply` | Те же флаги плюс обязательные `--output NEW_PRIVATE_FILE --apply`; новый файл вне source/user config, без перезаписи |
 
-Для всех команд кроме `list`: `--profile baseline`, `--backend codex` и
+Для `show/dry-run/check/catalog/smoke/apply`: `--profile baseline`, `--backend codex` и
 `--role owner` — defaults. `--root` должен быть существующим абсолютным каталогом.
 Роли `owner|architect|reviewer|helper` переводятся в ограничения профиля;
-`reviewer-readonly` выбирайте с `--role reviewer`.
+`reviewer-readonly` выбирайте с `--role reviewer`. Флаг `--graph-index F`
+у этих команд передаёт ordinary frozen graph receipt; проверка нужна у
+`check/catalog/smoke`, dry-run/apply не квалифицируют его.
 
 `check/catalog` имеют exit 2 при required BLOCKED; optional NOT_AVAILABLE
 сохраняется в JSON и не становится PASS. `smoke` имеет exit 2 с
@@ -75,9 +80,10 @@ python tools/harness.py tools smoke --profile baseline --backend opencode --root
 python tools/harness.py tools apply --profile baseline --backend codex --root /absolute/project --output /private/run/tool-config.toml --apply
 ```
 
-Примеры используют существующие project/private paths. `tools catalog` пустого
-reviewer profile подтверждает только отсутствие дополнительных declared MCP;
-допуск реального reviewer всё равно требует backend enforcement. Подробнее:
+Примеры используют существующие project/private paths. `tools catalog` использует Codex app-server без model turn и auth в отдельном
+disposable home. `client_catalog_verified` относится только к этому thread;
+`qualified_for_exec: false` и отсутствие reviewer qualification запрещают
+переносить его результат на другой exec. Допуск reviewer требует enforcement. Подробнее:
 [Tool Profiles](TOOL_PROFILES_RU.md) и [Tooling acceptance](TOOLING_ACCEPTANCE_RU.md).
 
 ## Foreground work supervisor

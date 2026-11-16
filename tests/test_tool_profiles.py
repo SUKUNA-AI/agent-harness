@@ -144,6 +144,14 @@ class ToolProfileTests(unittest.TestCase):
         self.assertEqual(receipt["status"], "READY")
         self.assertFalse(receipt["client_catalog_verified"])
 
+    def test_large_diagnostic_request_is_rejected_before_blocking_pipe_write(self):
+        spec = resolved_servers(self.profile(), self.source)[0]
+        with StdioProbe(spec) as client:
+            client.inventory()
+            with self.assertRaisesRegex(ProbeFailure, "REQUEST_LIMIT"):
+                client.call_readonly("search_symbol", {"symbol": "x" * 8192})
+        self.assertTrue(client.stopped)
+
     def test_A5_required_mcp_failures_never_become_ready(self):
         for mode, reason in (("startup-failure", "HANDSHAKE_FAILED"), ("handshake-failure", "HANDSHAKE_FAILED"),
                 ("missing-tool", "MISSING_TOOL"), ("timeout", "TIMEOUT"), ("disconnect", "DISCONNECTED"),
@@ -250,6 +258,18 @@ class ToolProfileTests(unittest.TestCase):
         with self.assertRaisesRegex(HarnessError, "current_source_drift"):
             verify_graph_index(receipt, frozen)
         self.assertEqual(verify_graph_index(receipt, frozen, required=False)["status"], "HISTORICAL_ONLY")
+
+    def test_documents_modes_cannot_bypass_unimplemented_controlled_runner(self):
+        profile = load_profile("documents")
+        profile["cli"] = []
+        for mode in ("local-only", "remote"):
+            with self.subTest(mode=mode):
+                profile["documents"]["mode"] = mode
+                result = preflight_profile(profile, "codex", self.source)
+                self.assertEqual(result["status"], "BLOCKED")
+                self.assertEqual(result["requested_conversion_mode"], mode)
+                self.assertEqual(result["actual_conversion_mode"], "not_run")
+                self.assertIn("controlled conversion runner", result["reason"])
 
     def test_required_graph_readiness_blocks_before_process_without_current_binding(self):
         profile = self.profile()

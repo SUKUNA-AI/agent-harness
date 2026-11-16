@@ -22,6 +22,7 @@ from .runner import WindowsJob, _contained_capture
 
 MAX_MESSAGE_BYTES = 1024 * 1024
 MAX_TOTAL_BYTES = 8 * 1024 * 1024
+MAX_REQUEST_BYTES = 4096
 
 
 class ProbeFailure(HarnessError):
@@ -121,7 +122,9 @@ class StdioProbe(AbstractContextManager):
 
     def _send(self, message):
         data = json.dumps(message, separators=(",", ":"), allow_nan=False).encode() + b"\n"
-        if len(data) > MAX_MESSAGE_BYTES:
+        # A request fits one ordinary pipe buffer. A server that stops reading
+        # cannot make a large blocking stdin write bypass the response timeout.
+        if len(data) > MAX_REQUEST_BYTES:
             raise ProbeFailure("REQUEST_LIMIT")
         try:
             self.process.stdin.write(data)

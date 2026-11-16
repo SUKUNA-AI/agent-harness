@@ -312,9 +312,11 @@ def preflight_profile(profile, backend, root, role="worker", *, cache_root=None,
             receipt["servers"].append(observed)
             if observed["status"] != "READY" and server["required"]:
                 receipt["status"] = "BLOCKED"
-        if profile.get("documents", {}).get("mode") == "local-only":
+        if profile.get("documents"):
             receipt["status"] = "BLOCKED"
-            receipt["reason"] = "BLOCKED_NOT_QUALIFIED: local-only conversion requires a qualified offline runner; CLI presence does not prove network isolation"
+            receipt["requested_conversion_mode"] = profile["documents"]["mode"]
+            receipt["actual_conversion_mode"] = "not_run"
+            receipt["reason"] = "BLOCKED_NOT_QUALIFIED: controlled conversion runner required for " + profile["documents"]["mode"] + "; CLI presence does not enforce input/output/size/time/network policy"
         if profile.get("browser"):
             receipt["status"] = "BLOCKED"
             receipt["reason"] = "BLOCKED_NOT_QUALIFIED: browser binary/context lifecycle requires live smoke; CLI presence is insufficient"

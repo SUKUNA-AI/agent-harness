@@ -197,6 +197,9 @@ execution:
 flow. Отсутствие профиля означает baseline. Старым контрактам defaults этих
 полей не дописываются: их нормализованные digest/checkpoint правила сохраняются.
 Узел наследует contract selection и заменяет явно заданные значения.
+Для обязательного frozen graph добавьте абсолютный `execution.graph_index` —
+путь к ordinary YAML receipt, построенному через `tools index-build` до edits.
+Перед dispatch/resume проверяются его source/tool/index hashes.
 Для private profile добавьте абсолютный `tool_profile.path`; файл повторно
 проверяется перед resume, и смена bytes/version запрещает exact resume.
 
