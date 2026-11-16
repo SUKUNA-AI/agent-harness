@@ -343,6 +343,13 @@ canonical worktree/physical identity и source snapshot. Session/process/events
 остаются в существующих execution records и JSONL receipts. Secret values в
 новый checkpoint не копируются.
 
+Для OpenCode binding также содержит native qualification reference. Перед
+dispatch выполняется pre-turn rehearsal без inference; во время исполнения
+проверяются реальные context/HTTP tool catalogs. Completion закрепляет все
+runtime catalog artifacts и JSONL, а final gate проверяет покрытие каждого
+native step. Logical owner с read-only контрактом получает reviewer tool policy,
+сохраняя прежнюю роль и quota accounting.
+
 При `work resume --run-dir /private/run` сначала действуют прежние ownership и
 process reconciliation, затем заново проверяются backend/profile/config/catalog/
 worktree identities. Drift даёт `EXACT_RESUME_DRIFT`; новая сессия не называется

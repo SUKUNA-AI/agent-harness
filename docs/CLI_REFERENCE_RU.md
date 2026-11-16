@@ -49,14 +49,15 @@ code. Полный managed JSON обычно форматирован;
 | `tools show` | `--profile ID_OR_ABSOLUTE_YAML`, `--backend codex\|opencode`, обязательный `--root`; нормализованный policy и native config |
 | `tools dry-run` | Те же флаги; deterministic config/digests без записи |
 | `tools check` | Те же флаги; installed dependencies и live stdio MCP readiness |
-| `tools catalog` | Те же флаги; dependency catalog и отдельный no-model Codex app-server audit; результат привязан к disposable диагностическому thread |
+| `tools catalog` | Те же флаги; dependency catalog и native audit выбранного клиента без inference; временные артефакты диагностики |
+| `tools qualify` | `--backend opencode --root P --evidence-dir P`; те же profile/role флаги; native preflight и сохранённые proof/catalog без model calls |
 | `tools smoke` | Те же флаги; backend help/version, dependency probes и OpenCode standalone probe; без model calls |
 | `tools snapshot` | `--root P --output NEW_PRIVATE_YAML`; actual source manifest вне source |
 | `tools index-build` | `--root P --snapshot F --artifact-dir P --command-json JSON --tool-version V`; optional `--version-argv-json`, `--settings-json`, `--timeout` (120s) |
 | `tools index-verify` | `--root P --receipt F`, optional `--historical`; повторная проверка source/artifact/builder bytes |
 | `tools apply` | Те же флаги плюс обязательные `--output NEW_PRIVATE_FILE --apply`; новый файл вне source/user config, без перезаписи |
 
-Для `show/dry-run/check/catalog/smoke/apply`: `--profile baseline`, `--backend codex` и
+Для `show/dry-run/check/catalog/smoke/qualify/apply`: `--profile baseline`, `--backend codex` и
 `--role owner` — defaults. `--root` должен быть существующим абсолютным каталогом.
 Роли `owner|architect|reviewer|helper` переводятся в ограничения профиля;
 `reviewer-readonly` выбирайте с `--role reviewer`. Флаг `--graph-index F`
@@ -69,6 +70,11 @@ code. Полный managed JSON обычно форматирован;
 handshake не доказывает model session/exact resume/effective permissions.
 У `apply` target parent должен уже существовать; произвольная перезапись и
 изменения auth/config запрещены. JSON содержит `applied` и output path.
+У `qualify` backend должен быть `opencode`; evidence directory должен уже
+существовать вне source и пользовательских config roots. Вывод не служит
+переносимым разрешением: supervisor повторяет qualification для конкретного
+worktree и проверяет каталог внутри каждого исполнения. При required MCP
+нужно соединение именно native клиента и наличие required tools в его каталоге.
 
 ```text
 python tools/harness.py tools list
@@ -77,13 +83,17 @@ python tools/harness.py tools dry-run --profile /private/project-tools.yaml --ba
 python tools/harness.py tools check --profile coding --backend codex --root /absolute/worktree
 python tools/harness.py tools catalog --profile reviewer-readonly --backend codex --role reviewer --root /absolute/worktree
 python tools/harness.py tools smoke --profile baseline --backend opencode --root /absolute/project
+python tools/harness.py tools qualify --profile reviewer-readonly --backend opencode --role reviewer --root /absolute/worktree --evidence-dir /private/opencode-proof
 python tools/harness.py tools apply --profile baseline --backend codex --root /absolute/project --output /private/run/tool-config.toml --apply
 ```
 
-Примеры используют существующие project/private paths. `tools catalog` использует Codex app-server без model turn и auth в отдельном
+Примеры используют существующие project/private paths. `tools catalog --backend codex` использует Codex app-server без model turn и auth в отдельном
 disposable home. `client_catalog_verified` относится только к этому thread;
 `qualified_for_exec: false` и отсутствие reviewer qualification запрещают
-переносить его результат на другой exec. Допуск reviewer требует enforcement. Подробнее:
+переносить его результат на другой exec. OpenCode audit использует native
+pre-turn hook с прерыванием до provider dispatch; реальный запуск отдельно
+проверяет catalog/permissions и сохраняет привязанные к completion артефакты.
+Допуск reviewer требует enforcement. Подробнее:
 [Tool Profiles](TOOL_PROFILES_RU.md) и [Tooling acceptance](TOOLING_ACCEPTANCE_RU.md).
 
 ## Foreground work supervisor

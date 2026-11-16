@@ -31,6 +31,12 @@ plugins, Code Mode или внешних write-capable операций reviewer
 операторского self-report для обхода квалификации нет. Старый контракт без
 новых полей сохраняет прежнюю модель исполнения и прежние гарантии.
 
+OpenCode 2.2.5 имеет native core verifier: supervisor квалифицирует конкретный
+worktree/роль перед dispatch, а private plugin проверяет реальные context и
+HTTP catalogs каждого model request. Его JSONL artifacts и normalized execution
+log закрепляются в completion receipt. Сохранённый diagnostic proof не является
+операторским разрешением; drift и утрата runtime evidence закрывают gate.
+
 ## Матрица возможностей
 
 | Возможность | Реализация | Live граница |
@@ -38,13 +44,13 @@ plugins, Code Mode или внешних write-capable операций reviewer
 | Codex baseline без новых полей | SUPPORTED | Сохраняется существующий flow |
 | Strict профили, render/dry-run, dependency probes | SUPPORTED | Отсутствующая dependency видна отдельно |
 | Native Codex MCP catalog/deny RPC | QUALIFIED для изолированного probe | Не квалификация последующего exec |
-| MCP profile в managed exec | EXPERIMENTAL | BLOCKED без execution-bound catalog qualification |
-| Строгий reviewer с MCP | BLOCKED | Нет полного core verifier прав клиента |
+| MCP profile в managed exec | SUPPORTED для qualified OpenCode | Native connection/catalog и runtime guard; Codex exec пока BLOCKED |
+| Строгий reviewer с MCP | QUALIFIED для OpenCode 2.2.5 с fixture MCP | Реальный клиент и malicious provider negatives; реализация конкретного MCP требует аудита |
 | Serena на каждый worktree | EXPERIMENTAL | Требуются установленный CLI и live isolation test |
 | Graph index provenance/invalidation | SUPPORTED | Конкретная команда Graphify квалифицируется отдельно |
 | ast-grep migration helper | SUPPORTED | Нужен установленный ast-grep/sg с подходящей версией |
-| OpenCode V2 managed leaf transport | EXPERIMENTAL | Реальный клиент BLOCKED_NOT_QUALIFIED |
-| OpenCode exact session resume | EXPERIMENTAL | Fixture transport проверен; live resume не квалифицирован |
+| OpenCode V2 managed leaf transport | QUALIFIED для 2.2.5 | Native pre-turn/client policy и runtime catalog enforcement |
+| OpenCode exact session resume | QUALIFIED для native rehearsal | Реальный restart, конкретный ID, прежняя история; cloud workload проверяется отдельно |
 | OpenCode native multi-agent mode | NOT_IMPLEMENTED | Не эквивалент managed workers |
 | Browser/document managed profile | BLOCKED | Требуется полный qualified runner/client policy |
 | HTTP MCP diagnostic transport | NOT_IMPLEMENTED | HTTP renderer не означает живую готовность |
@@ -59,9 +65,9 @@ version и `UNKNOWN_OUTCOME` не являются успешной приёмк
 | --- | --- | --- |
 | A1 | `test_tooling_acceptance`: два managed CLI workers, реальные Git worktrees, отдельные MCP subprocesses, одинаковый symbol name с разным содержимым, cwd/project roots, scoped integration, event receipts, review/gate | Настоящая Serena; fixture сервер не выдаётся за неё |
 | A2 | `test_tool_profiles`: frozen source copy, tool/settings/source/index digests, independent Python AST check, dirty-source invalidation, historical-only режим | Конкретная установленная Graphify команда |
-| A3 | Diagnostic policy negatives; OpenCode fixture permissions; native Codex live catalog и два запрещённых RPC; новый unqualified reviewer блокируется до model slot | Полная изоляция реальных reviewer клиентов |
+| A3 | Native OpenCode 2.2.5: forced shell/edit/subagent/MCP write/execute, external read, forged plugin ID, удаление guard; нет записи/RPC. Native Codex diagnostic allowlist/deny RPC | Codex exec reviewer не квалифицирован; конкретные read-only MCP требуют аудита |
 | A4 | Worker process останавливается после session event; supervisor restart и explicit retry сохраняют session/worktree/backend/profile, journal history; profile/dependency/source-checkpoint drift блокирует запуск | Точное продолжение реальной model session OpenCode |
-| A5 | Startup/handshake/missing tool/timeouts/disconnect; model slot отсутствует при preflight failure; runtime MCP error и отсутствие подтверждённого обязательного результата запрещают integration | Реальные отказы установленных сторонних сервисов |
+| A5 | Startup/handshake/missing tool/timeouts/disconnect; model slot отсутствует при preflight failure; native OpenCode теряет fake MCP после provider dispatch и не сообщает completed, даже без MCP tool calls | Реальные отказы установленных сторонних сервисов |
 | A6 | Старый контракт без execution/profile; Codex flow проходит без создания OpenCode, без новых MCP; прежние schemas/checkpoints и scheduler покрыты regression suite | Windows/native qualification выполняется отдельно |
 | A7 | Успешные MCP calls и worker integration не спасают проваленный independent check; положительный A1 проходит freeze/check/review/gate; удаление tool receipt делает сохранённый ACCEPTED устаревшим | Live model workload отдельно от harness fixtures |
 
@@ -89,11 +95,20 @@ python -m unittest discover -s tests -p test_codex_tool_catalog.py -v
 
 ```bash
 HARNESS_LIVE_CODEX_CATALOG=1 python -m unittest discover -s tests -p test_codex_tool_catalog.py -v
+HARNESS_LIVE_OPENCODE_QUALIFICATION=1 python -m unittest discover -s tests -p test_opencode_qualification.py -v
 ```
 
 PowerShell: сначала `$env:HARNESS_LIVE_CODEX_CATALOG='1'`, затем та же Python
 команда. Для OpenCode live smoke используйте `tools smoke --backend opencode`:
 успешный help или standalone startup не выдаётся за exact-resume qualification.
+
+Opt-in OpenCode suite использует установленный CLI, изолированные HOME/XDG,
+реальный native permission/plugin/MCP runtime и локальный scripted model
+endpoint. Он не требует платного ключа. На Linux с 2.2.5 все шесть native live
+сценариев прошли; это отдельно от наличия доступа к OpenRouter-моделям.
+Без opt-in, CLI или local listen тесты имеют явную причину skip/block, которая
+не считается qualification другой машины. `tools qualify --backend opencode`
+сохраняет bounded native preflight без inference в указанном private каталоге.
 
 Для длительного набора допустимы штатные непересекающиеся shards:
 `python tools/run_tests.py --shard 1 --shards 4` и остальные три номера.

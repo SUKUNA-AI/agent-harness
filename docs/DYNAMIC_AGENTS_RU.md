@@ -169,8 +169,10 @@ Worktree создаёт harness; `codex --worktree` не используетс�
 
 Tool dependency diagnostics выполняются до model admission. Неподдерживаемый
 backend, mandatory MCP failure или недоказанное подавление native children
-блокируют запуск. Реальный OpenCode пока `BLOCKED_NOT_QUALIFIED`; fixture
-интеграции проверяют смешанный DAG и recovery mechanics без платных model calls.
+блокируют запуск. OpenCode проходит native pre-turn qualification для выбранного
+worktree/роли и проверяет execution-bound catalog перед каждым model request.
+Неуспешная qualification остаётся `BLOCKED_NOT_QUALIFIED`. Fixture
+интеграции отдельно проверяют смешанный DAG и recovery без платных model calls.
 OpenCode internal scheduler/child sessions не приравниваются к managed DAG.
 
 Final reviewer выбирается отдельным `review_execution` с тем же форматом.

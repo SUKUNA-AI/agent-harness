@@ -324,8 +324,12 @@ Codex остаётся default. OpenCode — optional managed leaf transport, б
 обязательного shared service/daemon. Backend не владеет scheduler, DAG,
 worktrees, quotas, retries, integration и acceptance. OpenCode native subagents
 не считаются managed workers; их полноценная оркестрация не реализована.
-До live проверки подавления subagents/permissions/exact resume реальные OpenCode
-managed вызовы блокируются. Смешанный DAG использует прежние глобальные slots.
+Native pre-turn verifier OpenCode проверяет location, catalog, permissions и
+session persistence до model admission. Private native plugin проверяет
+каталог каждого model request и отвергает незаявленные операции. Все runtime
+catalogs и JSONL привязаны к completion receipts; утрата evidence закрывает gate.
+При провале квалификации managed вызов блокируется. Смешанный DAG использует
+прежние глобальные slots.
 
 Новые tooling receipts лежат в том же private run и доступны gate freshness
 проверкам; отдельного state store нет. Graphify index — производный immutable

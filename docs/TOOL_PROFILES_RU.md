@@ -86,6 +86,16 @@ process identity, cwd, live catalog и его digest. Это диагности�
 Отрицательные тесты probe проверяют его собственную границу; они не являются
 live security qualification внешнего клиента.
 
+Для OpenCode `tools catalog` и `tools qualify` выполняют native pre-turn
+rehearsal без inference. Supervisor повторяет эту процедуру перед dispatch и
+привязывает proof к worktree, роли, executable, model и профилю. Private plugin
+проверяет фактический каталог до каждого запроса к provider; completion pin
+связывает runtime catalogs и полный JSONL с существующим receipt/gate.
+Сохранённый JSON или операторский флаг не включает capabilities.
+Required MCP должен быть connected в самом native клиенте, а required tools —
+в его effective catalog. Отсутствующий optional server исключается из native
+grants с документированным fallback; исходный профиль и его digest сохраняются.
+
 Codex renderer использует `mcp_servers`, `enabled_tools`, `disabled_tools`,
 `required`, `startup_readiness = "connection"`, cwd и ограниченные timeouts.
 `catalog` readiness не подходит mandatory live dependency. [Официальная
@@ -100,6 +110,15 @@ OpenCode V2 renderer использует `mcp.servers`, `codemode: false`, `poo
 сама генерация JSON не является квалификацией. [Официальные MCP
 настройки](https://opencode.ai/docs/mcp-servers/) и
 [permissions](https://opencode.ai/docs/permissions/).
+
+Единственное исключение plugin policy — точный private source path защитного
+плагина harness с проверкой hash. Остальные plugins не разрешаются по похожему
+ID. Shell, Code Mode execute, skill wrappers, subagent и внешние директории
+не входят в managed leaf grants. Worker получает native read/glob/grep/edit,
+reviewer и planner — read/glob/grep плюс явно аудированные MCP allowlists.
+CLI capabilities профиля не открывают shell автоматически. Для задач с
+компиляцией/тестами используйте независимые supervisor checks; задачи, которым
+обязательно нужен shell внутри worker, требуют другой квалифицированной границы.
 
 ## Serena: один worktree — один stdio process
 

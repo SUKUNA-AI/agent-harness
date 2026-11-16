@@ -38,9 +38,11 @@ MCP, live dependency diagnostics, native client renderers, Graphify provenance �
 overrides без перезаписи auth/config; [OpenCode V2](docs/OPENCODE_RU.md) —
 дополнительный optional adapter для managed leaf worker.
 
-OpenCode live managed/reviewer/resume capability остаётся
-`BLOCKED_NOT_QUALIFIED` до проверки реального клиента. Fixture integration PASS
-не является live qualification. Лимиты 12 managed sessions и 3 reviewers,
+OpenCode V2 проходит native preflight без inference, затем проверяет каталог
+и права в процессе каждого исполнения. Непрошедшая проверка даёт
+`BLOCKED_NOT_QUALIFIED`; fixture PASS сам по себе допуска не даёт.
+Квалифицированная граница и ограничения описаны в [OpenCode](docs/OPENCODE_RU.md).
+Лимиты 12 managed sessions и 3 reviewers,
 worktree ownership, независимые checks и final gate общие. Матрица сценариев и
 границы проверки — [Tooling acceptance](docs/TOOLING_ACCEPTANCE_RU.md).
 Новые исходники не меняют ранее опубликованный ZIP 1.6.1.

@@ -223,3 +223,12 @@ subagent/plugin policies. Реальные client precedence/plugins требу�
 квалификации, которую renderer не создаёт. Подробнее:
 [Tool Profiles](TOOL_PROFILES_RU.md), [Codex MCP](CODEX_MCP_RU.md),
 [OpenCode](OPENCODE_RU.md).
+
+OpenCodeAdapter выполняет собственную native qualification после renderer:
+проверяет location, effective model/catalog, permission negatives и exact
+session persistence. В процессе исполнения private plugin проверяет каталог
+перед каждым provider request; native JSONL и runtime catalog artifacts
+закрепляются в существующих receipts. Установленный, но неквалифицированный
+клиент не получает допуск. `OPENCODE_CONFIG`, `OPENCODE_CONFIG_DIR`, actual HOME
+и content overrides входят в проверку config drift. Модель по умолчанию
+автоматически не заменяется.

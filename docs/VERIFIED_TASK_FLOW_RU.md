@@ -297,3 +297,8 @@ freeze, source/test evidence и независимый review. Fault-injection �
 границы сценариев A1–A7 описаны в [Tooling acceptance](TOOLING_ACCEPTANCE_RU.md).
 Read-only reviewer допускается по фактическим backend ограничениям; конфиг или
 инструкция сами по себе не являются enforcement.
+
+OpenCode native qualification и runtime catalog artifacts входят в ту же
+цепочку evidence: completion pin, повторная проверка hashes и покрытие native
+steps. Их отсутствие или drift запрещают verified acceptance. Это дополняет
+source/check/reviewer gate и не заменяет независимые tests.
