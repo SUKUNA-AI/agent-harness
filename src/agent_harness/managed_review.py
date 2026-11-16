@@ -310,7 +310,20 @@ def review_candidate(supervisor, run, candidate):
             return None
         if not supervisor._model_budget_ok(for_spawn=True):
             return None
-        if not supervisor._adapter().capabilities().get("output_schema"):
+        review_adapter = supervisor._adapter()
+        tool_ref = None
+        if ("review_execution" in supervisor.contract or "execution" in supervisor.contract
+                or any("execution" in row for row in supervisor.store.read(supervisor.state["plan_path"], "agent-plan.schema.json")["tasks"])):
+            from .execution import prepare as prepare_execution, selection
+            try:
+                review_adapter, tool_ref = prepare_execution(supervisor, selection(supervisor.contract, review=True),
+                    root=supervisor.state["cwd"], role="reviewer", node_id="@review",
+                    attempt_id="review-" + str(len(all_intents) + 1))
+            except HarnessError as error:
+                supervisor.transition("BLOCKED_ENVIRONMENT", str(error))
+                return None
+        backend = supervisor.contract.get("review_execution", {}).get("backend", "codex")
+        if backend == "codex" and not review_adapter.capabilities().get("output_schema"):
             supervisor.transition("BLOCKED_ENVIRONMENT", "Fresh final review needs structured output capability")
             return None
         if binding:
@@ -339,14 +352,17 @@ def review_candidate(supervisor, run, candidate):
                 "completion_policy": binding,
                 "required_verdict_version": 3 if binding else 2 if supervisor.contract["schema_version"] == 2 else 1})
         effort = plan_reviewer_effort(supervisor.store.read(supervisor.state["plan_path"], "agent-plan.schema.json"))
-        preflight(supervisor._adapter(), prompt, read_only=True, write_authorized=False,
+        if backend == "opencode":
+            effort = None
+        preflight(review_adapter, prompt, read_only=True, write_authorized=False,
             native_children=False, output_schema=str(schema), reasoning_effort=effort)
         with GlobalSlots(supervisor.state_dir).acquire(supervisor.state["run_id"], "@review", "reviewer",
                 cancel_file=supervisor.path / "cancel.yaml", timeout=min(60, supervisor.remaining())) as slot:
             intent = receipts.intent("@review", "review-" + str(len(all_intents) + 1), checkout=supervisor.state["cwd"],
-                owner=slot.value["lease_id"], candidate_digest=candidate["digest"], review_binding=binding)
+                owner=slot.value["lease_id"], candidate_digest=candidate["digest"], review_binding=binding,
+                input_refs=[tool_ref["digest"]] if tool_ref else (), tool_provenance=tool_ref)
             start = time.monotonic()
-            result = invoke(supervisor._adapter(), prompt, slot=slot, cwd=supervisor.state["cwd"], read_only=True,
+            result = invoke(review_adapter, prompt, slot=slot, cwd=supervisor.state["cwd"], read_only=True,
                 write_authorized=False, native_children=False, output_schema=str(schema), reasoning_effort=effort,
                 timeout=invocation_timeout(supervisor, "reviewer"),
                 deadline=supervisor.state["deadline"], cancel_file=supervisor.path / "cancel.yaml",

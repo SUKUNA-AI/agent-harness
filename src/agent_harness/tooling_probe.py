@@ -171,6 +171,13 @@ class StdioProbe(AbstractContextManager):
             self.server_info = sanitized(initialized["serverInfo"])
             self._send({"jsonrpc": "2.0", "method": "notifications/initialized"})
         except ProbeFailure as error:
+            if error.code == "DISCONNECTED" and self.process is not None:
+                try:
+                    code = self.process.wait(timeout=0.1)
+                except subprocess.TimeoutExpired:
+                    code = None
+                if code is not None and code != 0:
+                    raise ProbeFailure("STARTUP_FAILED") from error
             if error.code in {"DISCONNECTED", "REQUEST_REJECTED", "INVALID_MESSAGE", "CONFLICTING_RESPONSE"}:
                 raise ProbeFailure("HANDSHAKE_FAILED") from error
             raise

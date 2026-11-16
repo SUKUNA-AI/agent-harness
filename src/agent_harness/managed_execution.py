@@ -334,6 +334,13 @@ def execute_managed(supervisor, *, recovering=False):
         supervisor.transition("BLOCKED_AMBIGUOUS", "Unsafe or invalid persisted plan: " + str(error))
         return supervisor._loop()
     scheduler = Scheduler(plan, contract)
+    tooling = ("execution" in contract or "review_execution" in contract
+               or any("execution" in node for node in plan["tasks"]))
+    if tooling:
+        review_backend = contract.get("review_execution", {}).get("backend", "codex")
+        if supervisor._adapter(review_backend).capabilities().get("reviewer_isolation_qualified") is not True:
+            supervisor.transition("BLOCKED_ENVIRONMENT", "BLOCKED_NOT_QUALIFIED: tooling DAG requires effective final-reviewer isolation before worker admission")
+            return supervisor._loop()
     # No proven per-request upper bounds exist. Serialize budgeted dispatch and
     # check complete coverage before each call; do not claim a backend hard cap.
     if contract["budgets"].get("max_tokens") is not None:
@@ -447,7 +454,12 @@ def execute_managed(supervisor, *, recovering=False):
                 return receipts.result(latest), 0.0, previous, latest
             from .failure_policy import classify
             failure = classify(receipts.result(latest))
-            if latest["payload"]["outcome"] != "completed" and not failure["repairable"]:
+            resume_stopped = (getattr(supervisor, "_explicit_tool_retry", False)
+                and ("execution" in node or "execution" in contract)
+                and latest["payload"]["outcome"] in {"timed_out", "cancelled"}
+                and latest["payload"]["process_tree_stopped"] is True
+                and previous.get("thread_id"))
+            if latest["payload"]["outcome"] != "completed" and not failure["repairable"] and not resume_stopped:
                 return receipts.result(latest), 0.0, previous, latest
         if previous and previous["attempts_used"] >= node["max_attempts"]:
             raise HarnessError("Worker attempt budget exhausted: " + name)
@@ -482,8 +494,20 @@ def execute_managed(supervisor, *, recovering=False):
                 if current_deps != agent["dependency_vector"]:
                     raise NotDispatched("Verified dependency vector changed before dispatch")
         review_schema = schema_file(supervisor, "managed-review.schema.json", 1) if verified_flow.enabled(supervisor) and node["role"] == "reviewer" else None
-        effort = worker_effort(node)
-        preflight(supervisor._adapter(), prompt, read_only=node["read_only"], native_children=False, output_schema=review_schema,
+        from .execution import selection, prepare as prepare_execution, revalidate
+        selected = selection(contract, node)
+        uses_tools = "execution" in contract or "execution" in node
+        adapter, tool_ref = supervisor._adapter(), None
+        if uses_tools:
+            adapter, tool_ref = prepare_execution(supervisor, selected, root=record["path"],
+                role=node["role"], node_id=name, attempt_id=name + "-" + str(agent["attempts_used"] + 1),
+                worktree=record, prior=agent.get("tool_provenance") if agent["thread_id"] else None)
+            if agent["thread_id"] and (not agent.get("tool_source_checkpoint") or input_digest != agent["tool_source_checkpoint"]):
+                raise NotDispatched("EXACT_RESUME_DRIFT: source checkpoint missing or changed since last confirmed process")
+            if contract["budgets"]["max_concurrent_managed_agents"] > 1:
+                validate_suppression(getattr(supervisor, "native_disabled_proof", None), adapter.capabilities())
+        effort = worker_effort(node) if selected.get("backend", "codex") == "codex" else node.get("reasoning_effort")
+        preflight(adapter, prompt, read_only=node["read_only"], native_children=False, output_schema=review_schema,
             write_authorized=not node["read_only"], session_id=agent["thread_id"] if agent["attempts_used"] else None,
             reasoning_effort=effort)
         attempt = agent["attempts_used"] + 1
@@ -523,9 +547,11 @@ def execute_managed(supervisor, *, recovering=False):
                         frontier = verified_flow.refresh_frontier(supervisor, plan, agents, names=node["depends_on"], verify_only=True)
                         if [frontier[d]["record_id"] for d in node["depends_on"]] != agent["dependency_vector"]:
                             raise NotDispatched("Verified predecessor changed while waiting")
-                preflight(supervisor._adapter(), prompt, read_only=node["read_only"], native_children=False,
+                preflight(adapter, prompt, read_only=node["read_only"], native_children=False,
                     write_authorized=not node["read_only"], output_schema=review_schema,
                     session_id=agent["thread_id"] if attempt > 1 else None, reasoning_effort=effort)
+                if tool_ref:
+                    revalidate(adapter, adapter.binding, selected)
                 if plan_quality.enabled(supervisor):
                     errors = plan_quality.evidence_errors(supervisor, plan)
                     if errors:
@@ -533,11 +559,15 @@ def execute_managed(supervisor, *, recovering=False):
             except (HarnessError, OSError, ValueError) as error:
                 slot.complete()
                 raise NotDispatched(str(error)) from error
-            intent = receipts.intent(name, agent["attempt_id"], checkout=record["path"], owner=slot.value["lease_id"], dependencies=agent["dependency_vector"], invocation_id=invocation_id)
+            if tool_ref:
+                agent["tool_provenance"] = tool_ref
+                save()
+            intent = receipts.intent(name, agent["attempt_id"], checkout=record["path"], owner=slot.value["lease_id"], dependencies=agent["dependency_vector"], invocation_id=invocation_id,
+                input_refs=[tool_ref["digest"]] if tool_ref else (), tool_provenance=tool_ref)
             agent["invocation_ids"].append(intent["invocation_id"])
             save()
             model_start = time.monotonic()
-            result = invoke(supervisor._adapter(), prompt, slot=slot, cwd=record["path"],
+            result = invoke(adapter, prompt, slot=slot, cwd=record["path"],
                 timeout=invocation_timeout(supervisor, "worker", node_remaining=(deadline - datetime.now(deadline.tzinfo)).total_seconds()), deadline=agent["deadline"],
                 session_id=agent["thread_id"] if attempt > 1 else None, output_schema=review_schema,
                 cancel_file=supervisor.path / "cancel.yaml", on_process=process, on_event=event,
@@ -549,6 +579,8 @@ def execute_managed(supervisor, *, recovering=False):
             guard_invocations(supervisor, node_ids={name})
             if result.get("process_tree_stopped") is True or contract["schema_version"] == 1 and result.get("process_tree_stopped") is not False:
                 slot.complete(result)
+        if tool_ref:
+            agent["tool_source_checkpoint"] = snapshot(input_contract)["digest"]
         agent.update(status="ready_for_review" if result["status"] == "completed" else result["status"],
             process_identity=None, completion_ref=completion["record_id"])
         for stream in ("stdout", "stderr"):

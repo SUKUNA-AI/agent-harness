@@ -16,6 +16,9 @@ def main(argv=None):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "tools":
+        from .tooling_cli import dispatch
+        return dispatch(argv[1:])
     if argv and argv[0] == "work":
         from .work_cli import dispatch
         return dispatch(argv[1:])
@@ -40,6 +43,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Native Codex harness: state and verification, never a second agent engine")
     parser.add_argument("--version", action="version", version=__version__)
     commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("tools", help="Optional tool profiles, native config and live diagnostics; use tools --help")
     commands.add_parser("work", help="Foreground execution supervisor; use work --help")
     commands.add_parser("repomap", help="Version-bound code/test navigation; use repomap --help")
     commands.add_parser("plan", help="Read-only orchestration helpers; use plan --help")

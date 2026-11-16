@@ -16,7 +16,7 @@ from .core import HarnessError, changed_paths, digest, file_hash, lock, now, sna
 from .execution_ledger import repository_identity
 from .file_io import read_regular_file
 from .runner import _contained_capture
-from .strict_yaml import dumps
+from .strict_yaml import dumps, validate
 from .supervisor_store import _mkdir, _ordinary, _parents, atomic_write
 from .tool_profiles import inspect_cli
 
@@ -163,6 +163,7 @@ def build_graph_index(root, frozen, artifact_dir, command, *, tool_version, sett
             "built_at": now(), "protection": "content_addressed_verified_on_use",
             "acceptance": "not_performed", "independent_source_checks": "required"}
         receipt["identity"] = digest(receipt)
+        validate(receipt, "graph-index.schema.json")
         receipt_path = artifact_dir / (receipt["identity"] + ".graph-receipt.yaml")
         if not receipt_path.exists():
             atomic_write(receipt_path, dumps(receipt).encode(), exclusive=True)
@@ -171,6 +172,7 @@ def build_graph_index(root, frozen, artifact_dir, command, *, tool_version, sett
 
 def verify_graph_index(receipt, expected_snapshot, *, required=True):
     """Fail closed for current evidence; explicit historical use stays labelled."""
+    validate(receipt, "graph-index.schema.json")
     verify_snapshot(expected_snapshot)
     expected_identity = digest({key: value for key, value in receipt.items() if key != "identity"})
     reasons = []

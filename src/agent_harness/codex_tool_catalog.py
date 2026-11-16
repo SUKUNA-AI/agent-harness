@@ -37,6 +37,11 @@ def _toml(value, *, depth=0):
         return "true" if value else "false"
     if type(value) is int:
         return str(value)
+    if type(value) is float:
+        try:
+            return json.dumps(value, allow_nan=False)
+        except ValueError as error:
+            raise HarnessError("Nonfinite MCP native config number") from error
     if isinstance(value, list):
         return "[" + ",".join(_toml(x, depth=depth + 1) for x in value) + "]"
     if isinstance(value, dict) and all(isinstance(k, str) and NAME.fullmatch(k) for k in value):

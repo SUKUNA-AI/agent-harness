@@ -32,6 +32,12 @@ def normalize(value):
             if isinstance(check, dict) and check.get("kind") == "command":
                 check.setdefault("timeout", 300)
     validate(value, "work-contract.schema.json")
+    from .execution import validate_selection
+    for field in ("execution", "review_execution"):
+        if field in value:
+            validate_selection(value[field])
+    if value["mode"] == "native" and value.get("execution", {}).get("backend", "codex") != "codex":
+        raise HarnessError("OpenCode native subagents are BLOCKED_NOT_QUALIFIED; use managed leaf workers")
     if not IDENTIFIER.fullmatch(value["task"]["id"]):
         raise HarnessError("Invalid task ID")
     paths = value["task"]["allowed_write_scopes"]

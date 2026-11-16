@@ -274,7 +274,10 @@ class Supervisor:
             name = node["id"]
             status = ("integrated" if name in integrated else "completed" if name in completed else
                 "unknown" if name in started else "ready" if set(node["depends_on"]) <= integrated else "planned")
-            nodes.append({"node_id": name, "status": status, "created": name in self.state["agents"], "mandatory": True})
+            row = {"node_id": name, "status": status, "created": name in self.state["agents"], "mandatory": True}
+            if "execution" in node:
+                row["execution"] = deepcopy(node["execution"])
+            nodes.append(row)
         root_done = any(r["node_id"] == "@integration" and r["record_type"] == "completion" and r["payload"]["outcome"] == "completed" for r in bound)
         execution_complete = len(integrated & {n["id"] for n in plan["tasks"]}) == len(nodes) and root_done
         from . import verified_flow
@@ -351,7 +354,25 @@ class Supervisor:
             if trees.validate(staging, expected_id="integration", expected_role="integrator", integrated=True) != cwd:
                 raise HarnessError("Managed acceptance candidate differs from its ownership receipt")
 
-    def _adapter(self):
+    def _adapter(self, backend=None):
+        if backend is not None:
+            if isinstance(self.adapter, dict):
+                if backend in self.adapter:
+                    return self.adapter[backend]
+            elif backend == "codex":
+                return self._adapter()
+            if backend == "opencode":
+                from .opencode_execution import OpenCodeAdapter
+                return OpenCodeAdapter()
+            if backend != "codex":
+                raise HarnessError("Unsupported execution backend")
+            from .codex_execution import CodexAdapter
+            return CodexAdapter()
+        if isinstance(self.adapter, dict):
+            if "codex" not in self.adapter:
+                from .codex_execution import CodexAdapter
+                self.adapter["codex"] = CodexAdapter()
+            return self.adapter["codex"]
         if self.adapter is None:
             from .codex_execution import CodexAdapter
             self.adapter = CodexAdapter()
@@ -487,6 +508,18 @@ class Supervisor:
         adapter = self._adapter()
         self._pending_invocation_id = pending['invocation_id'] if pending else uuid.uuid4().hex
         self._pending_attempt_number = pending['attempt'] if pending else self.state['attempts_used'] + 1
+        tool_ref = None
+        if self.contract["mode"] == "native" and "execution" in self.contract:
+            from .execution import prepare as prepare_execution, selection
+            try:
+                adapter, tool_ref = prepare_execution(self, selection(self.contract), root=self.state["cwd"],
+                    role="owner", node_id="@root", attempt_id="attempt-" + str(self._pending_attempt_number),
+                    prior=self.state.get("tool_provenance") if repair else None)
+                if repair and self.state.get("tool_source_checkpoint") != self.provenance()["snapshot_id"]:
+                    raise NotDispatched("EXACT_RESUME_DRIFT: source changed since last process checkpoint")
+            except NotDispatched as error:
+                self.transition("BLOCKED_ENVIRONMENT", str(error))
+                return False
         if pending:
             self._root_reservation_id = pending['reservation_id']
             self._root_preparation_id = pending['preparation_id']
@@ -545,9 +578,15 @@ class Supervisor:
                     root_preparation.handle_failure(self, error, context="invocation_boundary")
                     return False
                 try:
+                    if tool_ref:
+                        from .execution import revalidate, selection
+                        revalidate(adapter, adapter.binding, selection(self.contract))
+                        self.state["tool_provenance"] = tool_ref
+                        self._save("native tool configuration bound before invocation")
                     intent = self.receipts().intent("@integration" if self.contract["mode"] == "managed" else "@root",
                         "attempt-" + str(reservation['attempt']), checkout=self.state["cwd"], owner=slot.value["lease_id"],
-                        invocation_id=reservation['invocation_id'], input_refs=(reservation['reservation_id'], digest(reservation['binding'])))
+                        invocation_id=reservation['invocation_id'], input_refs=(reservation['reservation_id'], digest(reservation['binding']),
+                            *([tool_ref["digest"]] if tool_ref else [])), tool_provenance=tool_ref)
                     root_preparation.assert_dispatch(self, reservation, bound)
                     root_preparation.reconcile_failure(self, reservation['preparation_id'])
                 except Exception as error:
@@ -564,6 +603,8 @@ class Supervisor:
                     read_only=self.contract["task"]["read_only"], write_authorized=not self.contract["task"]["read_only"],
                     allow_non_git=source_revision(self.state["cwd"]) == "non-git", log_dir=self.path / "codex")
                 result["slot_wait_ms"] = slot.wait_seconds * 1000
+                if tool_ref:
+                    self.state["tool_source_checkpoint"] = self.provenance()["snapshot_id"]
                 try:
                     completion = self.receipts().completion(intent, result, duration_ms=(time.monotonic() - execution_start) * 1000)
                     guard_invocations(self)
@@ -762,6 +803,11 @@ class Supervisor:
             verdict = {"verdict": "rejected", "errors": ["Fresh reviewer requested changes: " + str(review["findings"])]}
         else:
             verdict = gate(run)
+        if verdict["verdict"] == "accepted":
+            from .execution import evidence_errors as tooling_errors
+            errors = tooling_errors(self)
+            if errors:
+                verdict = {"verdict": "rejected", "errors": errors}
         if verdict["verdict"] == "accepted" and not quality_publication_guard("before_accepted_report"):
             return False
         self.store.write("acceptance/report.yaml", {"schema_version": 1, "verdict": verdict},
@@ -893,6 +939,7 @@ class Supervisor:
     def resume(self, *, repair_journal=False, new_attempt=None, native_disabled_proof=None):
         if new_attempt is not None and (not isinstance(new_attempt,str) or not new_attempt.strip()):
             raise HarnessError("Explicit retry requires a nonempty authorized hypothesis")
+        self._explicit_tool_retry = new_attempt is not None
         with self.store.lease("explicit foreground recovery"):
             if repair_journal:
                 self.store.repair_torn_tail()
@@ -1152,6 +1199,31 @@ class Supervisor:
             result.update(status="STALE", evidence_current=False,
                 reason="Observed candidate binding differs from the committed run head; explicit reconciliation required")
             result["metrics"].update(accepted_tasks=0, time_to_acceptance_seconds=None)
+        if verify and state["status"] == "ACCEPTED":
+            from .execution import evidence_errors as tooling_errors
+            errors = tooling_errors(self)
+            if errors:
+                result.update(status="STALE", evidence_current=False, reason="; ".join(errors))
+                result["metrics"].update(accepted_tasks=0, time_to_acceptance_seconds=None)
+        if ("execution" in self.contract or "review_execution" in self.contract
+                or any("execution" in node for node in result["progress"]["nodes"])):
+            result["tooling"] = {"execution": self.contract.get("execution", {}),
+                "review_execution": self.contract.get("review_execution", {}), "provenance_root": "tooling/", "agents": []}
+            for name in state["agents"]:
+                agent = self.store.read(self.agent_path(name), "agent-state.schema.json")
+                ref = agent.get("tool_provenance")
+                if not ref:
+                    continue
+                try:
+                    binding = self.store.read(ref["path"], "tool-execution.schema.json")
+                    identity = binding["identity"]
+                    result["tooling"]["agents"].append({"id": name, "session_id": agent["thread_id"],
+                        "backend": identity["backend"], "profile_id": identity["profile_id"], "profile_version": identity["profile_version"],
+                        "effective_config_digest": identity["effective_config_digest"], "catalog_digest": identity["catalog_digest"],
+                        "source_snapshot_digest": binding["source_snapshot_digest"], "graph_index_digest": identity["graph_index_digest"],
+                        "readiness": binding["readiness"], "provenance": ref})
+                except (HarnessError, OSError, ValueError):
+                    result["tooling"]["agents"].append({"id": name, "status": "STALE", "provenance": ref})
         result["current_phase"] = ("plan_quality:" + (quality["status"] if quality["phase"] == "approved" else quality["phase"])
             if quality.get("phase") and not quality["passed"] else result["status"].lower())
         if unresolved:

@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "kind": {
+      "const": "graph_index"
+    },
+    "provider": {
+      "const": "graphify"
+    },
+    "repository_identity": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "base_commit": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_root": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16384
+    },
+    "source_snapshot_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "source_content_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "source_files_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "frozen_source_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16384
+    },
+    "builder_inputs": {
+      "type": "object",
+      "maxProperties": 512,
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    },
+    "tool_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "executable": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16384
+    },
+    "binary_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "settings_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "builder_argv_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "index_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "index_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16384
+    },
+    "index_bytes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 67108864
+    },
+    "built_at": {
+      "type": "string",
+      "format": "utc"
+    },
+    "protection": {
+      "const": "content_addressed_verified_on_use"
+    },
+    "acceptance": {
+      "const": "not_performed"
+    },
+    "independent_source_checks": {
+      "const": "required"
+    },
+    "identity": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "required": [
+    "schema_version",
+    "kind",
+    "provider",
+    "repository_identity",
+    "base_commit",
+    "source_root",
+    "source_snapshot_digest",
+    "source_content_digest",
+    "source_files_digest",
+    "frozen_source_path",
+    "builder_inputs",
+    "tool_version",
+    "executable",
+    "binary_sha256",
+    "settings_digest",
+    "builder_argv_digest",
+    "index_digest",
+    "index_path",
+    "index_bytes",
+    "built_at",
+    "protection",
+    "acceptance",
+    "independent_source_checks",
+    "identity"
+  ]
+}

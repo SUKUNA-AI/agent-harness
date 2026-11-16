@@ -672,6 +672,28 @@
         "assessment_ref",
         "phase"
       ]
+    },
+    "tool_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "path",
+        "digest"
+      ]
+    },
+    "tool_source_checkpoint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
     }
   },
   "required": [

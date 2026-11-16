@@ -49,6 +49,9 @@ def validate_plan(plan, contract):
             raise HarnessError("MISSION_COVERAGE_INCOMPLETE: mandatory requirement missing from task mapping")
         node_checks = {c["id"] for c in contract["node_checks"]}
     for node in nodes:
+        if "execution" in node:
+            from .execution import validate_selection
+            validate_selection(node["execution"])
         worker_effort(node)
         if not IDENTIFIER.fullmatch(node["id"]):
             raise HarnessError("Invalid task ID")

@@ -148,9 +148,20 @@ class ExecutionReceipts:
             "capability_receipt_ref": None, "execution_owner": "managed_supervisor",
             "input_refs": [state["contract_digest"]], "payload": {}}
 
-    def intent(self, node_id, attempt_id, *, checkout, owner, dependencies=(), candidate_digest=None, invocation_id=None, review_binding=None, input_refs=()):
+    def intent(self, node_id, attempt_id, *, checkout, owner, dependencies=(), candidate_digest=None, invocation_id=None, review_binding=None, input_refs=(), tool_provenance=None):
         value = self.envelope("invocation_intent", node_id, attempt_id, invocation_id or uuid.uuid4().hex)
         value["input_refs"] = list(dict.fromkeys([*value["input_refs"], *input_refs]))
+        if tool_provenance is not None:
+            binding = self.store.read(tool_provenance["path"], "tool-execution.schema.json")
+            from .file_io import canonical_directory
+            if (digest(binding) != tool_provenance["digest"] or binding["run_id"] != value["run_id"]
+                    or binding["node_id"] != node_id or binding["attempt_id"] != attempt_id
+                    or binding["repository_identity"] != value["project_id"]
+                    or canonical_directory(binding["identity"]["root"]) != canonical_directory(checkout)):
+                raise HarnessError("Tool provenance subject changed before invocation intent")
+            value["capability_receipt_ref"] = tool_provenance["digest"]
+            value["client_version"] = binding["identity"]["backend"] + ":" + binding["identity"]["version"]
+            value["input_refs"] = list(dict.fromkeys([*value["input_refs"], tool_provenance["digest"]]))
         value["payload"] = {"checkout": str(checkout), "owner_id": owner,
             "dependency_vector": list(dependencies), "contract_digest": self.supervisor.state["contract_digest"],
             "deadline": self.supervisor.state["deadline"], "dispatch_state": "possibly_dispatched", "candidate_digest": candidate_digest}
@@ -165,6 +176,8 @@ class ExecutionReceipts:
         value["record_id"] = intent["invocation_id"] + "-completion"
         value["plan_digest"] = intent["plan_digest"]
         value["input_refs"] = list(intent["input_refs"])
+        value["capability_receipt_ref"] = intent["capability_receipt_ref"]
+        value["client_version"] = intent["client_version"]
         usage = result.get("usage")
         counters = {}
         invalid = False

@@ -47,7 +47,12 @@ for line in sys.stdin:
             Path("forbidden.txt").write_text("write unexpectedly dispatched")
         if tool == "execute_command":
             Path("shell-forbidden.txt").write_text("shell unexpectedly dispatched")
-        content = Path("symbol.py").read_text() if tool == "search_symbol" else "fixture"
+        content = Path(sys.argv[3] if len(sys.argv) > 3 else "symbol.py").read_text() if tool == "search_symbol" else "fixture"
+        if mode == "disconnect-call":
+            raise SystemExit
+        if mode == "tool-error":
+            emit(ident, {"isError": True, "content": [{"type": "text", "text": "fixture tool failure"}]})
+            continue
         emit(ident, {"content": [{"type": "text", "text": json.dumps({"pid": os.getpid(),
             "cwd": str(Path.cwd()), "project": sys.argv[2] if len(sys.argv) > 2 else str(Path.cwd()),
             "content": content})}]})

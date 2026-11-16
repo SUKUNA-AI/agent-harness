@@ -175,7 +175,7 @@ class ToolProfileTests(unittest.TestCase):
         self.assertTrue(client.stopped)
 
     def test_A5_required_mcp_failures_never_become_ready(self):
-        for mode, reason in (("startup-failure", "HANDSHAKE_FAILED"), ("handshake-failure", "HANDSHAKE_FAILED"),
+        for mode, reason in (("startup-failure", "STARTUP_FAILED"), ("handshake-failure", "HANDSHAKE_FAILED"),
                 ("missing-tool", "MISSING_TOOL"), ("timeout", "TIMEOUT"), ("disconnect", "DISCONNECTED"),
                 ("ping-timeout", "TIMEOUT")):
             with self.subTest(mode=mode):

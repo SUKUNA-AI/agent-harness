@@ -171,6 +171,8 @@ def _start_contained(argv, cwd=None, *, env=None, stdin=subprocess.DEVNULL):
         process.wait(timeout=5)
         process.stdout.close()
         process.stderr.close()
+        if process.stdin is not None:
+            process.stdin.close()
         raise
 
 

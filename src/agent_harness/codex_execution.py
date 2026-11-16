@@ -208,10 +208,38 @@ def configured_settings(*, environment=None):
     return {key: value[key] for key in keys if key in value and isinstance(value[key], (str, bool, int))}
 
 
+def _toml_literal(value):
+    if type(value) is bool:
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
+    if type(value) in (int, float):
+        return json.dumps(value, allow_nan=False)
+    if isinstance(value, list):
+        return "[" + ",".join(_toml_literal(item) for item in value) + "]"
+    if isinstance(value, dict):
+        return "{" + ",".join(json.dumps(key) + "=" + _toml_literal(child) for key, child in value.items()) + "}"
+    raise HarnessError("Unsupported native TOML value")
+
+
 class CodexAdapter:
     # Backends may normalize their event protocol while sharing containment,
     # durable capture and uncertain-outcome handling.
     _stream_reader = staticmethod(_read_stream)
+
+    def with_tool_config(self, config, *, root=None, config_path=None):
+        """Per-invocation MCP overlays; authentication/model/security untouched."""
+        if not isinstance(config, dict) or set(config) - {"mcp_servers"}:
+            raise HarnessError("Codex tool overlays may configure only mcp_servers")
+        clone = copy.copy(self)
+        clone._tool_config = copy.deepcopy(config)
+        # Construct and parse now to refuse non-native values before admission.
+        import tomllib
+        for name, value in config.get("mcp_servers", {}).items():
+            tomllib.loads("server=" + _toml_literal(value))
+            if not isinstance(name, str) or not SESSION.fullmatch(name):
+                raise HarnessError("Unsafe MCP server ID")
+        return clone
 
     def __init__(self, executable=("codex",), *, environment=None):
         self.environment = _explicit_environment(environment)
@@ -263,7 +291,7 @@ class CodexAdapter:
                 values[name] = output
             except (OSError, ValueError, subprocess.TimeoutExpired, HarnessError) as error:
                 return {"status": "unavailable", "reason": type(error).__name__, "native_children_disabled": False}
-        return {"status": "observed", "version": values["version"].strip(), "binary_sha256": _binary_hash(self.executable[0]), "json": "--json" in values["exec"], "resume": "SESSION_ID" in values["resume"], "output_schema": "--output-schema" in values["exec"], "resume_output_schema": "--output-schema" in values["resume"], "configured_settings": configured_settings(environment=self.environment), "native_children_disabled": False, "suppression_proof": "Separate observed tool inventory bound to this binary/version is required"}
+        return {"status": "observed", "version": values["version"].strip(), "binary_sha256": _binary_hash(self.executable[0]), "json": "--json" in values["exec"], "resume": "SESSION_ID" in values["resume"], "output_schema": "--output-schema" in values["exec"], "resume_output_schema": "--output-schema" in values["resume"], "configured_settings": configured_settings(environment=self.environment), "native_children_disabled": False, "effective_tool_catalog": False, "reviewer_isolation_qualified": False, "suppression_proof": "Separate observed tool inventory bound to this binary/version is required"}
 
     def argv(self, prompt, *, session_id=None, output_schema=None, native_children=False, read_only=False, write_authorized=False, allow_non_git=False, reasoning_effort=None):
         if not isinstance(prompt, str) or not prompt or len(prompt.encode("utf-8")) > MAX_PROMPT_BYTES or "\x00" in prompt:
@@ -275,6 +303,8 @@ class CodexAdapter:
         if reasoning_effort is not None and (not isinstance(reasoning_effort, str) or reasoning_effort not in {"medium", "high", "ultra"}):
             raise HarnessError("Unsupported explicit managed worker reasoning effort")
         argv = list(self.executable)
+        for name, value in getattr(self, "_tool_config", {}).get("mcp_servers", {}).items():
+            argv += ["-c", "mcp_servers." + json.dumps(name) + "=" + _toml_literal(value)]
         if reasoning_effort is not None:
             # Per-invocation only: never change the coordinator's installed model
             # or reasoning defaults. The selected model must support this effort.
