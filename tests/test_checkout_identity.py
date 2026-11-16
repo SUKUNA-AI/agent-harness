@@ -130,7 +130,7 @@ class CheckoutIdentityTests(unittest.TestCase):
         except OSError as exc:
             self.skipTest(f"Directory symlinks unavailable: {exc}")
         self.assertEqual(self.repo, checkout_identity(alias / "src"))
-        with self.assertRaisesRegex(HarnessError, "Unsafe snapshot"):
+        with self.assertRaisesRegex(HarnessError, "Unsafe snapshot|source ancestor is symlink/reparse"):
             self.run_fixture(alias / "tests", "alias")
         self.assertFalse((self.base / "alias").exists(), "refused root created persisted state")
 
