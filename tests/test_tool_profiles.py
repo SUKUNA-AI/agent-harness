@@ -65,6 +65,28 @@ class ToolProfileTests(unittest.TestCase):
         with self.assertRaises((HarnessError, StrictYAMLError)):
             load_profile(profile)
 
+    def test_credential_literal_names_and_flags_are_rejected_without_echo(self):
+        for name in ("SERVICE_TOKEN", "client_secret", "DB_PASSWORD", "Service_Credential",
+                "vendor_api_key", "AUTHORIZATION", "api-key", "PASSWD"):
+            with self.subTest(environment=name):
+                profile = self.profile()
+                profile["servers"][0]["environment"] = {name: "fixture-private-value"}
+                with self.assertRaises(HarnessError) as error:
+                    load_profile(profile)
+                self.assertNotIn("fixture-private-value", str(error.exception))
+        for flag in ("--password", "--token=fixture-private-value", "--api-key",
+                "--client_secret=fixture-private-value", "--github-token", "--Authorization"):
+            for field in ("command", "help_argv"):
+                with self.subTest(flag=flag, field=field):
+                    profile = self.profile()
+                    profile["servers"][0][field] = [sys.executable, flag, "fixture-private-value"]
+                    with self.assertRaises(HarnessError) as error:
+                        load_profile(profile)
+                    self.assertNotIn("fixture-private-value", str(error.exception))
+        allowed = self.profile()
+        allowed["servers"][0]["env_vars"] = ["SERVICE_TOKEN", "API_KEY"]
+        self.assertEqual(load_profile(allowed)["servers"][0]["env_vars"], ["SERVICE_TOKEN", "API_KEY"])
+
     def test_native_renderers_bind_root_and_live_readiness_without_global_writes(self):
         before = sorted(self.root.rglob("*"))
         codex = render_codex(self.profile(), self.source, cache_root=self.root / "cache")
@@ -291,6 +313,30 @@ class ToolProfileTests(unittest.TestCase):
         self.assertEqual(stale["status"], "BLOCKED")
         self.assertEqual(stale["servers"], [])
         self.assertIn("STALE_GRAPH_INDEX", stale["reason"])
+
+    def test_graph_output_traversal_is_blocked_before_any_source_mutation(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        destination = outside / ".." / "source" / "forbidden-index"
+        fixture = FIXTURES / "fake_graphify.py"
+        frozen = source_snapshot(self.source)
+        with self.assertRaises(HarnessError):
+            build_graph_index(self.source, frozen, destination,
+                [sys.executable, str(fixture), "{source_root}", "{index_output}"],
+                tool_version="fixture-graphify 1", version_argv=[sys.executable, str(fixture), "--version"])
+        self.assertFalse((self.source / "forbidden-index").exists())
+        self.assertEqual(source_snapshot(self.source)["digest"], frozen["digest"])
+
+    @unittest.skipIf(os.name == "nt", "POSIX symlink creation; Windows reparse checks share _ordinary")
+    def test_graph_output_linked_ancestor_is_blocked_before_source_mutation(self):
+        alias = self.root / "linked-artifacts"
+        alias.symlink_to(self.source, target_is_directory=True)
+        frozen = source_snapshot(self.source)
+        with self.assertRaises(HarnessError):
+            build_graph_index(self.source, frozen, alias / "forbidden-index",
+                [sys.executable, "{source_root}", "{index_output}"], tool_version="fixture")
+        self.assertFalse((self.source / "forbidden-index").exists())
+        self.assertEqual(source_snapshot(self.source)["digest"], frozen["digest"])
 
     def test_graph_artifacts_cannot_pollute_source(self):
         with self.assertRaises(HarnessError):

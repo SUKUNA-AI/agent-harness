@@ -24,6 +24,21 @@ ROLES = ("worker", "reviewer", "planner", "root")
 _READ_TOOLS = ["find_symbol", "find_referencing_symbols", "get_symbols_overview", "search_for_pattern", "read_file"]
 
 
+_CREDENTIAL_ENV = re.compile(r"TOKEN|SECRET|PASS(?:WORD|WD)|CREDENTIAL|API[_-]?KEY|AUTHORIZATION", re.I)
+_CREDENTIAL_OPTIONS = {"password", "passwd", "token", "api-key", "apikey", "secret",
+    "client-secret", "credential", "credentials", "authorization", "auth", "bearer"}
+
+
+def _check_credential_argv(argv):
+    for item in argv:
+        if not isinstance(item, str) or not item.startswith("-"):
+            continue
+        option = item.split("=", 1)[0].lstrip("-").lower().replace("_", "-")
+        if (option in _CREDENTIAL_OPTIONS or option.endswith(("-token", "-secret", "-password",
+                "-passwd", "-credential", "-credentials", "-api-key", "-authorization"))):
+            raise HarnessError("Credential-bearing command flags are forbidden in Tool Profiles; use env_vars names or native client auth")
+
+
 def _serena():
     # The local CLI must confirm these options before this command may launch.
     return {"id": "serena", "transport": "stdio", "required": True,
@@ -115,6 +130,10 @@ def load_profile(reference=None):
         # Profiles are shareable policy. Secret values belong to inherited env
         # names or client auth stores, never rendered files/checkpoints.
         from .codex_execution import sanitized
+        if any(_CREDENTIAL_ENV.search(key) for key in server["environment"]):
+            raise HarnessError("Credential-bearing environment literals are forbidden; declare env_vars names only")
+        _check_credential_argv(server.get("command", []))
+        _check_credential_argv(server.get("help_argv", []))
         if sanitized(server) != server:
             raise HarnessError("Tool profile contains credential-like material")
     for dep in value["cli"]:
@@ -123,6 +142,7 @@ def load_profile(reference=None):
         dep.setdefault("required", True)
         dep.setdefault("version_args", ["--version"])
         dep.setdefault("capabilities", [])
+        _check_credential_argv(dep["version_args"])
     validate(value, PROFILE_SCHEMA)
     if expected and expected != (value["id"], value["version"]):
         raise HarnessError("Tool profile reference identity/version mismatch")

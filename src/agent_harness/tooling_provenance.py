@@ -79,7 +79,16 @@ def build_graph_index(root, frozen, artifact_dir, command, *, tool_version, sett
         raise HarnessError("STALE_GRAPH_SOURCE: initial frozen snapshot differs from source")
     files = _source_files(frozen)
     artifact_dir = Path(artifact_dir)
-    if not artifact_dir.is_absolute() or artifact_dir == root or root in artifact_dir.parents:
+    if (not artifact_dir.is_absolute() or ".." in artifact_dir.parts
+            or os.name != "nt" and str(artifact_dir).startswith("//")):
+        raise HarnessError("Graph artifact path must be absolute without parent traversal or ambiguous roots")
+    # Validate before resolve/mkdir: normalizing first could hide a linked
+    # ancestor, while lexical containment alone misses outside/../source.
+    for parent in [*reversed(artifact_dir.parents), artifact_dir]:
+        if parent.exists() or parent.is_symlink():
+            _ordinary(parent, directory=True)
+    artifact_dir = Path(os.path.abspath(artifact_dir))
+    if artifact_dir == root or root in artifact_dir.parents:
         raise HarnessError("Graph artifacts must live outside the indexed source")
     _mkdir(artifact_dir)
     _parents(artifact_dir)
