@@ -20,11 +20,13 @@ def _output_path(value):
     return path
 
 
-def _opencode_catalog(config, root, role, evidence_dir):
+def _opencode_catalog(config, root, role, evidence_dir, profile):
+    from .execution import require_native_dependencies
     from .opencode_execution import OpenCodeAdapter
     adapter = OpenCodeAdapter().with_tool_config(config, root=root)
     adapter = adapter.qualify(root=root, role=role, evidence_dir=evidence_dir, timeout=60)
     adapter.verify_qualification(root=root, role=role)
+    require_native_dependencies(profile, adapter, adapter.capabilities())
     return {"status": "READY", "client_catalog_verified": True,
         "catalog": adapter.effective_tool_catalog(), "capabilities": adapter.capabilities(),
         "qualification_ref": adapter.qualification_receipt(), "model_calls": 0,
@@ -125,11 +127,11 @@ def dispatch(argv):
                     if (not evidence.is_dir() or evidence.is_symlink()
                             or any(evidence == p or p in evidence.parents for p in (root, codex, opencode))):
                         raise HarnessError("Qualification requires an existing private directory outside source/user config")
-                    result["client_catalog"] = _opencode_catalog(native, root, role, evidence)
+                    result["client_catalog"] = _opencode_catalog(native, root, role, evidence, profile)
                 else:
                     import tempfile
                     with tempfile.TemporaryDirectory(prefix="harness-opencode-catalog-") as directory:
-                        result["client_catalog"] = _opencode_catalog(native, root, role, Path(directory))
+                        result["client_catalog"] = _opencode_catalog(native, root, role, Path(directory), profile)
                     result["client_catalog"]["artifact_lifetime"] = "temporary_diagnostic_only"
                 result["client_catalog_verified"] = result["client_catalog"]["client_catalog_verified"]
             if args.command == "smoke":

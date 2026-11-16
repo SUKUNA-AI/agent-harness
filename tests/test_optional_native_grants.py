@@ -3,10 +3,11 @@ from copy import deepcopy
 from pathlib import Path
 import sys
 import unittest
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from agent_harness.core import HarnessError
-from agent_harness.execution import available_profile
+from agent_harness.execution import available_profile, require_native_dependencies
 
 
 class OptionalNativeGrantsTests(unittest.TestCase):
@@ -36,6 +37,17 @@ class OptionalNativeGrantsTests(unittest.TestCase):
             with self.subTest(required=required, status=status), self.assertRaises(HarnessError):
                 available_profile({"servers": [self.server(required)]}, {"servers": [
                     {"id": "source", "status": status, "catalog": tools}]})
+
+    def test_separate_diagnostic_ready_cannot_replace_native_required_connection(self):
+        profile = {"servers": [self.server(True)]}
+        adapter = SimpleNamespace(effective_tool_catalog=lambda: [{"name": "source_read"}])
+        for capabilities in ({}, {"connected_mcp_servers": []}, {"connected_mcp_servers": [{}]}):
+            with self.subTest(capabilities=capabilities), self.assertRaises(HarnessError):
+                require_native_dependencies(profile, adapter, capabilities)
+        require_native_dependencies(profile, adapter, {"connected_mcp_servers": ["source"]})
+        adapter.effective_tool_catalog = lambda: []
+        with self.assertRaises(HarnessError):
+            require_native_dependencies(profile, adapter, {"connected_mcp_servers": ["source"]})
 
 
 if __name__ == "__main__":

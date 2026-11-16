@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 
 from .core import HarnessError, digest, now
 from .file_io import read_regular_file, canonical_directory
@@ -193,6 +194,25 @@ def available_profile(profile, readiness):
     return result
 
 
+def require_native_dependencies(profile, adapter, capabilities):
+    """Required MCP readiness must belong to the actual native client."""
+    required = [server for server in profile["servers"] if server["required"]]
+    if not required:
+        return
+    connected = capabilities.get("connected_mcp_servers")
+    if (not isinstance(connected, list) or any(not isinstance(item, str) for item in connected)
+            or not {s["id"] for s in required} <= set(connected)):
+        raise HarnessError("Required MCP is not connected in the native execution client")
+    catalog = adapter.effective_tool_catalog()
+    names = {tool["name"] for tool in catalog}
+    for server in required:
+        prefix = re.sub(r"[^A-Za-z0-9_]", "_", server["id"])
+        wanted = {prefix + "_" + re.sub(r"[^A-Za-z0-9_]", "_", name)
+                  for name in server["required_tools"]}
+        if not wanted <= names:
+            raise HarnessError("Required MCP tools absent from native execution catalog: " + server["id"])
+
+
 def _verify_qualification_ref(supervisor, binding, *, require_execution=False, session_id=None, catalog_artifacts=None):
     """Persisted evidence verifies closure; it never grants native capabilities."""
     ref = binding.get("client_qualification")
@@ -277,6 +297,8 @@ def _configured(supervisor, selected, *, root, role, node_id, attempt_id):
         validate(capabilities.get("effective_catalog_digest"),
             _schema("tool-execution.schema.json")["properties"]["identity"]["properties"]["catalog_digest"])
         _qualification_ref(supervisor, adapter, profile_role)
+        if backend == "opencode":
+            require_native_dependencies(profile, adapter, capabilities)
     if role == "reviewer" and capabilities.get("reviewer_isolation_qualified") is not True:
         raise HarnessError("BLOCKED_NOT_QUALIFIED: effective reviewer catalog, shell, plugins and MCP isolation need live enforcement")
     if supervisor.remaining() <= 0:
