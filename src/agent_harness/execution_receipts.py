@@ -36,10 +36,24 @@ V2_PAYLOAD = dict(REQUIRED_PAYLOAD,
         "contract_digest", "plan_digest", "policy_digest", "input_digest", "output_schema_digest", "round", "verdict"})
 
 
-def record_schema(version):
-    if version not in (1, 2):
+def record_schema(version, *, tooling=False):
+    if type(version) is not int or version not in (1, 2):
         raise HarnessError("Unsupported execution receipt version")
+    if tooling:
+        return "execution-receipt.tooling.v" + str(version) + ".schema.json"
     return SCHEMA if version == 1 else "execution-receipt.v2.schema.json"
+
+
+def schema_for_record(record):
+    """Explicit typed artifact extension; historical schema bytes stay frozen.
+
+    The existing artifact field discriminates a completion-only tooling
+    variant. No default marker, new store or rewriting of saved records is
+    needed, including receipts already published by the tooling writer.
+    """
+    payload = record.get("payload")
+    return record_schema(record["schema_version"],
+        tooling=isinstance(payload, dict) and "tool_artifacts" in payload)
 
 
 def _catalog_artifacts(supervisor, artifacts):
@@ -80,7 +94,8 @@ def verify_tool_artifacts(supervisor, completion):
     supplied = completion.get("payload", {}).get("tool_artifacts")
     if supplied is None:
         return []
-    if not completion.get("capability_receipt_ref"):
+    if (not completion.get("capability_receipt_ref")
+            or completion["capability_receipt_ref"] not in completion.get("input_refs", [])):
         raise HarnessError("Tool catalog artifacts lack invocation capability binding")
     if (not isinstance(supplied, list) or any(not isinstance(row, dict)
             or set(row) != {"kind", "path", "sha256"} or row["kind"] != "opencode_catalog"
@@ -93,7 +108,7 @@ def verify_tool_artifacts(supervisor, completion):
 
 
 def validate_record(record, *, replay_schemas=None):
-    schema = record_schema(record["schema_version"])
+    schema = schema_for_record(record)
     if replay_schemas is not None:
         if schema not in replay_schemas:
             replay_schemas[schema] = _schema(schema)
@@ -107,6 +122,7 @@ def validate_record(record, *, replay_schemas=None):
         raise HarnessError("Invocation identity is required for execution receipts")
     if record["payload"].get("tool_artifacts") is not None:
         if (not record["capability_receipt_ref"]
+                or record["capability_receipt_ref"] not in record["input_refs"]
                 or not {row["sha256"] for row in record["payload"]["tool_artifacts"]} <= set(record["input_refs"])):
             raise HarnessError("Tool catalog evidence lacks exact capability/digest binding")
     if record["schema_version"] == 2 and record["record_type"] == "completion" and record["payload"]["dispatch_state"] == "not_dispatched_proven":
@@ -168,7 +184,7 @@ class ExecutionReceipts:
                 if self.store.read(name, schema) != record:
                     raise HarnessError("Execution receipt projection integrity conflict")
             elif repair:
-                self.store.write(name, record, record_schema(record["schema_version"]), exclusive=True)
+                self.store.write(name, record, schema_for_record(record), exclusive=True)
             records[record_id] = record
         return list(records.values())
 
@@ -185,7 +201,7 @@ class ExecutionReceipts:
                 return existing[record["record_id"]]
             # fsync the authoritative chain BEFORE exposing derived state.
             self.store.append_event({"kind": "execution_receipt", "receipt": record})
-            self.store.write("receipts/" + record["record_id"] + ".yaml", record, record_schema(record["schema_version"]), exclusive=True)
+            self.store.write("receipts/" + record["record_id"] + ".yaml", record, schema_for_record(record), exclusive=True)
             return record
 
     def envelope(self, kind, node_id, attempt_id, invocation_id=None):
