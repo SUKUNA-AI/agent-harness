@@ -178,3 +178,45 @@ provider tables, agent instructions и произвольные секреты �
 проверяет startup/model input новым процессом. Фактический spawn с нужной ролью
 и выбранные модель/effort требуют наблюдения клиента. Полная последовательность,
 пути и recovery — в [SETUP_RU](../SETUP_RU.md).
+
+## Optional execution selection и Tool Profiles
+
+Выбор инструментов не является глобальной установкой. Новый optional mapping
+`execution` в work contract и в узле agent plan имеет закрытую schema:
+
+```yaml
+execution:
+  backend: codex
+  tool_profile:
+    id: coding
+    version: 1
+  required_capabilities: [json]
+```
+
+`backend` принимает `codex|opencode`; отсутствие выбора использует прежний Codex
+flow. Отсутствие профиля означает baseline. Старым контрактам defaults этих
+полей не дописываются: их нормализованные digest/checkpoint правила сохраняются.
+Узел наследует contract selection и заменяет явно заданные значения.
+Для private profile добавьте абсолютный `tool_profile.path`; файл повторно
+проверяется перед resume, и смена bytes/version запрещает exact resume.
+
+Отдельный optional `review_execution` на уровне work contract выбирает backend
+и профиль final reviewer с тем же форматом. Это разрешает заявить смешанный DAG,
+но не обходит capability qualification. Настоящий read-only reviewer profile
+допускается только при подтверждённом effective catalog и negative enforcement;
+отсутствие квалификации даёт BLOCKED.
+
+`tools show|dry-run` выводит нормализованный профиль, native configuration и
+digests; `tools check|catalog` выполняет dependency diagnostics. `tools apply`
+принимает только новый private output file вне source и user config roots и
+требует `--apply`. Auth, model/provider, approvals и sandbox в нём не задаются.
+Он не активирует профиль автоматически в пользовательском клиенте. Скрытая
+запись `~/.codex/config.toml` или `~/.config/opencode` отсутствует.
+
+Codex renderer использует live `startup_readiness=connection`; cached catalog
+не доказывает mandatory readiness. OpenCode renderer использует V2
+`mcp.servers`, ordered permissions, отключённые Code Mode/pooling и deny
+subagent/plugin policies. Реальные client precedence/plugins требуют отдельной
+квалификации, которую renderer не создаёт. Подробнее:
+[Tool Profiles](TOOL_PROFILES_RU.md), [Codex MCP](CODEX_MCP_RU.md),
+[OpenCode](OPENCODE_RU.md).

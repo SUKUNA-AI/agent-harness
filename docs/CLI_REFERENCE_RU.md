@@ -10,7 +10,7 @@
 Из корня исходного пакета: `python tools/harness.py <команда>`. Из другого cwd
 укажите полный путь к `tools/harness.py`. После установки Python-пакета доступны
 `agent-harness <команда>` и `python -m agent_harness <команда>`. Это один dispatcher;
-`work` запускает установленный Codex как отдельный процесс; остальные namespaces сохраняют прежнюю семантику. Native API клиента не эмулируется.
+`work` по умолчанию запускает установленный Codex как отдельный процесс; optional execution selection выбирает дополнительный backend только после qualification; остальные namespaces сохраняют прежнюю семантику. Native API клиента не эмулируется.
 
 `--help` доступен у команд и вложенных подкоманд. `--version` печатает версию
 пакета. Аргументы `--run-dir`, `--contract`, `--record` и output paths не имеют
@@ -37,6 +37,48 @@ code. Полный managed JSON обычно форматирован;
 `native status` и `code doctor` exit 0 означает успешную диагностику, а не наличие
 всех optional executables или проверенную runtime capability. Смотрите поля ответа.
 У установочного `verify` exit 1 означает неуспешную verification.
+
+## Optional Tool Profiles: `tools`
+
+Тот же dispatcher, без отдельного CLI framework. Команды не устанавливают
+зависимости, не вызывают модель и не меняют credentials/user config.
+
+| Команда | Аргументы и результат |
+| --- | --- |
+| `tools list` | Builtin IDs и defaults `codex`/`baseline` |
+| `tools show` | `--profile ID_OR_ABSOLUTE_YAML`, `--backend codex\|opencode`, обязательный `--root`; нормализованный policy и native config |
+| `tools dry-run` | Те же флаги; deterministic config/digests без записи |
+| `tools check` | Те же флаги; installed dependencies и live stdio MCP readiness |
+| `tools catalog` | Те же флаги; live advertised catalog, policy projection и digest; `client_catalog_verified: false` |
+| `tools smoke` | Те же флаги; backend help/version, dependency probes и OpenCode standalone probe; без model calls |
+| `tools apply` | Те же флаги плюс обязательные `--output NEW_PRIVATE_FILE --apply`; новый файл вне source/user config, без перезаписи |
+
+Для всех команд кроме `list`: `--profile baseline`, `--backend codex` и
+`--role owner` — defaults. `--root` должен быть существующим абсолютным каталогом.
+Роли `owner|architect|reviewer|helper` переводятся в ограничения профиля;
+`reviewer-readonly` выбирайте с `--role reviewer`.
+
+`check/catalog` имеют exit 2 при required BLOCKED; optional NOT_AVAILABLE
+сохраняется в JSON и не становится PASS. `smoke` имеет exit 2 с
+`live_execution: BLOCKED_NOT_QUALIFIED`: успешный help или диагностический
+handshake не доказывает model session/exact resume/effective permissions.
+У `apply` target parent должен уже существовать; произвольная перезапись и
+изменения auth/config запрещены. JSON содержит `applied` и output path.
+
+```text
+python tools/harness.py tools list
+python tools/harness.py tools show --profile baseline --backend codex --root /absolute/project
+python tools/harness.py tools dry-run --profile /private/project-tools.yaml --backend opencode --root /absolute/worktree
+python tools/harness.py tools check --profile coding --backend codex --root /absolute/worktree
+python tools/harness.py tools catalog --profile reviewer-readonly --backend codex --role reviewer --root /absolute/worktree
+python tools/harness.py tools smoke --profile baseline --backend opencode --root /absolute/project
+python tools/harness.py tools apply --profile baseline --backend codex --root /absolute/project --output /private/run/tool-config.toml --apply
+```
+
+Примеры используют существующие project/private paths. `tools catalog` пустого
+reviewer profile подтверждает только отсутствие дополнительных declared MCP;
+допуск реального reviewer всё равно требует backend enforcement. Подробнее:
+[Tool Profiles](TOOL_PROFILES_RU.md) и [Tooling acceptance](TOOLING_ACCEPTANCE_RU.md).
 
 ## Foreground work supervisor
 

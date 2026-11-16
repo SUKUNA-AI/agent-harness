@@ -158,3 +158,24 @@ integration owner в прежнем staging cwd через exact session resume.
 
 Сравнение single/2/3/5 требует одинаковых задач и учёта planner/spawn/merge/check
 costs. До таких измерений дополнительная параллельность не означает ускорение.
+
+## Optional backend/profile на узле
+
+Поле `execution` в contract или узле plan задаёт backend и versioned profile;
+узел наследует отсутствующие поля. Например, один узел может явно выбрать
+`codex`, другой — `opencode`. Выбор не создаёт дополнительную квоту: оба
+используют прежний registry до 12 managed model sessions и до 3 reviewers.
+Worktree создаёт harness; `codex --worktree` не используется.
+
+Tool dependency diagnostics выполняются до model admission. Неподдерживаемый
+backend, mandatory MCP failure или недоказанное подавление native children
+блокируют запуск. Реальный OpenCode пока `BLOCKED_NOT_QUALIFIED`; fixture
+интеграции проверяют смешанный DAG и recovery mechanics без платных model calls.
+OpenCode internal scheduler/child sessions не приравниваются к managed DAG.
+
+Final reviewer выбирается отдельным `review_execution` с тем же форматом.
+Read-only role требует effective tool catalog и отрицательную проверку записи;
+шаблон deny или prompt не квалифицирует клиента. Без них допуск BLOCKED.
+Профиль `reviewer-readonly` сам по себе не разрешает shell/MCP code execution.
+См. [Tool Profiles](TOOL_PROFILES_RU.md), [OpenCode](OPENCODE_RU.md) и
+[Tooling acceptance](TOOLING_ACCEPTANCE_RU.md).

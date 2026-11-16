@@ -2,7 +2,7 @@
 
 Локальный комплект для Codex: общие инструкции, память, работа с большими
 репозиториями, делегация и проверяемое продолжение задач. Модели запускает
-установленный Codex. Harness хранит состояние и связывает проверки с конкретными
+установленный Codex; он остаётся основным backend. Harness хранит состояние и связывает проверки с конкретными
 исходниками. Дополнительный LLM API, ключ, сервер, daemon и база данных не нужны.
 
 [Скачать полный ZIP 1.6.1](https://github.com/SUKUNA-AI/agent-harness/releases/download/v1.6.1/agent-harness-1.6.1.zip) ·
@@ -28,6 +28,28 @@ effort по роли и риску, Rust LSP на Windows, ограниченн�
 Короткую задачу агент выполняет напрямую. Сохраняемый run нужен для длительной
 работы, повторяемой приёмки или восстановления. Один writer работает в одном
 checkout; независимые изменения Git выполняются в отдельных worktrees.
+
+## Optional Tool Profiles и OpenCode
+
+В исходной ветке добавлены [Tool Profiles](docs/TOOL_PROFILES_RU.md): per-worktree
+MCP, live dependency diagnostics, native client renderers, Graphify provenance и
+проверяемые ast-grep migrations. Baseline не требует новых инструментов и
+сохраняет прежние контракты. [Codex MCP](docs/CODEX_MCP_RU.md) использует локальные
+overrides без перезаписи auth/config; [OpenCode V2](docs/OPENCODE_RU.md) —
+дополнительный optional adapter для managed leaf worker.
+
+OpenCode live managed/reviewer/resume capability остаётся
+`BLOCKED_NOT_QUALIFIED` до проверки реального клиента. Fixture integration PASS
+не является live qualification. Лимиты 12 managed sessions и 3 reviewers,
+worktree ownership, независимые checks и final gate общие. Матрица сценариев и
+границы проверки — [Tooling acceptance](docs/TOOLING_ACCEPTANCE_RU.md).
+Новые исходники не меняют ранее опубликованный ZIP 1.6.1.
+
+```text
+python tools/harness.py tools list
+python tools/harness.py tools dry-run --profile baseline --backend codex --root /absolute/project
+python tools/harness.py tools check --profile coding --backend codex --root /absolute/project
+```
 
 ## Требования и поставка
 

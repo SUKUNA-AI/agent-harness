@@ -15,6 +15,19 @@
 | [Native-сессия](NATIVE_SESSION_RU.md) | Установленный SessionStart hook, короткий bootstrap, checkpoint и проверка свежести |
 | [Native bundles](../bin/README.md) | Готовый бинарник, сборка, version/hash mismatch и поддерживаемые платформы |
 
+## Optional инструменты и execution backends
+
+| Документ | Содержание |
+| --- | --- |
+| [Tool Profiles](TOOL_PROFILES_RU.md) | Strict profiles, dependency readiness, Serena isolation, Graphify revision binding, ast-grep, browser/documents limits |
+| [Codex MCP](CODEX_MCP_RU.md) | Native configuration, tool allowlists, precedence, exact resume и безопасные overrides |
+| [OpenCode V2](OPENCODE_RU.md) | Optional managed leaf adapter, permissions, standalone, qualification boundary |
+| [Tooling acceptance](TOOLING_ACCEPTANCE_RU.md) | A1–A7, fault injection, negative security tests, fixture/live distinction |
+
+Наличие renderer или fixture PASS не квалифицирует реальный клиент.
+В исходной ветке OpenCode live managed execution остаётся blocked; baseline
+Codex и опубликованный 1.6.1 ZIP сохраняют свои прежние границы.
+
 ## Понять и применять
 
 Команды `work` и проверяемая очередь описаны в следующих действующих руководствах:

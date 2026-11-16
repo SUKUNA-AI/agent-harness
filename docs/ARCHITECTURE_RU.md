@@ -298,3 +298,38 @@ secret patterns помогает отсеять известные формы, �
 сохранён рядом с объяснением в Markdown. Галерея связывает эти представления с
 модулями реализации. Private PNG для визуального review не входят в поставку.
 Редактирование диаграмм не требует изменений model/provider или runtime harness.
+
+## Optional граница инструментов и backends
+
+```mermaid
+flowchart LR
+    C["Strict contract / DAG node"] --> P["execution selection + Tool Profile"]
+    P --> R["Fresh dependency diagnostics / native renderer"]
+    R --> Q{"Backend capabilities qualified?"}
+    Q -->|"нет"| B["BLOCKED; model slot не занят"]
+    Q -->|"да"| A["CodexAdapter / OpenCodeAdapter"]
+    A --> S["Existing supervisor / owned process / exact session"]
+    S --> E["JSONL events + existing YAML checkpoint / receipts"]
+    E --> V["Frozen source / scope / independent checks / review / gate"]
+```
+
+[execution.py](../src/agent_harness/execution.py) связывает explicit selection с
+существующим store. [tool_profiles.py](../src/agent_harness/tool_profiles.py)
+валидирует закрытую policy и рендерит native client config;
+[tooling_probe.py](../src/agent_harness/tooling_probe.py) проверяет короткое
+диагностическое MCP соединение и всегда закрывает contained process tree.
+Он не является proxy модельных вызовов и не доказывает effective client catalog.
+
+Codex остаётся default. OpenCode — optional managed leaf transport, без
+обязательного shared service/daemon. Backend не владеет scheduler, DAG,
+worktrees, quotas, retries, integration и acceptance. OpenCode native subagents
+не считаются managed workers; их полноценная оркестрация не реализована.
+До live проверки подавления subagents/permissions/exact resume реальные OpenCode
+managed вызовы блокируются. Смешанный DAG использует прежние глобальные slots.
+
+Новые tooling receipts лежат в том же private run и доступны gate freshness
+проверкам; отдельного state store нет. Graphify index — производный immutable
+artifact исходного frozen snapshot с проверкой bytes на use boundary.
+Ни MCP receipt, ни graph edge не заменяют независимое source/test evidence.
+Подробности: [Tool Profiles](TOOL_PROFILES_RU.md),
+[границы квалификации](TOOLING_ACCEPTANCE_RU.md).

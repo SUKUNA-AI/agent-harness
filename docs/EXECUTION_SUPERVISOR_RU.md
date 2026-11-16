@@ -3,7 +3,7 @@
 [Индекс](INDEX.md) · [CLI](CLI_REFERENCE_RU.md) · [Форматы состояния](STATE_FORMATS_AND_MIGRATION_RU.md)
 
 Supervisor выполняет локальный цикл «редактирование → снимок → независимая
-проверка → исправление». Модель запускает установленный Codex CLI. Harness
+проверка → исправление». По умолчанию модель запускает установленный Codex CLI; optional adapter имеет отдельную qualification boundary. Harness
 не содержит дополнительный LLM API client, сервер или базу данных.
 
 ## Путь выполнения
@@ -328,3 +328,31 @@ Dependency closure/generation race может повторить preparation д�
 ## Verified contract v2
 
 Для длинной managed-задачи доступен [verified task flow](VERIFIED_TASK_FLOW_RU.md): immutable mission, required packets, local/integrated node checks и current frontier. Contract/plan v1 сохраняют legacy integration-only semantics. Команды work start/resume/status прежние; новый mode выбирается version2 контракта, не увеличением concurrency.
+
+## Optional tooling provenance и exact resume
+
+Explicit `execution` выбирает backend/profile/capabilities; `review_execution`
+выбирает final reviewer. Отсутствующие поля сохраняют старый Codex flow и
+нормализованные contract digests. [CLI `tools`](CLI_REFERENCE_RU.md#optional-tool-profiles-tools)
+показывает policy/native config и dependency readiness без глобальной установки.
+
+Перед model admission supervisor связывает tooling receipt с run/node/attempt,
+backend executable hash/version, profile ID/version/digest, native config и
+configuration input digests, catalog digest, mandatory dependency IDs,
+canonical worktree/physical identity и source snapshot. Session/process/events
+остаются в существующих execution records и JSONL receipts. Secret values в
+новый checkpoint не копируются.
+
+При `work resume --run-dir /private/run` сначала действуют прежние ownership и
+process reconciliation, затем заново проверяются backend/profile/config/catalog/
+worktree identities. Drift даёт `EXACT_RESUME_DRIFT`; новая сессия не называется
+точным продолжением. Старые checkpoints читаются по прежним правилам. OpenCode
+нельзя возобновить через `--continue` или новый session ID; unqualified exact
+resume блокируется до dispatch. Неизвестный process/event outcome остаётся
+`UNKNOWN_OUTCOME` и удерживает recovery guarantees.
+
+Mandatory MCP runtime failure не может быть скрыт последующим model completion.
+Успех tools не заменяет freeze/check/reviewer/gate. `work report/status
+--verify-evidence` проверяет tooling evidence вместе с существующими artifacts.
+[Tool Profiles](TOOL_PROFILES_RU.md) · [Codex MCP](CODEX_MCP_RU.md) ·
+[OpenCode](OPENCODE_RU.md) · [Acceptance scenarios](TOOLING_ACCEPTANCE_RU.md).

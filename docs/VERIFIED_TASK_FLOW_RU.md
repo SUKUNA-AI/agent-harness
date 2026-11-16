@@ -277,3 +277,23 @@ managed-verified.
 Контролируемые subprocess fixtures проверяют protocol и controller admission.
 Они не доказывают качество настоящих model judgements или реального Codex client;
 такая qualification остаётся отдельной работой W19/W20.
+
+## Tool Profiles не меняют authority приёмки
+
+Contract/node `execution` добавляет optional backend и tool profile; отдельный
+`review_execution` выбирает final reviewer. Mandatory dependency readiness
+проверяется до model slot; unsupported/unqualified capability остаётся BLOCKED.
+Старые contract/plan без selection сохраняют прежний Codex flow и hash rules.
+
+MCP search, Graphify index и ast-grep rewrite создают дополнительные observations,
+которые не подтверждают node acceptance. Graph index должен совпадать с frozen
+source snapshot, а независимые проверки читают actual source/imports/calls/tests.
+После edits индекс инвалидируется; historical graph hint не выдаётся за current
+source evidence. Reviewer получает готовый проверенный index read-only.
+
+При намеренно failed required check успешный MCP вызов не открывает dependent
+узел и не даёт ACCEPTED. Final acceptance по-прежнему связывает scope, candidate
+freeze, source/test evidence и независимый review. Fault-injection и fixture/live
+границы сценариев A1–A7 описаны в [Tooling acceptance](TOOLING_ACCEPTANCE_RU.md).
+Read-only reviewer допускается по фактическим backend ограничениям; конфиг или
+инструкция сами по себе не являются enforcement.
