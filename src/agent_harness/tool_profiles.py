@@ -264,7 +264,7 @@ def render_opencode(profile, root, *, cache_root=None, role="worker"):
         for action in ("subagent", "execute", "external_directory"))
     if role == "reviewer":
         rules.extend({"action": action, "resource": "*", "effect": "deny"} for action in ("shell", "edit"))
-    return {"mcp": {"servers": servers}, "agents": {"harness-leaf": {"mode": "primary", "permissions": rules}},
+    return {"default_agent": "harness-leaf", "mcp": {"servers": servers}, "agents": {"harness-leaf": {"mode": "primary", "permissions": rules}},
         "policies": [{"action": "tool.use", "resource": "subagent:*", "effect": "deny"},
                      {"action": "plugin.use", "resource": "*", "effect": "deny"}]}
 

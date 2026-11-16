@@ -23,6 +23,9 @@ class Route:
  def __init__(self,url): self.request=type('Request',(),{'url':url})();self.effect=None
  def continue_(self): self.effect='continue'
  def abort(self): self.effect='abort'
+class WebSocket:
+ def __init__(self,url): self.url=url;self.closed=False
+ def close(self,code,reason): assert code==1008 and reason;self.closed=True
 class Locator:
  def click(self): pass
  def fill(self,value): pass
@@ -36,13 +39,16 @@ class Page:
   assert wait_until=='domcontentloaded'
   local=Route(url);self.context.handler(local);assert local.effect=='continue'
   external=Route('https://outside.invalid/');self.context.handler(external);assert external.effect=='abort'
+  for address in ['ws://outside.invalid/socket','wss://outside.invalid/socket','ws://127.0.0.1:8123/socket']:
+   websocket=WebSocket(address);self.context.websocket_handler(websocket);assert websocket.closed
  def locator(self,selector): assert isinstance(selector,str);return Locator()
  def screenshot(self,path,full_page):
   assert full_page is False
   Path(path).write_bytes(b'PNG-fixture-only')
 class Context:
  def route(self,pattern,handler): assert pattern=='**/*';self.handler=handler
- def new_page(self): return Page(self)
+ def route_web_socket(self,pattern,handler): assert pattern=='**/*';self.websocket_handler=handler
+ def new_page(self): assert hasattr(self,'websocket_handler');return Page(self)
  def close(self): pass
 class Browser:
  def new_context(self,**options):
@@ -190,6 +196,26 @@ class OptionalToolJobTests(unittest.TestCase):
         self.assertEqual(receipt["regression"]["exit_code"], 0)
         self.assertEqual(receipt["playwright"]["version"], "fixture-playwright-only")
         self.assertTrue(Path(receipt["events_receipt"]["path"]).is_file())
+
+    def test_browser_blocks_ws_and_wss_before_any_page_can_create_them(self):
+        identity = self.fake_playwright()
+        with patch("agent_harness.optional_tool_jobs._playwright_package", return_value=identity):
+            receipt = run_browser_job(self.browser_job())
+        self.assertEqual(receipt["status"], "COMPLETED", receipt)
+        self.assertEqual(receipt["browser"]["websockets_blocked"], 3)
+        self.assertIn("no_websockets", receipt["context_policy"])
+
+    def test_browser_missing_websocket_interception_blocks_before_regression(self):
+        identity = self.fake_playwright()
+        module = Path(identity["package_root"]) / "playwright" / "sync_api.py"
+        module.write_text(module.read_text().replace(" def route_web_socket(", " def unsupported_route_web_socket("))
+        with patch("agent_harness.optional_tool_jobs._playwright_package", return_value=identity):
+            receipt = run_browser_job(self.browser_job())
+        self.assertEqual(receipt["status"], "BLOCKED_NOT_QUALIFIED", receipt)
+        self.assertIn("WebSocket interception", receipt["reason"])
+        self.assertNotIn("regression", receipt)
+        self.assertTrue(receipt["browser"]["context_closed"])
+        self.assertTrue(receipt["browser"]["browser_closed"])
 
     def test_fixture_browser_screenshot_cannot_hide_failed_regression(self):
         identity = self.fake_playwright()

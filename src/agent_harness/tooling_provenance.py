@@ -276,8 +276,8 @@ def ast_grep_migrate(root, paths, *, pattern, rewrite, language, checks, executa
         if result.returncode:
             raise HarnessError("Independent migration regression test failed")
     final = source_snapshot(root)
-    if not set(changed_paths(before, final)) <= set(targets):
-        raise HarnessError("Migration/test changed undeclared source paths")
+    if final["digest"] != after["digest"]:
+        raise HarnessError("Regression test changed source after structural postconditions; migration evidence is stale")
     return {"schema_version": 1, "status": "verified_migration", "tool": identity,
         "source_before": before["digest"], "source_after": final["digest"], "changed_paths": actual_changes,
         "initial_scan": original, "old_pattern_scan": old, "new_pattern_scan": new, "tests": tests,

@@ -117,6 +117,15 @@ class ToolProfileTests(unittest.TestCase):
         self.assertNotEqual(original, distinct)
         self.assertFalse(cache.exists())
 
+    def test_rendered_opencode_profile_selects_its_enforced_agent(self):
+        from agent_harness.opencode_execution import OpenCodeAdapter
+        config = render_opencode(self.profile(), self.source, role="reviewer")
+        adapter = OpenCodeAdapter((sys.executable,)).with_tool_config(config, root=self.source)
+        argv = adapter.argv("fixture-only argv check", read_only=True)
+        self.assertEqual(config["default_agent"], "harness-leaf")
+        self.assertEqual(argv[argv.index("--agent") + 1], "harness-leaf")
+        self.assertIn("harness-leaf", config["agents"])
+
     def test_baseline_without_optional_executables_is_ready(self):
         for backend in ("codex", "opencode"):
             result = preflight_profile("baseline", backend, self.source)
@@ -268,6 +277,15 @@ class ToolProfileTests(unittest.TestCase):
                 executable=[sys.executable, str(FIXTURES / "fake_ast_grep.py")],
                 checks=[[sys.executable, "-c", "raise SystemExit(3)"]])
         self.assertIn("new_api", (self.source / "calc.py").read_text())
+
+    def test_ast_grep_passing_regression_cannot_restore_old_pattern(self):
+        (self.source / "calc.py").write_text("result = old_api(41)\n")
+        with self.assertRaisesRegex(HarnessError, "Regression test changed source"):
+            ast_grep_migrate(self.source, ["calc.py"], pattern="old_api($A)",
+                rewrite="new_api($A)", language="python",
+                executable=[sys.executable, str(FIXTURES / "fake_ast_grep.py")],
+                checks=[[sys.executable, "-c", "from pathlib import Path; Path('calc.py').write_text('result = old_api(41)\\n')"]])
+        self.assertIn("old_api", (self.source / "calc.py").read_text())
 
     def test_graph_old_manifest_does_not_bypass_current_source_verification(self):
         frozen = source_snapshot(self.source)

@@ -386,7 +386,7 @@ import json,pathlib,sys,urllib.parse
 job=json.loads(pathlib.Path(sys.argv[1]).read_text())
 sys.path.insert(0,job['package_root'])
 output=pathlib.Path(job['output'])
-result={'status':'FAILED','context_closed':False,'browser_closed':False,'actions':[],'external_requests_blocked':0,'console_messages':0}
+result={'status':'FAILED','context_closed':False,'browser_closed':False,'actions':[],'external_requests_blocked':0,'websockets_blocked':0,'console_messages':0}
 browser=context=None
 try:
  from playwright.sync_api import sync_playwright
@@ -405,6 +405,13 @@ try:
      result['external_requests_blocked']+=1
      request.abort()
    context.route('**/*',route)
+   websocket_route=getattr(context,'route_web_socket',None)
+   if not callable(websocket_route):
+    raise RuntimeError('harness_websocket_api_unavailable')
+   def reject_websocket(connection):
+    result['websockets_blocked']+=1
+    connection.close(code=1008,reason='Harness browser verification blocks WebSockets')
+   websocket_route('**/*',reject_websocket)
    page=context.new_page()
    page.set_default_timeout(job['action_timeout_ms'])
    page.on('console',lambda event: result.update(console_messages=min(result['console_messages']+1,10000)))
@@ -429,7 +436,9 @@ try:
    result['status']='ASSERTION_FAILED' if assertion_failed else 'PASSED'
   except Exception as error:
    message=str(error)
-   if 'Executable doesn' in message or 'playwright install' in message:
+   if message=='harness_websocket_api_unavailable':
+    result.update(status='BLOCKED_NOT_QUALIFIED',reason='Playwright context WebSocket interception API unavailable')
+   elif 'Executable doesn' in message or 'playwright install' in message:
     result.update(status='BLOCKED_NOT_QUALIFIED',reason='Playwright browser executable unavailable')
    else:
     result.update(status='FAILED',reason='Browser operation failed',error_type=type(error).__name__)
@@ -511,7 +520,7 @@ def run_browser_job(job: BrowserJob):
     root, artifact_root, regression = _browser_validation(job)
     receipt = {"schema_version": 1, "kind": "browser_job", "status": "BLOCKED_NOT_QUALIFIED",
         "expectation": job.expectation, "origin": urllib.parse.urlsplit(job.url).netloc,
-        "context_policy": "new_context_same_origin_no_downloads_no_service_workers",
+        "context_policy": "new_context_same_origin_no_websockets_no_downloads_no_service_workers",
         "acceptance": "independent_final_gate_required", "created_at": now()}
     package = _playwright_package()
     if package is None:

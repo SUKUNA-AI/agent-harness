@@ -92,7 +92,9 @@ Codex renderer использует `mcp_servers`, `enabled_tools`, `disabled_to
 справка](https://learn.chatgpt.com/docs/config-file/config-reference).
 
 OpenCode V2 renderer использует `mcp.servers`, `codemode: false`, `pool: false`,
-`agents.harness-leaf.permissions` и deny policies для plugins/subagent. Reviewer
+`agents.harness-leaf.permissions`, `default_agent: harness-leaf` и deny policies
+для plugins/subagent. Adapter явно передаёт `--agent harness-leaf`; настройки
+разрешений относятся к фактически выбранному agent. [V2 default agent](https://opencode.ai/docs/config/#agent). Reviewer
 получает deny shell/edit/execute/external_directory. Нативные permission
 настройки требуют проверки effective precedence и negative tests клиента;
 сама генерация JSON не является квалификацией. [Официальные MCP
@@ -145,7 +147,8 @@ settings digest, index bytes/digest/path и время. Замена исход�
 `ast_grep_migrate` требует явный список файлов, pattern, rewrite, language и
 независимые test argv. Сначала проверяет установленный `run --help`, затем:
 исходный JSON scan → bounded rewrite → snapshot diff/scope → old/new scans →
-целевые tests → повторная scope проверка. Нулевой rewrite exit недостаточен.
+целевые tests → проверка полного source snapshot: regression не может менять
+исходники после подтверждённых structural postconditions. Нулевой rewrite exit недостаточен.
 
 Воспроизводимый пример для отдельной fixture с `calc.py`:
 
@@ -214,8 +217,11 @@ receipt = run_document_job(DocumentJob(
 
 `run_browser_job(BrowserJob(...))` использует lazy Playwright Python import и
 новый browser/context с сохранённой Chromium sandbox. URL ограничен localhost;
-context routes блокируют запросы к другим origins, downloads/service workers
-отключены. Поддержаны bounded `click`, `fill`, `expect_text`, `expect_visible`.
+context HTTP routes блокируют запросы к другим origins; все WebSockets
+(`ws` и `wss`, включая localhost) закрываются отдельным
+`context.route_web_socket` handler, установленным до создания page. При отсутствии
+этого Playwright API helper даёт BLOCKED_NOT_QUALIFIED без regression.
+Downloads/service workers отключены. Поддержаны bounded `click`, `fill`, `expect_text`, `expect_visible`.
 Нужна хотя бы одна assertion и обязательный независимый `regression_argv`.
 Screenshot/result bounded, context/browser закрываются через finally, parent
 останавливает всё дерево на timeout/crash и проверяет неизменность source.
