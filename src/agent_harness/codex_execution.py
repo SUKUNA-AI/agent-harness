@@ -209,6 +209,10 @@ def configured_settings(*, environment=None):
 
 
 class CodexAdapter:
+    # Backends may normalize their event protocol while sharing containment,
+    # durable capture and uncertain-outcome handling.
+    _stream_reader = staticmethod(_read_stream)
+
     def __init__(self, executable=("codex",), *, environment=None):
         self.environment = _explicit_environment(environment)
         if isinstance(executable, (str, Path)):
@@ -416,7 +420,7 @@ class CodexAdapter:
                 if on_process is not None:
                     on_process(result["process"])
                 for source, name, output in ((process.stdout, "stdout", stdout_log), (process.stderr, "stderr", stderr_log)):
-                    reader = threading.Thread(target=_read_stream, args=(source, name, output, inbox), daemon=True)
+                    reader = threading.Thread(target=self._stream_reader, args=(source, name, output, inbox), daemon=True)
                     reader.start()
                     readers.append(reader)
                 while process.poll() is None or len(eof) < 2:
