@@ -106,9 +106,10 @@ export default {id:"agent-harness.execution-guard",async setup(ctx) {
     sourceOK();
     await connectedOK();
     if(event.agent!==spec.agent) throw new Error("HARNESS_GUARD_AGENT_MISMATCH");
-    // V2 exposes this denied loader independently of ordinary tool permissions.
-    // Apply the existing deny to the model-visible snapshot as well.
-    delete event.tools.skill;
+    // V2 injects skill and Git worktree tools independently of ordinary tool
+    // permissions. Project every assembled snapshot onto the qualified grants;
+    // execute.before still rejects unsolicited calls to any removed operation.
+    for(const name of Object.keys(event.tools))if(!allowed.has(name))delete event.tools[name];
     if(kind==="primary" && spec.expected_model && canonical(event.model)!==canonical(spec.expected_model))
       throw new Error("HARNESS_GUARD_MODEL_DRIFT");
     const actual=inspect(event.tools);

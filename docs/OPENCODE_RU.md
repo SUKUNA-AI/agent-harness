@@ -54,6 +54,9 @@ Guard работает также внутри каждого настоящег
 HTTP hook дополнительно проверяет tools после protocol lowering и body overlays.
 Неизвестный transport/WebSocket блокируется. `execute.before` отклоняет tool
 calls вне разрешённого набора, даже если их прислал model server вне catalog.
+V2 добавляет некоторые native tools, включая `skill` и Git worktree operations,
+помимо ordinary permissions. Guard удаляет все незаявленные операции из каждого
+model-visible snapshot; управлять harness-owned worktree через native tool нельзя.
 Guard не изменяет модель, provider, prompt или ответ.
 
 Runtime JSONL содержит session/model IDs и catalog, без prompts, headers и keys.

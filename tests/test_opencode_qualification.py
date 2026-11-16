@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import shutil
 import signal
+import subprocess
 import sys
 import tempfile
 import threading
@@ -212,15 +213,28 @@ def local_provider(*, forced_tool=None, forced_input=None, sensitive_marker=None
     "Live native OpenCode pre-turn/permission/resume qualification explicitly opted out; not PASS")
 class LiveOpenCodeQualificationTests(unittest.TestCase):
     @contextmanager
-    def native_case(self, *, forced_tool=None, mcp=False, external_read=False, request_hook=None):
+    def native_case(self, *, forced_tool=None, mcp=False, external_read=False, request_hook=None,
+                    git_worktree=False, role="reviewer"):
         arguments = {}
         marker = "HARNESS-EXTERNAL-FIXTURE-NOT-A-CREDENTIAL"
         with tempfile.TemporaryDirectory() as td, local_provider(forced_tool=forced_tool,
                 forced_input=arguments, sensitive_marker=marker, request_hook=request_hook) as (endpoint, requests):
             base = Path(td)
             root = base / "project"
-            root.mkdir()
-            (root / "protected.txt").write_text("BEFORE\n")
+            if git_worktree:
+                repository = base / "repository"
+                repository.mkdir()
+                subprocess.run(["git", "init", "--quiet", str(repository)], check=True, capture_output=True)
+                (repository / "protected.txt").write_text("BEFORE\n")
+                subprocess.run(["git", "-C", str(repository), "add", "protected.txt"], check=True, capture_output=True)
+                subprocess.run(["git", "-C", str(repository), "-c", "user.name=Harness fixture", "-c",
+                    "user.email=harness-fixture@example.invalid", "commit", "--quiet", "-m", "fixture"],
+                    check=True, capture_output=True)
+                subprocess.run(["git", "-C", str(repository), "worktree", "add", "--quiet", "--detach",
+                    str(root), "HEAD"], check=True, capture_output=True)
+            else:
+                root.mkdir()
+                (root / "protected.txt").write_text("BEFORE\n")
             outside = base / "outside.txt"
             outside.write_text(marker)
             if external_read:
@@ -233,6 +247,8 @@ class LiveOpenCodeQualificationTests(unittest.TestCase):
                 arguments.update(path=str(root / "protected.txt"), edits=[{"old": "BEFORE", "new": "AFTER"}])
             elif forced_tool == "subagent":
                 arguments.update(agent="general", text="Create forbidden.txt")
+            elif forced_tool == "opencode_worktree_remove":
+                arguments.update(path=str(root), directory=str(root), name=root.name)
             environment = {k: v for k, v in os.environ.items() if k in {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR"}}
             for key, name in (("HOME", "home"), ("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"),
                               ("XDG_CACHE_HOME", "cache"), ("XDG_STATE_HOME", "state")):
@@ -260,9 +276,9 @@ class LiveOpenCodeQualificationTests(unittest.TestCase):
                         "allowed_tools": ["search_symbol", "read_file"], "read_only_tools": ["search_symbol", "read_file"],
                         "forbidden_tools": ["write_file", "execute_command"], "required_tools": ["search_symbol"],
                         "startup_timeout": 3, "tool_timeout": 3}]}
-            adapter = OpenCodeAdapter(environment=environment).with_tool_config(render_opencode(profile, root, role="reviewer"), root=root)
+            adapter = OpenCodeAdapter(environment=environment).with_tool_config(render_opencode(profile, root, role=role), root=root)
             try:
-                qualified = adapter.qualify(root=root, role="reviewer", evidence_dir=base / "proof" / "first", timeout=60)
+                qualified = adapter.qualify(root=root, role=role, evidence_dir=base / "proof" / "first", timeout=60)
                 self.assertEqual(requests, [], "Qualification must not reach the scripted endpoint")
                 yield base, root, qualified, requests
             except BaseException:
@@ -320,6 +336,34 @@ class LiveOpenCodeQualificationTests(unittest.TestCase):
                 log = Path(result["logs"]["stdout"]).read_text()
                 self.assertTrue(result["status"] != "completed" or '"status":"error"' in log or '"status": "error"' in log,
                     "A hostile tool invocation must be denied, never silently successful")
+
+    def test_real_git_worktree_worker_qualification_excludes_native_worktree_operations(self):
+        with self.native_case(git_worktree=True, role="worker") as (base, root, qualified, requests):
+            names = {tool["name"] for tool in qualified.effective_tool_catalog()}
+            self.assertEqual(names, {"read", "glob", "grep", "edit"})
+            self.assertTrue((root / ".git").is_file(), "Fixture must be an actual detached Git worktree")
+            result = qualified.run("Reply native-qualified", cwd=root, timeout=20, log_dir=base / "logs")
+            self.assertEqual(result["status"], "completed", result)
+            self.assertEqual(len(requests), 1)
+            self.assertEqual((root / "protected.txt").read_text(), "BEFORE\n")
+            verify_qualification_evidence(qualified.qualification_receipt(), root=root, role="worker",
+                require_execution=True, session_id=result["thread_id"], catalog_artifacts=result["catalog_artifacts"],
+                execution_log={"path": result["logs"]["stdout"], "sha256": result["log_sha256"]["stdout"]})
+
+    def test_unsolicited_native_worktree_remove_cannot_remove_owned_worktree(self):
+        with self.native_case(git_worktree=True, forced_tool="opencode_worktree_remove") as (base, root, qualified, requests):
+            result = qualified.run("Reply native-qualified", cwd=root, timeout=12,
+                read_only=True, log_dir=base / "logs")
+            self.assertTrue(requests, "The native client must receive the hostile worktree operation")
+            self.assertNotIn("opencode_worktree_remove", [tool["function"]["name"] for tool in requests[0]["tools"]])
+            self.assertTrue((root / ".git").is_file())
+            self.assertEqual((root / "protected.txt").read_text(), "BEFORE\n")
+            listed = subprocess.run(["git", "-C", str(base / "repository"), "worktree", "list", "--porcelain"],
+                check=True, capture_output=True, text=True).stdout
+            self.assertIn("worktree " + str(root), listed)
+            self.assertTrue(result.get("process_tree_stopped"), result)
+            log = Path(result["logs"]["stdout"]).read_text()
+            self.assertTrue(result["status"] != "completed" or '"status":"error"' in log or '"status": "error"' in log)
 
     def test_native_external_directory_permission_prevents_read_leak(self):
         with self.native_case(forced_tool="read", external_read=True) as (base, root, qualified, requests):

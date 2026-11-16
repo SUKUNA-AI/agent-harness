@@ -90,6 +90,8 @@ if mode=='late':event('text',part=part('text',text='late'))
 class FixtureOpenCodeAdapter(OpenCodeAdapter):
     """Fixture-only verifier; deliberately unavailable from the production CLI."""
     qualify = None
+    qualification_receipt = None
+    verify_qualification = None
     def _qualification(self):
         return {"managed_leaf_qualified": True, "exact_resume_qualified": True,
                 "reviewer_isolation_qualified": True}
