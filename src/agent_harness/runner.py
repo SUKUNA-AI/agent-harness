@@ -155,9 +155,9 @@ def _terminate(process, job):
         raise HarnessError("Owned process did not terminate; inspect retained process identity")
 
 
-def _start_contained(argv, cwd=None, *, env=None):
+def _start_contained(argv, cwd=None, *, env=None, stdin=subprocess.DEVNULL):
     flags = subprocess.CREATE_NEW_PROCESS_GROUP | 0x00000004 if os.name == "nt" else 0
-    process = subprocess.Popen(argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, shell=False, creationflags=flags, start_new_session=(os.name != "nt"), env=env)
+    process = subprocess.Popen(argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=stdin, shell=False, creationflags=flags, start_new_session=(os.name != "nt"), env=env)
     job = None
     try:
         job = WindowsJob(process)
