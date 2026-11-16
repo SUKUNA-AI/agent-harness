@@ -42,6 +42,56 @@ def record_schema(version):
     return SCHEMA if version == 1 else "execution-receipt.v2.schema.json"
 
 
+def _catalog_artifacts(supervisor, artifacts):
+    """Pin ordinary run-owned runtime catalogs; never accept a path-only claim."""
+    from .file_io import read_regular_file
+    if not isinstance(artifacts, list) or not 1 <= len(artifacts) <= 64:
+        raise HarnessError("Tool catalog artifacts require a bounded nonempty list")
+    base = Path(supervisor.path)
+    result, seen = [], set()
+    for artifact in artifacts:
+        if (not isinstance(artifact, dict) or set(artifact) != {"path", "sha256"}
+                or not isinstance(artifact["path"], str) or not artifact["path"]
+                or len(artifact["path"]) > 16384 or "\0" in artifact["path"]
+                or not isinstance(artifact["sha256"], str)
+                or len(artifact["sha256"]) != 64
+                or any(c not in "0123456789abcdef" for c in artifact["sha256"])):
+            raise HarnessError("Invalid tool catalog artifact identity")
+        path = Path(artifact["path"])
+        if ".." in path.parts:
+            raise HarnessError("Tool catalog artifact parent traversal is forbidden")
+        path = path if path.is_absolute() else base / path
+        try:
+            relative = path.relative_to(base).as_posix()
+        except ValueError as error:
+            raise HarnessError("Tool catalog artifact escaped its execution run") from error
+        if relative in seen:
+            raise HarnessError("Duplicate tool catalog artifact path")
+        seen.add(relative)
+        raw = read_regular_file(path, max_bytes=2 * 1024 * 1024)
+        if hashlib.sha256(raw).hexdigest() != artifact["sha256"]:
+            raise HarnessError("Tool catalog artifact digest mismatch")
+        result.append({"kind": "opencode_catalog", "path": relative, "sha256": artifact["sha256"]})
+    return result
+
+
+def verify_tool_artifacts(supervisor, completion):
+    """Read-only closure for completion-pinned, actual-execution tool catalogs."""
+    supplied = completion.get("payload", {}).get("tool_artifacts")
+    if supplied is None:
+        return []
+    if not completion.get("capability_receipt_ref"):
+        raise HarnessError("Tool catalog artifacts lack invocation capability binding")
+    if (not isinstance(supplied, list) or any(not isinstance(row, dict)
+            or set(row) != {"kind", "path", "sha256"} or row["kind"] != "opencode_catalog"
+            for row in supplied)):
+        raise HarnessError("Invalid completion tool catalog artifact fields")
+    rows = _catalog_artifacts(supervisor, [{"path": r["path"], "sha256": r["sha256"]} for r in supplied])
+    if not {row["sha256"] for row in rows} <= set(completion["input_refs"]):
+        raise HarnessError("Completion lacks pinned tool catalog digests")
+    return [{"path": str(Path(supervisor.path) / row["path"]), "sha256": row["sha256"]} for row in rows]
+
+
 def validate_record(record, *, replay_schemas=None):
     schema = record_schema(record["schema_version"])
     if replay_schemas is not None:
@@ -50,11 +100,15 @@ def validate_record(record, *, replay_schemas=None):
         schema = replay_schemas[schema]
     validate(record, schema)
     required = (REQUIRED_PAYLOAD if record["schema_version"] == 1 else V2_PAYLOAD)[record["record_type"]]
-    optional = {"error"} if record["record_type"] == "completion" else set()
+    optional = {"error", "tool_artifacts"} if record["record_type"] == "completion" else set()
     if not required <= set(record["payload"]) or set(record["payload"]) - required - optional:
         raise HarnessError("Execution receipt payload fields do not match record type")
     if record["record_type"] in {"invocation_intent", "completion"} and record["invocation_id"] is None:
         raise HarnessError("Invocation identity is required for execution receipts")
+    if record["payload"].get("tool_artifacts") is not None:
+        if (not record["capability_receipt_ref"]
+                or not {row["sha256"] for row in record["payload"]["tool_artifacts"]} <= set(record["input_refs"])):
+            raise HarnessError("Tool catalog evidence lacks exact capability/digest binding")
     if record["schema_version"] == 2 and record["record_type"] == "completion" and record["payload"]["dispatch_state"] == "not_dispatched_proven":
         value = record["payload"]
         if (value["outcome"] not in {"failed", "cancelled", "timed_out"} or value["turn_started"] is not False
@@ -222,6 +276,12 @@ class ExecutionReceipts:
             "observable_tool_calls": result.get("observable_tool_calls", 0),
             "spawn_seconds": result.get("spawn_seconds"), "process_tree_stopped": result.get("process_tree_stopped"),
             "logs": logs, "error": str(result.get("error") or "")[:2048]}
+        if result.get("catalog_artifacts") is not None:
+            if not intent["capability_receipt_ref"]:
+                raise HarnessError("Unbound execution cannot publish tool catalog artifacts")
+            artifacts = _catalog_artifacts(self.supervisor, result["catalog_artifacts"])
+            value["payload"]["tool_artifacts"] = artifacts
+            value["input_refs"] = list(dict.fromkeys([*value["input_refs"], *(r["sha256"] for r in artifacts)]))
         for existing in self.records():
             if existing["record_id"] == value["record_id"]:
                 stable = lambda payload: {k: v for k, v in payload.items() if k not in {"finished_at", "duration_ms"}}
@@ -266,7 +326,10 @@ class ExecutionReceipts:
     def result(completion):
         value = completion["payload"]
         usage = {key: value[key] for key in ("input_tokens", "output_tokens", "cached_input_tokens", "reasoning_tokens") if value[key] is not None}
-        return {"status": value["outcome"], "usage": usage or None, "thread_id": value["thread_id"],
+        result = {"status": value["outcome"], "usage": usage or None, "thread_id": value["thread_id"],
             "dispatch_state": value["dispatch_state"], "error": value.get("error", ""),
             "logs": {k: v for k, v in value["logs"].items() if k in {"stdout", "stderr"} and v is not None},
             "turn_started": value["turn_started"], "process_tree_stopped": value["process_tree_stopped"]}
+        if "tool_artifacts" in value:
+            result["catalog_artifacts"] = [{"path": r["path"], "sha256": r["sha256"]} for r in value["tool_artifacts"]]
+        return result
