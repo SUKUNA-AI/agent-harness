@@ -166,6 +166,33 @@ def _qualification_ref(supervisor, adapter, role):
     return result
 
 
+def available_profile(profile, readiness):
+    """Narrow native grants using diagnostics; this never attests client tools.
+
+    An unavailable optional server is omitted, and an allowed-but-unadvertised
+    optional tool is not a readiness requirement. Required tools still fail
+    closed. The native verifier must separately audit its live runtime catalog.
+    """
+    result = deepcopy(profile)
+    observed = {row["id"]: row for row in readiness["servers"]}
+    result["servers"] = []
+    for server in profile["servers"]:
+        row = observed.get(server["id"], {})
+        if row.get("status") != "READY":
+            if server["required"]:
+                raise HarnessError("Required MCP unavailable during native configuration: " + server["id"])
+            continue
+        names = {tool["name"] for tool in row["catalog"]}
+        if not set(server["required_tools"]) <= names:
+            raise HarnessError("Required MCP tools missing during native configuration: " + server["id"])
+        narrowed = deepcopy(server)
+        narrowed["allowed_tools"] = [name for name in server["allowed_tools"] if name in names]
+        narrowed["read_only_tools"] = [name for name in server.get("read_only_tools", [])
+                                       if name in narrowed["allowed_tools"]]
+        result["servers"].append(narrowed)
+    return result
+
+
 def _verify_qualification_ref(supervisor, binding, *, require_execution=False, session_id=None, catalog_artifacts=None):
     """Persisted evidence verifies closure; it never grants native capabilities."""
     ref = binding.get("client_qualification")
@@ -213,7 +240,8 @@ def _configured(supervisor, selected, *, root, role, node_id, attempt_id):
         raise HarnessError("TOOL_PROFILE_NOT_READY: " + json.dumps(readiness, ensure_ascii=False))
     if supervisor.remaining() <= 0:
         raise HarnessError("Absolute task deadline expired during tool readiness")
-    native = (render_codex if backend == "codex" else render_opencode)(profile, root, role=profile_role, cache_root=cache)
+    runtime_profile = available_profile(profile, readiness) if backend == "opencode" else profile
+    native = (render_codex if backend == "codex" else render_opencode)(runtime_profile, root, role=profile_role, cache_root=cache)
     configure = getattr(adapter, "with_tool_config", None)
     if native and callable(configure):
         adapter = configure(native, root=root)

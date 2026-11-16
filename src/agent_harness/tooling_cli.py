@@ -103,6 +103,10 @@ def dispatch(argv):
                 from .strict_yaml import load
                 graph = load(args.graph_index) if args.graph_index else None
                 result["readiness"] = preflight_profile(profile, args.backend, root, role, graph_index=graph)
+                if args.backend == "opencode" and result["readiness"]["status"] == "READY":
+                    from .execution import available_profile
+                    native = render_opencode(available_profile(profile, result["readiness"]), root, role=role)
+                    result.update(native_config=native, effective_config_digest=digest(native))
             if args.command == "catalog" and args.backend == "codex":
                 from .codex_execution import CodexAdapter
                 from .codex_tool_catalog import audit_catalog
