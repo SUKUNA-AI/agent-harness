@@ -20,6 +20,18 @@ def _output_path(value):
     return path
 
 
+def _opencode_catalog(config, root, role, evidence_dir):
+    from .opencode_execution import OpenCodeAdapter
+    adapter = OpenCodeAdapter().with_tool_config(config, root=root)
+    adapter = adapter.qualify(root=root, role=role, evidence_dir=evidence_dir, timeout=60)
+    adapter.verify_qualification(root=root, role=role)
+    return {"status": "READY", "client_catalog_verified": True,
+        "catalog": adapter.effective_tool_catalog(), "capabilities": adapter.capabilities(),
+        "qualification_ref": adapter.qualification_receipt(), "model_calls": 0,
+        "qualified_for_exec": False, "reusable_as_authorization": False,
+        "scope": "native rehearsal; supervisor requalifies and guards each real invocation"}
+
+
 def dispatch(argv):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -37,13 +49,15 @@ def dispatch(argv):
     command.add_argument("--root", required=True)
     command.add_argument("--receipt", required=True)
     command.add_argument("--historical", action="store_true")
-    for name in ("show", "dry-run", "check", "catalog", "smoke", "apply"):
+    for name in ("show", "dry-run", "check", "catalog", "smoke", "qualify", "apply"):
         command = sub.add_parser(name)
         command.add_argument("--profile", default="baseline", help="Built-in ID or absolute Strict YAML path")
         command.add_argument("--backend", choices=("codex", "opencode"), default="codex")
         command.add_argument("--root", required=True)
         command.add_argument("--role", default="owner", choices=("owner", "architect", "reviewer", "helper"))
         command.add_argument("--graph-index", help="Ordinary YAML graph receipt, verified against current root")
+        if name == "qualify":
+            command.add_argument("--evidence-dir", required=True, help="Existing private directory outside source/user config")
         if name == "apply":
             command.add_argument("--output", required=True, help="New private per-run config file; never a user/project config")
             command.add_argument("--apply", action="store_true", required=True)
@@ -85,7 +99,7 @@ def dispatch(argv):
             result = {"profile": profile, "profile_digest": profile_digest(profile), "backend": args.backend,
                 "native_config": native, "effective_config_digest": digest(native), "applied": False,
                 "client_catalog_verified": False}
-            if args.command in {"check", "catalog", "smoke"}:
+            if args.command in {"check", "catalog", "smoke", "qualify"}:
                 from .strict_yaml import load
                 graph = load(args.graph_index) if args.graph_index else None
                 result["readiness"] = preflight_profile(profile, args.backend, root, role, graph_index=graph)
@@ -94,9 +108,26 @@ def dispatch(argv):
                 from .codex_tool_catalog import audit_catalog
                 result["client_catalog"] = audit_catalog(CodexAdapter(), native, root)
                 result["client_catalog_verified"] = result["client_catalog"]["client_catalog_verified"]
-            elif args.command == "catalog":
-                result["client_catalog"] = {"status": "BLOCKED", "client_catalog_verified": False,
-                    "reason": "BLOCKED_NOT_QUALIFIED: effective OpenCode client catalog is not qualified"}
+            elif args.command in {"catalog", "qualify"}:
+                if args.backend != "opencode":
+                    raise HarnessError("Codex execution qualification is unavailable; use tools catalog for its diagnostic audit")
+                if result["readiness"]["status"] != "READY":
+                    result["client_catalog"] = {"status": "BLOCKED", "client_catalog_verified": False,
+                        "reason": "Tool dependencies are not ready for native qualification"}
+                elif args.command == "qualify":
+                    evidence = _output_path(args.evidence_dir)
+                    codex = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")).resolve()
+                    opencode = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")).resolve() / "opencode"
+                    if (not evidence.is_dir() or evidence.is_symlink()
+                            or any(evidence == p or p in evidence.parents for p in (root, codex, opencode))):
+                        raise HarnessError("Qualification requires an existing private directory outside source/user config")
+                    result["client_catalog"] = _opencode_catalog(native, root, role, evidence)
+                else:
+                    import tempfile
+                    with tempfile.TemporaryDirectory(prefix="harness-opencode-catalog-") as directory:
+                        result["client_catalog"] = _opencode_catalog(native, root, role, Path(directory))
+                    result["client_catalog"]["artifact_lifetime"] = "temporary_diagnostic_only"
+                result["client_catalog_verified"] = result["client_catalog"]["client_catalog_verified"]
             if args.command == "smoke":
                 try:
                     if args.backend == "codex":

@@ -89,6 +89,27 @@ class ToolingContractCLITests(unittest.TestCase):
             self.assertFalse((source / "forbidden").exists())
             self.assertFalse((home / "config.toml").exists())
 
+    def test_native_qualification_rejects_source_config_paths_without_starting_client(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            source = base / "source"
+            source.mkdir()
+            private = base / "private"
+            private.mkdir()
+            codex = base / "codex"
+            codex.mkdir()
+            with patch.dict(os.environ, {"CODEX_HOME": str(codex)}), \
+                    patch("agent_harness.tooling_cli._opencode_catalog", side_effect=AssertionError("must not start client")), \
+                    redirect_stdout(io.StringIO()):
+                for target in (source, codex, base / "absent", private / ".." / "source"):
+                    with self.subTest(path=target):
+                        self.assertEqual(dispatch(["qualify", "--backend", "opencode", "--root", str(source),
+                            "--evidence-dir", str(target)]), 2)
+                self.assertEqual(dispatch(["qualify", "--backend", "codex", "--root", str(source),
+                    "--evidence-dir", str(private)]), 2)
+            self.assertEqual(list(source.iterdir()), [])
+            self.assertEqual(list(private.iterdir()), [])
+
 
 if __name__ == "__main__":
     unittest.main()
