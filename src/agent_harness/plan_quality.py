@@ -13,6 +13,7 @@ from .supervisor_store import atomic_write
 from .scheduling import plan_reviewer_effort
 
 STATE_SCHEMA = 'work-state.v3.schema.json'
+RUNTIME_STATE_SCHEMA = 'work-state.v4.schema.json'
 POLICY_SCHEMA = 'plan-quality-policy.v1.schema.json'
 ASSESSMENT_SCHEMA = 'plan-quality-assessment.v1.schema.json'
 DETERMINISTIC = ['mandatory_coverage', 'acyclic_dependencies', 'exclusive_write_owners',
@@ -123,7 +124,8 @@ def publish_bootstrap(store, material):
 
 
 def enabled(supervisor):
-    return supervisor.state['schema_version'] == 3 and supervisor.contract['mode'] == 'managed' and supervisor.contract['schema_version'] == 2
+    version = supervisor.state['schema_version']
+    return (version == 3 or version == 4 and supervisor.state['base_schema_version'] == 3) and supervisor.contract['mode'] == 'managed' and supervisor.contract['schema_version'] == 2
 
 
 def initialize(supervisor, *, max_rounds=None):
@@ -330,6 +332,9 @@ def assess(supervisor, plan):
     receipts = supervisor.receipts()
     accounting = guard_invocations(supervisor)
     matching = [r for r in accounting['intents'].values() if r['node_id'] == '@plan-quality' and r['attempt_id'] == template['attempt_id']]
+    if len(matching) == 1 and matching[0].get('capability_receipt_ref'):
+        from .execution import provenance_ref
+        receipts.bind_tools(template, provenance_ref(matching[0]), checkout=matching[0]['payload']['checkout'])
     if len(matching) > 1 or matching and (matching[0]['plan_digest'] != digest(plan) or matching[0]['input_refs'] != template['input_refs']):
         raise HarnessError('Plan-quality dispatched input binding conflict')
     if matching:
@@ -341,7 +346,16 @@ def assess(supervisor, plan):
     else:
         if not supervisor._model_budget_ok(for_spawn=True):
             return None
-        if not supervisor._adapter().capabilities().get('output_schema'):
+        adapter, tool_ref = supervisor._adapter(), None
+        from .tooling_state import enabled as tooling_enabled
+        backend = 'codex'
+        if tooling_enabled(supervisor.contract, plan):
+            from .execution import prepare as prepare_execution, selection
+            selected = selection(supervisor.contract, review=True)
+            backend = selected.get('backend', 'codex')
+            adapter, tool_ref = prepare_execution(supervisor, selected,
+                root=supervisor.state['source_cwd'], role='reviewer', node_id='@plan-quality', attempt_id=template['attempt_id'])
+        if backend == 'codex' and not adapter.capabilities().get('output_schema'):
             raise HarnessError('Configured plan-quality reviewer requires structured output capability')
         schema_ref = quality['policy_ref']['output_schema_ref']
         schema_path = supervisor.store.path(schema_ref['path'])
@@ -351,8 +365,8 @@ def assess(supervisor, plan):
             'Do not rewrite requirements/requiredness or trusted bindings. Return the exact supplied binding and per-node rationales. '
             'Do not edit, spawn, publish, change model/provider/effort/settings or call session connectors.',
             {'purpose': 'plan_quality', 'binding': binding, 'input': input_value, 'input_ref': input_ref})
-        effort = plan_reviewer_effort(plan)
-        preflight(supervisor._adapter(), prompt, read_only=True, write_authorized=False, native_children=False,
+        effort = plan_reviewer_effort(plan) if backend == 'codex' else None
+        preflight(adapter, prompt, read_only=True, write_authorized=False, native_children=False,
             output_schema=str(schema_path), reasoning_effort=effort)
         quality['phase'] = 'reviewing'
         supervisor._save('plan-quality reviewer admission; original round/usage/deadline retained')
@@ -368,9 +382,13 @@ def assess(supervisor, plan):
                 'dependency_vector': [], 'contract_digest': supervisor.state['contract_digest'],
                 'deadline': supervisor.state['deadline'], 'dispatch_state': 'possibly_dispatched',
                 'candidate_digest': digest(plan), 'review_binding': None}
+            if tool_ref:
+                from .execution import revalidate
+                revalidate(adapter, adapter.binding, selected)
+                receipts.bind_tools(template, tool_ref, checkout=supervisor.state['source_cwd'])
             intent = receipts.publish(template)
             started = time.monotonic()
-            result = invoke(supervisor._adapter(), prompt, slot=slot, cwd=supervisor.state['source_cwd'],
+            result = invoke(adapter, prompt, slot=slot, cwd=supervisor.state['source_cwd'],
                 read_only=True, write_authorized=False, native_children=False, output_schema=str(schema_path), reasoning_effort=effort,
                 timeout=invocation_timeout(supervisor, 'reviewer'), deadline=supervisor.state['deadline'],
                 cancel_file=supervisor.path / 'cancel.yaml', on_process=lambda value: (slot.bind(value), supervisor._on_process(value)),
@@ -415,7 +433,7 @@ def evidence_errors(supervisor, plan=None):
             return ['Plan-quality stage counter/current round is stale']
         if not supervisor.state['plan_path'] or quality['assessment_ref'] is None:
             return ['Current plan-quality assessment missing']
-        current_plan = supervisor.store.read(supervisor.state['plan_path'], 'agent-plan.schema.json')
+        current_plan = supervisor.store.read(supervisor.state['plan_path'], 'agent-plan.tooling.v1.schema.json')
         if plan is not None and digest(plan) != digest(current_plan):
             return ['Selected plan no longer matches authoritative current plan']
         plan = current_plan
@@ -487,10 +505,10 @@ def publish_creation(supervisor, material):
 def _finish_creation(supervisor, document):
     contract = document['contract']
     if supervisor.store.path('contract.yaml').exists():
-        if supervisor.store.read('contract.yaml', 'work-contract.schema.json') != contract:
+        if supervisor.store.read('contract.yaml', 'work-contract.tooling.v1.schema.json') != contract:
             raise HarnessError('Prepared creation contract bytes changed')
     else:
-        supervisor.store.write('contract.yaml', contract, 'work-contract.schema.json', exclusive=True)
+        supervisor.store.write('contract.yaml', contract, 'work-contract.tooling.v1.schema.json', exclusive=True)
     publish_bootstrap(supervisor.store, document['material'])
     supervisor.state = deepcopy(document['material']['state'])
     supervisor._save('prepared plan-quality creation committed; original identity/deadline retained')
@@ -623,10 +641,10 @@ def _proposal(supervisor, capabilities, request):
     from .strict_yaml import load
     from .managed_execution import _plan, _plan_path
     if supervisor.state['plan_path']:
-        return supervisor.store.read(supervisor.state['plan_path'], 'agent-plan.schema.json')
+        return supervisor.store.read(supervisor.state['plan_path'], 'agent-plan.tooling.v1.schema.json')
     if request['retained_plan_path']:
         supervisor.state['plan_path'] = request['retained_plan_path']
-        return supervisor.store.read(request['retained_plan_path'], 'agent-plan.schema.json')
+        return supervisor.store.read(request['retained_plan_path'], 'agent-plan.tooling.v1.schema.json')
     accounting = guard_invocations(supervisor)
     refs = [request['policy_digest'], digest(request), _hash(_bytes(request)), request['mission_digest']]
     intents = [intent for intent in accounting['intents'].values() if intent['node_id'] == '@planner'
@@ -648,10 +666,10 @@ def _proposal(supervisor, capabilities, request):
         _validate_plan(supervisor, plan)
         relative = _plan_path(supervisor)
         if supervisor.store.path(relative).exists():
-            if supervisor.store.read(relative, 'agent-plan.schema.json') != plan:
+            if supervisor.store.read(relative, 'agent-plan.tooling.v1.schema.json') != plan:
                 raise HarnessError('Recovered proposed plan conflicts with immutable artifact')
         else:
-            supervisor.store.write(relative, plan, 'agent-plan.schema.json', exclusive=True)
+            supervisor.store.write(relative, plan, 'agent-plan.tooling.v1.schema.json', exclusive=True)
         supervisor.store.append_event({'kind': 'plan_frozen', 'plan_digest': digest(plan),
             'mission_generation': supervisor.contract['mission']['generation'], 'quality_round': request['round']})
         supervisor.state['plan_path'] = relative
@@ -775,7 +793,7 @@ def _verified_assessment_record(supervisor, record, accounting):
             or actual_input['purpose'] != 'plan_quality'):
         raise HarnessError('Plan-quality actual evaluator input shape changed')
     contract, plan, policy = actual_input['contract'], actual_input['plan'], actual_input['policy']
-    validate(contract, 'work-contract.schema.json')
+    validate(contract, 'work-contract.tooling.v1.schema.json')
     validate(policy, POLICY_SCHEMA)
     if contract['schema_version'] != 2 or contract['mode'] != 'managed' or actual_input['mission'] != contract['mission']:
         raise HarnessError('Plan-quality actual evaluator input contract/mission mismatch')
@@ -805,9 +823,18 @@ def _verified_assessment_record(supervisor, record, accounting):
     if completion is None or intent is None:
         raise HarnessError('Plan-quality receipt invocation evidence missing')
     post_invocation_guard(intent, completion, accounting)
+    expected_refs = _refs(view, binding)
+    if intent.get('capability_receipt_ref'):
+        from .execution import provenance_ref
+        # The historical evaluator input remains frozen. Only the separately
+        # versioned execution capability receipt extends its invocation refs.
+        probe = dict(intent, input_refs=list(expected_refs))
+        supervisor.receipts().bind_tools(probe, provenance_ref(intent), checkout=intent['payload']['checkout'])
+        expected_refs = probe['input_refs']
     if (completion['payload']['outcome'] != 'completed' or intent['node_id'] != '@plan-quality'
             or intent['attempt_id'] != 'plan-quality-' + str(binding['round'])
-            or intent['input_refs'] != _refs(view, binding) or record['input_refs'] != intent['input_refs']
+            or intent['input_refs'] != expected_refs or record['input_refs'] != intent['input_refs']
+            or completion['capability_receipt_ref'] != intent['capability_receipt_ref'] or record['capability_receipt_ref'] != intent['capability_receipt_ref']
             or any(record[key] != completion[key] for key in ('plan_digest', 'attempt_id', 'invocation_id', 'created_at', 'generation', 'harness_build_digest'))
             or record['record_id'] != 'plan-quality-' + digest([intent['invocation_id'], binding])[:48]):
         raise HarnessError('Plan-quality receipt invocation/input identity changed')

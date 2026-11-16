@@ -137,7 +137,7 @@ class ExecutionReceipts:
     def envelope(self, kind, node_id, attempt_id, invocation_id=None):
         from .completion_eligibility import policy
         state = self.supervisor.state
-        plan = self.store.read(state["plan_path"], "agent-plan.schema.json") if state["plan_path"] else None
+        plan = self.store.read(state["plan_path"], "agent-plan.tooling.v1.schema.json") if state["plan_path"] else None
         return {"schema_version": 2 if policy(self.supervisor) else 1, "record_type": kind, "record_id": uuid.uuid4().hex,
             "project_id": self.supervisor.repository_identity(), "run_id": state["run_id"],
             "task_id": state["task_id"], "plan_digest": digest(plan) if plan else None,
@@ -148,20 +148,26 @@ class ExecutionReceipts:
             "capability_receipt_ref": None, "execution_owner": "managed_supervisor",
             "input_refs": [state["contract_digest"]], "payload": {}}
 
+    def bind_tools(self, value, tool_provenance, *, checkout):
+        """Bind an existing custom invocation template through the same checks."""
+        node_id, attempt_id = value["node_id"], value["attempt_id"]
+        binding = self.store.read(tool_provenance["path"], "tool-execution.schema.json")
+        from .file_io import canonical_directory
+        if (digest(binding) != tool_provenance["digest"] or binding["run_id"] != value["run_id"]
+                or binding["node_id"] != node_id or binding["attempt_id"] != attempt_id
+                or binding["repository_identity"] != value["project_id"]
+                or canonical_directory(binding["identity"]["root"]) != canonical_directory(checkout)):
+            raise HarnessError("Tool provenance subject changed before invocation intent")
+        value["capability_receipt_ref"] = tool_provenance["digest"]
+        value["client_version"] = binding["identity"]["backend"] + ":" + binding["identity"]["version"]
+        value["input_refs"] = list(dict.fromkeys([*value["input_refs"], tool_provenance["digest"]]))
+        return value
+
     def intent(self, node_id, attempt_id, *, checkout, owner, dependencies=(), candidate_digest=None, invocation_id=None, review_binding=None, input_refs=(), tool_provenance=None):
         value = self.envelope("invocation_intent", node_id, attempt_id, invocation_id or uuid.uuid4().hex)
         value["input_refs"] = list(dict.fromkeys([*value["input_refs"], *input_refs]))
         if tool_provenance is not None:
-            binding = self.store.read(tool_provenance["path"], "tool-execution.schema.json")
-            from .file_io import canonical_directory
-            if (digest(binding) != tool_provenance["digest"] or binding["run_id"] != value["run_id"]
-                    or binding["node_id"] != node_id or binding["attempt_id"] != attempt_id
-                    or binding["repository_identity"] != value["project_id"]
-                    or canonical_directory(binding["identity"]["root"]) != canonical_directory(checkout)):
-                raise HarnessError("Tool provenance subject changed before invocation intent")
-            value["capability_receipt_ref"] = tool_provenance["digest"]
-            value["client_version"] = binding["identity"]["backend"] + ":" + binding["identity"]["version"]
-            value["input_refs"] = list(dict.fromkeys([*value["input_refs"], tool_provenance["digest"]]))
+            self.bind_tools(value, tool_provenance, checkout=checkout)
         value["payload"] = {"checkout": str(checkout), "owner_id": owner,
             "dependency_vector": list(dependencies), "contract_digest": self.supervisor.state["contract_digest"],
             "deadline": self.supervisor.state["deadline"], "dispatch_state": "possibly_dispatched", "candidate_digest": candidate_digest}

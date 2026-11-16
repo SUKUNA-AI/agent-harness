@@ -232,8 +232,8 @@ class ToolingAcceptanceTests(unittest.TestCase):
         self.assertEqual(supervisor.start()["status"], "TIMED_OUT")
         calls = self.calls()
         agent = supervisor.store.read("agents/left.yaml")
-        agent.pop("tool_source_checkpoint")
-        supervisor.store.write("agents/left.yaml", agent, "agent-state.schema.json")
+        agent["tool_source_checkpoint"] = None
+        supervisor.store.write("agents/left.yaml", agent, "agent-state.v3.schema.json")
         (Path(agent["worktree"]["path"]) / "left.py").write_text("VALUE = -1\n")
         recovered = Supervisor(supervisor.path, state_dir=self.root / "state", adapter={"codex": self.codex})
         result = recovered.resume(new_attempt="Do not infer a missing source checkpoint")

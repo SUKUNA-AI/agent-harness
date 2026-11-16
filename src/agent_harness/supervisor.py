@@ -44,8 +44,8 @@ INTERRUPTS = BLOCKED | {"CANCEL_REQUESTED", "CANCELLED", "TIMED_OUT", "UNKNOWN_O
 class Supervisor:
     def __init__(self, run_dir, *, adapter=None, state_dir=None):
         self.path = canonical_directory(run_dir)
-        from .plan_quality import STATE_SCHEMA
-        self.store = SupervisorStore(self.path, STATE_SCHEMA)
+        from .plan_quality import RUNTIME_STATE_SCHEMA
+        self.store = SupervisorStore(self.path, RUNTIME_STATE_SCHEMA)
         self.adapter = adapter
         self.state_dir = canonical_directory(state_dir) if state_dir else self.path.parent.parent
         self._state_dir_explicit = state_dir is not None
@@ -98,6 +98,8 @@ class Supervisor:
         with supervisor.store.lease("initialize work"):
             from . import plan_quality
             if plan_quality.recover_creation(supervisor, contract, cwd, max_rounds=max_planning_rounds):
+                from .tooling_state import ensure as ensure_tooling_state
+                ensure_tooling_state(supervisor)
                 return supervisor
             if (path / "contract.yaml").exists() or (path / "state.yaml").exists():
                 raise HarnessError("Work run already exists; use status/resume")
@@ -131,10 +133,12 @@ class Supervisor:
                 material["state"].update(status="NEW", reason=supervisor.state["reason"])
                 plan_quality.publish_creation(supervisor, material)
             else:
-                supervisor.store.write("contract.yaml", contract, "work-contract.schema.json", exclusive=True)
+                supervisor.store.write("contract.yaml", contract, "work-contract.tooling.v1.schema.json", exclusive=True)
                 from .completion_eligibility import pin
                 pin(supervisor)
                 supervisor._save("task created; original contract preserved")
+            from .tooling_state import ensure as ensure_tooling_state
+            ensure_tooling_state(supervisor)
         return supervisor
 
     def load(self, *, recover=False):
@@ -146,7 +150,7 @@ class Supervisor:
             observed = self.store.recover(read_only=True)
             self.state = observed["state"]
             self.recovery_required = observed.get("recovery_required", False)
-        self.contract = self.store.read(self.state.get("contract_path", "contract.yaml"), "work-contract.schema.json") if self.state else None
+        self.contract = self.store.read(self.state.get("contract_path", "contract.yaml"), "work-contract.tooling.v1.schema.json") if self.state else None
         if self.state is None or digest(self.contract) != self.state["contract_digest"]:
             raise HarnessError("Work contract/state binding invalid")
         if self.state.get("migration", {}).get("status") == "pending":
@@ -212,10 +216,10 @@ class Supervisor:
                 raise HarnessError("Revalidate stale accepted source before changing mission")
             relative = "missions/generation-" + str(new["mission"]["generation"]) + "-" + digest(new) + ".yaml"
             if self.store.path(relative).exists():
-                if self.store.read(relative, "work-contract.schema.json") != new:
+                if self.store.read(relative, "work-contract.tooling.v1.schema.json") != new:
                     raise HarnessError("Immutable mission generation conflict")
             else:
-                self.store.write(relative, new, "work-contract.schema.json", exclusive=True)
+                self.store.write(relative, new, "work-contract.tooling.v1.schema.json", exclusive=True)
             # One committed checkpoint chooses contract+goal+acceptance+plan
             # together. A pre-commit crash leaves only an unreferenced payload.
             self.contract = new
@@ -225,11 +229,13 @@ class Supervisor:
                 max_attempts=new["budgets"]["max_attempts"], current_failure=None,
                 acceptance=[{"id": c["id"], "required": c["required"], "status": "pending", "evidence_id": None} for c in new["acceptance"]])
             self.state["deadline"] = min(self.state["deadline"], deadline_for(new, self.state["started_at"]))
-            if self.state["schema_version"] == 3:
+            if self.state["schema_version"] == 3 or self.state["schema_version"] == 4 and self.state["base_schema_version"] == 3:
                 # Stage allowance/history remain original across mission heads.
                 self.state["plan_quality"].update(plan_revision=0, active_round=None,
                     active_plan_digest=None, assessment_ref=None, phase="unassessed")
             self._save("mission head committed with original deadline, attempts and usage: " + reason[:2048])
+            from .tooling_state import ensure as ensure_tooling_state
+            ensure_tooling_state(self)
         return self.status()
 
     def remaining(self):
@@ -262,7 +268,7 @@ class Supervisor:
                 "coverage_counts": counts([]), "plan_quality": quality,
                 "mission_generation": self.contract.get("mission", {}).get("generation"), "plan_generation": None}
         from .scheduling import validate_plan
-        plan = validate_plan(self.store.read(self.state["plan_path"], "agent-plan.schema.json"), self.contract)
+        plan = validate_plan(self.store.read(self.state["plan_path"], "agent-plan.tooling.v1.schema.json"), self.contract)
         records = self.receipts().records()
         plan_digest = digest(plan)
         bound = [r for r in records if r["plan_digest"] == plan_digest]
@@ -285,7 +291,7 @@ class Supervisor:
         frontier = {}
         if verified_flow.enabled(self):
             try:
-                agents = {name: self.store.read(self.agent_path(name), "agent-state.schema.json") for name in integrated}
+                agents = {name: self.store.read(self.agent_path(name), "agent-state.v3.schema.json") for name in integrated}
                 frontier = verified_flow.refresh_frontier(self, plan, agents, names=integrated, verify_only=True)
                 coverage = verified_flow.coverage(self, plan, frontier)
                 for item in nodes:
@@ -712,8 +718,8 @@ class Supervisor:
             return False
         from . import verified_flow
         if verified_flow.enabled(self):
-            plan = self.store.read(self.state["plan_path"], "agent-plan.schema.json")
-            agents = {name: self.store.read(self.agent_path(name), "agent-state.schema.json") for name in self.state["agents"]}
+            plan = self.store.read(self.state["plan_path"], "agent-plan.tooling.v1.schema.json")
+            agents = {name: self.store.read(self.agent_path(name), "agent-state.v3.schema.json") for name in self.state["agents"]}
             try:
                 verified_flow.refresh_frontier(self, plan, agents)
             except HarnessError as error:
@@ -976,7 +982,7 @@ class Supervisor:
                         raise HarnessError("Missing agent projection with possible dispatch; exact reconciliation required: " + agent_id)
                     # Frozen-plan reconciliation safely prepares a never-dispatched node.
                     continue
-                agent = self.store.read(agent_path, "agent-state.schema.json")
+                agent = self.store.read(agent_path, "agent-state.v3.schema.json")
                 if identity_alive(agent["process_identity"]):
                     raise HarnessError("Managed worker still alive: " + agent_id + "; refusing duplicate writer")
                 if agent["status"] not in {"integrated", "verified", "stopped"}:
@@ -1210,7 +1216,7 @@ class Supervisor:
             result["tooling"] = {"execution": self.contract.get("execution", {}),
                 "review_execution": self.contract.get("review_execution", {}), "provenance_root": "tooling/", "agents": []}
             for name in state["agents"]:
-                agent = self.store.read(self.agent_path(name), "agent-state.schema.json")
+                agent = self.store.read(self.agent_path(name), "agent-state.v3.schema.json")
                 ref = agent.get("tool_provenance")
                 if not ref:
                     continue

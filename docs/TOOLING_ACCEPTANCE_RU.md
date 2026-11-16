@@ -105,6 +105,7 @@ PowerShell: сначала `$env:HARNESS_LIVE_CODEX_CATALOG='1'`, затем т�
 Новые optional поля верхнего контракта или отдельного task plan:
 
 ```yaml
+tooling_schema_version: 1
 execution:
   backend: codex
   tool_profile:
@@ -151,6 +152,23 @@ OpenCode без квалифицированных leaf permissions не доп�
 существующего run store. `graph-index.schema.json` описывает graph receipt.
 Invocation/completion используют существующее поле `capability_receipt_ref`
 и `input_refs`; второй execution store не появляется.
+
+Исторические `work-contract.schema.json`, `agent-plan.schema.json`,
+`agent-state.schema.json`, `work-state.schema.json` и `work-state.v3.schema.json`
+сохраняют исходные bytes. Новые поля описаны отдельными
+`work-contract.tooling.v1.schema.json` / `agent-plan.tooling.v1.schema.json`.
+`tooling_schema_version: 1` возникает только при явном выборе execution или
+review_execution; обычный normalized contract/plan и его digest не меняются.
+
+Новые tooling agents используют `agent-state.v3.schema.json`, старые agent1/2
+читаются без добавления полей. Новый runtime reader `work-state.v4.schema.json`
+принимает исторические state1/2/3 и отдельный state4. Только opt-in контракт
+либо versioned план активирует явный checkpoint upgrade в том же journal:
+`schema_version: 4`, `tooling_schema_version: 1`, `base_schema_version: 2|3`.
+Deadline, attempts, session/usage и прежние checkpoints сохраняются; base3
+сохраняет обязательный plan-quality gate. Historical migration2/3 продолжает
+использовать старый reader и отказывается от state4 без изменения файлов.
+Не выполняйте downgrade или редактирование state вручную.
 
 Binding содержит backend executable/version/hash и launcher files digest,
 profile/version/digest, native-config digest, fingerprints user/project config

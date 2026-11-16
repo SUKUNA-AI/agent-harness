@@ -138,7 +138,7 @@ def _publish_verdict_record(receipts, receipt_index, intent, completion, candida
 def evidence_errors(supervisor, candidate_digest):
     """Validate the final reviewer subject and raw artifact without model work."""
     records = supervisor.receipts().records()
-    plan_digest = digest(supervisor.store.read(supervisor.state["plan_path"], "agent-plan.schema.json"))
+    plan_digest = digest(supervisor.store.read(supervisor.state["plan_path"], "agent-plan.tooling.v1.schema.json"))
     reviews = [r for r in records if r["plan_digest"] == plan_digest and r["record_type"] == "review" and r["payload"]["candidate_digest"] == candidate_digest and r["payload"]["verdict"] == "approved"]
     if not reviews:
         return ["final-review receipt missing"]
@@ -253,7 +253,7 @@ def review_candidate(supervisor, run, candidate):
     receipt_records = cast(list[ReceiptRecord], accounting["records"])
     receipt_index = {record["record_id"]: record for record in receipt_records}
     binding = _review_binding(supervisor)
-    plan_digest = digest(supervisor.store.read(supervisor.state["plan_path"], "agent-plan.schema.json"))
+    plan_digest = digest(supervisor.store.read(supervisor.state["plan_path"], "agent-plan.tooling.v1.schema.json"))
     cached = [r for r in receipt_records if r["plan_digest"] == plan_digest and r["record_type"] == "review" and r["payload"]["candidate_digest"] == candidate["digest"]]
     if binding:
         if any(r["schema_version"] == 2 and r["payload"].get("review_binding") != binding for r in cached):
@@ -313,7 +313,7 @@ def review_candidate(supervisor, run, candidate):
         review_adapter = supervisor._adapter()
         tool_ref = None
         if ("review_execution" in supervisor.contract or "execution" in supervisor.contract
-                or any("execution" in row for row in supervisor.store.read(supervisor.state["plan_path"], "agent-plan.schema.json")["tasks"])):
+                or any("execution" in row for row in supervisor.store.read(supervisor.state["plan_path"], "agent-plan.tooling.v1.schema.json")["tasks"])):
             from .execution import prepare as prepare_execution, selection
             try:
                 review_adapter, tool_ref = prepare_execution(supervisor, selection(supervisor.contract, review=True),
@@ -344,14 +344,14 @@ def review_candidate(supervisor, run, candidate):
             "Use changes_requested for defects and blocked for missing evidence. Read every required part.", {
                 "goal": supervisor.contract["task"]["objective"], "task": supervisor.contract["task"],
                 "mission": supervisor.contract.get("mission"),
-                "plan": supervisor.store.read(supervisor.state["plan_path"], "agent-plan.schema.json"),
+                "plan": supervisor.store.read(supervisor.state["plan_path"], "agent-plan.tooling.v1.schema.json"),
                 "acceptance": supervisor.contract["acceptance"], "candidate_digest": candidate["digest"],
                 "raw_evidence": str(run.attempt_dir()),
                 "coverage": supervisor.plan_progress().get("requirements"),
                 "prior_reviewer_failure": prior_failure,
                 "completion_policy": binding,
                 "required_verdict_version": 3 if binding else 2 if supervisor.contract["schema_version"] == 2 else 1})
-        effort = plan_reviewer_effort(supervisor.store.read(supervisor.state["plan_path"], "agent-plan.schema.json"))
+        effort = plan_reviewer_effort(supervisor.store.read(supervisor.state["plan_path"], "agent-plan.tooling.v1.schema.json"))
         if backend == "opencode":
             effort = None
         preflight(review_adapter, prompt, read_only=True, write_authorized=False,

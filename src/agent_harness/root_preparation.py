@@ -298,7 +298,7 @@ def binding(supervisor, purpose, *, attempts_before=None, core_path=None, genera
     core = Run(state['core_run']) if state['core_run'] else None
     try:
         before = core.state() if core else None
-        plan = supervisor.store.read(state['plan_path'], 'agent-plan.schema.json') if state['plan_path'] else None
+        plan = supervisor.store.read(state['plan_path'], 'agent-plan.tooling.v1.schema.json') if state['plan_path'] else None
     except (OSError,ValueError,HarnessError) as error:
         raise PreparationFailure('INTEGRITY','core_prepare','Required current core/plan binding unavailable') from error
     number = generation if generation is not None else len(before['attempts']) if before else 1
@@ -769,7 +769,7 @@ class ManagedInputProof:
         if plan_quality.enabled(supervisor):
             errors=plan_quality.evidence_errors(supervisor)
             if errors:fail('INTEGRITY','invocation_boundary','PLAN_QUALITY: '+'; '.join(errors))
-        plan=supervisor.store.read(supervisor.state['plan_path'],'agent-plan.schema.json')
+        plan=supervisor.store.read(supervisor.state['plan_path'],'agent-plan.tooling.v1.schema.json')
         nodes={node['id'] for node in plan['tasks']}
         records=supervisor.receipts().records()
         integrations=[row for row in records if row['record_type']=='integration' and row['plan_digest']==digest(plan)]
@@ -784,7 +784,7 @@ class ManagedInputProof:
         if trees.tree(staging)!=latest['result_tree'] or git(checkout,'rev-parse','HEAD').decode().strip()!=latest['result_head']:
             fail('INTEGRITY','invocation_boundary','Integrated root tree/head changed outside its exact publication')
         if verified_flow.enabled(supervisor):
-            agents={name:supervisor.store.read(supervisor.agent_path(name),'agent-state.schema.json') for name in nodes}
+            agents={name:supervisor.store.read(supervisor.agent_path(name),'agent-state.v3.schema.json') for name in nodes}
             frontier=verified_flow.refresh_frontier(supervisor,plan,agents,names=nodes,verify_only=True)
             if set(frontier)!=nodes:
                 fail('INTEGRITY','invocation_boundary','Current complete node frontier required before initial root')

@@ -17,8 +17,16 @@ from .strict_yaml import validate, _schema
 from .task_packets import NotDispatched
 
 
+def provenance_ref(intent):
+    checksum = intent.get("capability_receipt_ref")
+    if not checksum:
+        return None
+    return {"path": "tooling/" + intent["node_id"].replace("@", "_") + "/" + intent["attempt_id"] + "-" + checksum + ".yaml",
+            "digest": checksum}
+
+
 def validate_selection(value):
-    validate(value, _schema("work-contract.schema.json")["properties"]["execution"])
+    validate(value, _schema("work-contract.tooling.v1.schema.json")["properties"]["execution"])
     ref = value.get("tool_profile", {})
     if ref.get("path") and not Path(ref["path"]).is_absolute():
         raise HarnessError("Tool profile path must be absolute; relative resume identity is ambiguous")
@@ -198,7 +206,7 @@ def evidence_errors(supervisor):
         # Never erase a required binding simply by deleting its directory.
         if "execution" not in supervisor.contract and "review_execution" not in supervisor.contract:
             path = supervisor.state.get("plan_path")
-            if not path or not any("execution" in n for n in supervisor.store.read(path, "agent-plan.schema.json")["tasks"]):
+            if not path or not any("execution" in n for n in supervisor.store.read(path, "agent-plan.tooling.v1.schema.json")["tasks"]):
                 return []
     errors = []
     records = supervisor.receipts().records()
@@ -222,7 +230,7 @@ def evidence_errors(supervisor):
     # Known binding projections provide a required, closed set even if a file
     # is deleted. Old agents have no binding and follow their legacy rules.
     for name in supervisor.state["agents"]:
-        row = supervisor.store.read(supervisor.agent_path(name), "agent-state.schema.json")
+        row = supervisor.store.read(supervisor.agent_path(name), "agent-state.v3.schema.json")
         ref = row.get("tool_provenance")
         if ref and ref["digest"] not in seen:
             errors.append("Tooling provenance is no longer bound to immutable invocation evidence: " + name)

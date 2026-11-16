@@ -79,7 +79,7 @@ def _plan_path(supervisor):
 def _plan(supervisor, capabilities):
     explicit = getattr(supervisor, "plan_input", None)
     if explicit:
-        value = load(explicit, "agent-plan.schema.json")
+        value = load(explicit, "agent-plan.tooling.v1.schema.json")
     elif supervisor.contract["budgets"]["max_concurrent_managed_agents"] == 1 and not verified_flow.enabled(supervisor):
         value = {"schema_version": 1, "task_id": supervisor.state["task_id"], "tasks": [{
             "id": "implementation", "goal": supervisor.contract["task"]["objective"], "role": "owner",
@@ -160,11 +160,11 @@ def _plan(supervisor, capabilities):
         if not messages:
             raise HarnessError("Structured planner has no final response")
         from .strict_yaml import loads
-        value = loads(messages[-1], "agent-plan.schema.json")
+        value = loads(messages[-1], "agent-plan.tooling.v1.schema.json")
     validate_plan(value, supervisor.contract)
     if value["task_id"] != supervisor.state["task_id"]:
         raise HarnessError("Plan task identity mismatch")
-    supervisor.store.write(_plan_path(supervisor), value, "agent-plan.schema.json", exclusive=True)
+    supervisor.store.write(_plan_path(supervisor), value, "agent-plan.tooling.v1.schema.json", exclusive=True)
     supervisor.store.append_event({"kind": "plan_frozen", "plan_digest": digest(value), "mission_generation": supervisor.contract.get("mission", {}).get("generation", 1)})
     supervisor.state["plan_path"] = _plan_path(supervisor)
     supervisor._save("structured plan validated and persisted as Strict YAML")
@@ -258,6 +258,23 @@ def execute_managed(supervisor, *, recovering=False):
     if not supervisor._model_budget_ok():
         return supervisor._loop()
     capabilities = supervisor._adapter().capabilities()
+    from .tooling_state import enabled as tooling_enabled, ensure as ensure_tooling_state
+    proposed = None
+    explicit = getattr(supervisor, "plan_input", None)
+    try:
+        if state["plan_path"]:
+            proposed = supervisor.store.read(state["plan_path"], "agent-plan.tooling.v1.schema.json")
+        elif explicit:
+            proposed = load(explicit, "agent-plan.tooling.v1.schema.json")
+        if tooling_enabled(contract, proposed):
+            backend = contract.get("review_execution", {}).get("backend", "codex")
+            if supervisor._adapter(backend).capabilities().get("reviewer_isolation_qualified") is not True:
+                supervisor.transition("BLOCKED_ENVIRONMENT", "BLOCKED_NOT_QUALIFIED: tooling DAG requires effective final-reviewer isolation before planning/worker admission")
+                return supervisor._loop()
+            ensure_tooling_state(supervisor, plan=proposed)
+    except (HarnessError, OSError, ValueError) as error:
+        supervisor.transition("BLOCKED_AMBIGUOUS", "Tooling planning admission failed: " + str(error))
+        return supervisor._loop()
     if contract["budgets"]["max_concurrent_managed_agents"] > 1:
         try:
             proof_path = getattr(supervisor, "native_disabled_proof", None)
@@ -281,7 +298,7 @@ def execute_managed(supervisor, *, recovering=False):
                 return supervisor._loop()
         elif recovering and supervisor.store.path(_plan_path(supervisor)).exists():
             state["plan_path"] = _plan_path(supervisor)
-            plan = supervisor.store.read(state["plan_path"], "agent-plan.schema.json")
+            plan = supervisor.store.read(state["plan_path"], "agent-plan.tooling.v1.schema.json")
             validate_plan(plan, contract)
             frozen = [e["payload"]["plan_digest"] for e in supervisor.store.events() if e["payload"].get("kind") == "plan_frozen" and e["payload"].get("mission_generation", 1) == contract.get("mission", {}).get("generation", 1)]
             if frozen and (len(set(frozen)) != 1 or frozen[-1] != digest(plan)):
@@ -307,11 +324,11 @@ def execute_managed(supervisor, *, recovering=False):
                     if event.get("type") == "item.completed" and event.get("item", {}).get("type") == "agent_message"]
                 if not messages:
                     raise HarnessError("Planner completed without structured result")
-                plan = loads(messages[-1], "agent-plan.schema.json")
+                plan = loads(messages[-1], "agent-plan.tooling.v1.schema.json")
                 validate_plan(plan, contract)
                 if plan["task_id"] != state["task_id"]:
                     raise HarnessError("Recovered planner task identity mismatch")
-                supervisor.store.write(_plan_path(supervisor), plan, "agent-plan.schema.json", exclusive=True)
+                supervisor.store.write(_plan_path(supervisor), plan, "agent-plan.tooling.v1.schema.json", exclusive=True)
                 supervisor.store.append_event({"kind": "plan_frozen", "plan_digest": digest(plan), "mission_generation": contract.get("mission", {}).get("generation", 1)})
                 state["plan_path"] = _plan_path(supervisor)
                 supervisor._save("Recovered structured plan from exact immutable completion artifact")
@@ -334,6 +351,8 @@ def execute_managed(supervisor, *, recovering=False):
         supervisor.transition("BLOCKED_AMBIGUOUS", "Unsafe or invalid persisted plan: " + str(error))
         return supervisor._loop()
     scheduler = Scheduler(plan, contract)
+    from .tooling_state import ensure as ensure_tooling_state
+    ensure_tooling_state(supervisor, plan=plan)
     tooling = ("execution" in contract or "review_execution" in contract
                or any("execution" in node for node in plan["tasks"]))
     if tooling:
@@ -378,7 +397,7 @@ def execute_managed(supervisor, *, recovering=False):
         path = supervisor.agent_path(name)
         if not supervisor.store.path(path).exists():
             continue
-        agent = supervisor.store.read(path, "agent-state.schema.json")
+        agent = supervisor.store.read(path, "agent-state.v3.schema.json")
         if (agent["task_contract_digest"] != digest(node) or agent["id"] != name or agent["role"] != node["role"]
                 or agent["allowed_write_scope"] != node["write_scope"] or agent["read_only"] != node["read_only"]):
             raise HarnessError("Recovered agent contract/role/scope no longer matches persisted plan")
@@ -396,7 +415,7 @@ def execute_managed(supervisor, *, recovering=False):
             if agent["status"] != "failed":
                 agent["status"] = "integrated"
             agent["integration_ref"] = integrated[-1]["record_id"]
-            supervisor.store.write(path, agent, "agent-state.schema.json")
+            supervisor.store.write(path, agent, "agent-state.v3.schema.json")
             if not verified_flow.enabled(supervisor) or agent["status"] != "failed":
                 completed.add(name)
         elif agent["status"] in {"integrated", "verified"}:
@@ -419,7 +438,9 @@ def execute_managed(supervisor, *, recovering=False):
             "node_id": name, "plan_digest": plan_digest, "attempt_id": name + "-" + str(len(prior_intents)), "owner_id": name,
             "worker_checkout_ref": record["path"], "result_digest": None, "completion_ref": None, "integration_ref": None,
             "invocation_ids": [], "dependency_vector": [agents[d]["integration_ref"] for d in node["depends_on"]]}
-        supervisor.store.write(supervisor.agent_path(name), agent, "agent-state.schema.json", exclusive=True)
+        if "execution" in contract or "execution" in node:
+            agent.update(schema_version=3, tool_provenance=None, tool_source_checkpoint=None)
+        supervisor.store.write(supervisor.agent_path(name), agent, "agent-state.v3.schema.json", exclusive=True)
         agents[name] = agent
         return agent
 
@@ -516,7 +537,7 @@ def execute_managed(supervisor, *, recovering=False):
         def save():
             with supervisor.mutex:
                 agent["checkpoint"] += 1
-                supervisor.store.write(supervisor.agent_path(name), agent, "agent-state.schema.json")
+                supervisor.store.write(supervisor.agent_path(name), agent, "agent-state.v3.schema.json")
         def process(value):
             slot.bind(value)
             agent.update(process_identity=value["identity"], status="running")
@@ -600,7 +621,7 @@ def execute_managed(supervisor, *, recovering=False):
         decision = repair_decision(prior, failure, current, attempts=agent["attempts_used"], max_attempts=agent["max_attempts"])
         rows = history if any(r.get("completion_ref") == completion_ref for r in history) else [*history, dict(failure, snapshot_id=current, attempt=agent["attempts_used"], completion_ref=completion_ref)]
         agent.update(status="failed", last_failure=str(error)[:2048], retry_decision=decision, failures=rows)
-        supervisor.store.write(supervisor.agent_path(name), agent, "agent-state.schema.json")
+        supervisor.store.write(supervisor.agent_path(name), agent, "agent-state.v3.schema.json")
         if decision["action"] != "repair":
             if decision["status"] == "NO_PROGRESS":
                 supervisor.transition("FAILED_REPAIRABLE", "Node failed without new progress")
@@ -613,7 +634,7 @@ def execute_managed(supervisor, *, recovering=False):
             agent.update(worktree=record, worker_checkout_ref=record["path"], thread_id=None,
                 repair_base_tree=trees.tree(staging))
             records[name] = record
-            supervisor.store.write(supervisor.agent_path(name), agent, "agent-state.schema.json")
+            supervisor.store.write(supervisor.agent_path(name), agent, "agent-state.v3.schema.json")
         state["metrics"]["repair_attempts"] += 1
         completed.discard(name)
         supervisor._save("bounded node repair with dependents closed: " + name)
@@ -655,7 +676,7 @@ def execute_managed(supervisor, *, recovering=False):
             if verified_flow.enabled(supervisor) and not agent.get("repair_base_tree"):
                 frontier = verified_flow.refresh_frontier(supervisor, plan, agents, names=scheduler.nodes[name]["depends_on"], verify_only=True)
                 agent["dependency_vector"] = [frontier[d]["record_id"] for d in scheduler.nodes[name]["depends_on"]]
-                supervisor.store.write(supervisor.agent_path(name), agent, "agent-state.schema.json")
+                supervisor.store.write(supervisor.agent_path(name), agent, "agent-state.v3.schema.json")
             if name not in state["agents"]:
                 state["agents"].append(name)
         supervisor._save("spawn ready wave: " + ", ".join(wave["selected"]))
@@ -725,7 +746,7 @@ def execute_managed(supervisor, *, recovering=False):
                 integrated = _integrate(supervisor, trees, staging, scheduler.nodes[name], agent, completion)
                 agent.update(status="integrated", integration_ref=integrated["record_id"], result_digest=integrated["payload"]["result_digest"])
                 agent.pop("repair_base_tree", None)
-                supervisor.store.write(supervisor.agent_path(name), agent, "agent-state.schema.json")
+                supervisor.store.write(supervisor.agent_path(name), agent, "agent-state.v3.schema.json")
             except HarnessError as error:
                 state["metrics"]["integration_conflicts"] += 1
                 supervisor.transition("BLOCKED_AMBIGUOUS", "Integration requires exact reconciliation: " + str(error))
