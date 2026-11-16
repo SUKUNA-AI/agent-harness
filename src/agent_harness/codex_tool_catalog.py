@@ -22,6 +22,8 @@ from .core import HarnessError, digest, now, process_identity
 from .runner import _start_contained
 
 MAX_MESSAGE_BYTES = 1024 * 1024
+MAX_REQUEST_BYTES = 65536
+MAX_CURSOR_BYTES = 4096
 MAX_STREAM_BYTES = 8 * 1024 * 1024
 MAX_SERVERS = 128
 MAX_TOOLS = 4096
@@ -79,6 +81,7 @@ class _AppServer:
         self.events_digest = hashlib.sha256()
         self.errors_digest = hashlib.sha256()
         self.readers = []
+        self.writer = None
         self.startup_notifications = []
         self.stopped = False
         for stream, name in ((self.process.stdout, "stdout"), (self.process.stderr, "stderr")):
@@ -135,19 +138,47 @@ class _AppServer:
                 raise HarnessError("MCP_CLIENT_PROTOCOL_" + kind.upper())
             return value
 
+    def _send(self, message):
+        raw = (json.dumps(message, separators=(",", ":"), allow_nan=False) + "\n").encode()
+        if len(raw) > MAX_REQUEST_BYTES:
+            raise HarnessError("MCP_CLIENT_REQUEST_BOUND")
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise HarnessError("MCP_CLIENT_TIMEOUT")
+        if self.writer is not None and self.writer.is_alive():
+            raise HarnessError("MCP_CLIENT_PREVIOUS_WRITE_UNCONFIRMED")
+        # Buffered pipe writes can block when a peer stops reading. The owner
+        # waits only to its absolute deadline, then kills the contained process
+        # tree before joining this writer or closing/flushing the pipe.
+        done, errors = threading.Event(), []
+        def write():
+            try:
+                if self.process.stdin.write(raw) != len(raw):
+                    raise OSError("Short app-server request write")
+                self.process.stdin.flush()
+            except (OSError, ValueError):
+                errors.append("MCP_CLIENT_STDIN_WRITE_FAILED")
+            finally:
+                done.set()
+        self.writer = threading.Thread(target=write, daemon=True)
+        self.writer.start()
+        if not done.wait(remaining):
+            raise HarnessError("MCP_CLIENT_TIMEOUT")
+        self.writer.join()
+        if errors:
+            raise HarnessError(errors[0])
+
     def notify(self, method, params=None):
         message = {"method": method}
         if params is not None:
             message["params"] = params
-        self.process.stdin.write((json.dumps(message, separators=(",", ":")) + "\n").encode())
-        self.process.stdin.flush()
+        self._send(message)
 
     def request(self, method, params):
         self.sequence += 1
         ident = self.sequence
         message = {"id": ident, "method": method, "params": params}
-        self.process.stdin.write((json.dumps(message, separators=(",", ":")) + "\n").encode())
-        self.process.stdin.flush()
+        self._send(message)
         while True:
             value = self._receive()
             if "id" not in value:
@@ -156,7 +187,7 @@ class _AppServer:
                 if value["method"] == "mcpServer/startupStatus/updated":
                     self.startup_notifications.append(value.get("params", {}))
                 continue
-            if value["id"] != ident or value["id"] in self.responses or "method" in value:
+            if type(value["id"]) is not int or value["id"] != ident or value["id"] in self.responses or "method" in value:
                 # Never answer permission/tool/approval requests in diagnostics.
                 raise HarnessError("MCP_CLIENT_UNEXPECTED_RESPONSE_OR_REQUEST")
             self.responses.add(ident)
@@ -168,17 +199,30 @@ class _AppServer:
 
     def close(self):
         try:
-            if self.process.stdin and not self.process.stdin.closed:
-                self.process.stdin.close()
+            # Never flush/close stdin before stopping the owned tree. A peer
+            # may have closed its read end while a live descendant remains, or
+            # a writer may still hold BufferedWriter's lock under backpressure.
             _stop_owned_tree(self.process, self.job, self.identity)
             self.stopped = True
         finally:
             self.job.close()
+            if self.writer is not None:
+                self.writer.join(timeout=3)
             for reader in self.readers:
                 reader.join(timeout=3)
-            if any(reader.is_alive() for reader in self.readers):
+            if (self.writer is not None and self.writer.is_alive()
+                    or any(reader.is_alive() for reader in self.readers)):
                 self.stopped = False
                 raise HarnessError("Catalog reader cleanup unconfirmed")
+            if self.process.stdin and not self.process.stdin.closed:
+                try:
+                    self.process.stdin.close()
+                except (OSError, ValueError):
+                    # Cleanup of the tree has already happened. A broken pipe
+                    # cannot prevent process cancellation or mask its identity.
+                    raw = getattr(self.process.stdin, "raw", None)
+                    if raw is not None:
+                        raw.close()
 
 
 def audit_catalog(adapter, config, root, *, timeout=15):
@@ -247,7 +291,8 @@ def audit_catalog(adapter, config, root, *, timeout=15):
             cursor = page.get("nextCursor")
             if cursor is None:
                 break
-            if not isinstance(cursor, str) or not cursor or cursor in cursors or len(cursors) >= 128:
+            if (not isinstance(cursor, str) or not cursor or len(cursor.encode()) > MAX_CURSOR_BYTES
+                    or cursor in cursors or len(cursors) >= 128):
                 raise HarnessError("MCP_CLIENT_PAGINATION_INVALID")
             cursors.add(cursor)
         errors = []

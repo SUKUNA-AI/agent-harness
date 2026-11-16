@@ -5,19 +5,26 @@ from pathlib import Path
 import shutil
 import sys
 import tempfile
+import time
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from agent_harness.codex_execution import CodexAdapter
-from agent_harness.codex_tool_catalog import audit_catalog, _AppServer, _config_args
-from agent_harness.core import HarnessError, identity_alive
+from agent_harness.codex_execution import CodexAdapter, _stop_owned_tree
+from agent_harness.codex_tool_catalog import audit_catalog, _AppServer, _config_args, MAX_REQUEST_BYTES
+from agent_harness.core import HarnessError, identity_alive, process_identity
 
 
 APP_SERVER = r'''
-import json,os,pathlib,sys,time,tomllib
+import json,os,pathlib,subprocess,sys,time,tomllib
 mode=sys.argv[1]
 assert 'app-server' in sys.argv and '--stdio' in sys.argv
 assert 'PRIVATE_TEST_CREDENTIAL' not in os.environ
+if mode=='no-reader':time.sleep(3);sys.exit(0)
+if mode=='closed-stdin':
+    os.close(0)
+    child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'],stdin=subprocess.DEVNULL)
+    pathlib.Path('closed-stdin.ready').write_text(str(child.pid))
+    time.sleep(60);sys.exit(0)
 config={}
 for i,arg in enumerate(sys.argv):
     if arg=='-c':
@@ -51,8 +58,9 @@ for line in sys.stdin:
             data.append({'name':name,'runtimeStatus':None if mode=='cached' else 'failed' if mode=='startup-failed' else 'connected',
                          'tools':{x:{'name':x,'inputSchema':{'type':'object'}} for x in tools},'toolsError':'failed' if mode=='tools-error' else None})
         if mode=='unexpected':data.append({'name':'foreign','runtimeStatus':'connected','tools':{}})
-        result={'data':data,'nextCursor':'repeat' if mode=='cursor-loop' else None}
-    print(json.dumps({'id':ident,'result':result}),flush=True)
+        result={'data':data,'nextCursor':'x'*100000 if mode=='long-cursor' else 'repeat' if mode=='cursor-loop' else None}
+    print(json.dumps({'id':True if mode=='bool-id' and method=='initialize' else ident,'result':result}),flush=True)
+    if mode=='long-cursor' and method=='mcpServerStatus/list':time.sleep(3);sys.exit(0)
     if mode=='duplicate-response' and method=='initialize':print(json.dumps({'id':ident,'result':result}),flush=True)
 '''
 
@@ -117,12 +125,68 @@ class CodexToolCatalogTests(unittest.TestCase):
                 self.assertTrue(result['process_tree_stopped'])
 
     def test_corrupt_partial_duplicate_foreign_rpc_and_pagination_never_qualify(self):
-        for mode in ['partial','corrupt','duplicate-key','server-request','duplicate-response','cursor-loop','crash','wrong-root']:
+        for mode in ['partial','corrupt','duplicate-key','server-request','duplicate-response','cursor-loop','crash','wrong-root','bool-id']:
             with self.subTest(mode=mode):
                 result=self.audit(mode)
                 self.assertEqual(result['status'],'BLOCKED',result)
                 self.assertFalse(result['client_catalog_verified'])
                 self.assertTrue(result['process_tree_stopped'])
+
+    def test_long_cursor_peer_that_stops_reading_is_bounded_before_next_write(self):
+        started=time.monotonic()
+        result=self.audit('long-cursor',timeout=.5)
+        self.assertEqual(result['status'],'BLOCKED',result)
+        self.assertEqual(result['reason'],'MCP_CLIENT_PAGINATION_INVALID')
+        self.assertLess(time.monotonic()-started,2)
+        self.assertTrue(result['process_tree_stopped'])
+        self.assertFalse(identity_alive(result['process_identity']))
+
+    def test_pipe_backpressure_cannot_escape_absolute_request_deadline(self):
+        client=_AppServer([sys.executable,str(self.fake),'no-reader','app-server','--stdio'],
+                          self.project,dict(os.environ),.2)
+        started=time.monotonic()
+        try:
+            with self.assertRaisesRegex(HarnessError,'MCP_CLIENT_TIMEOUT'):
+                client.request('initialize',{'padding':'x'*32768})
+        finally:
+            client.close()
+        self.assertLess(time.monotonic()-started,2)
+        self.assertTrue(client.stopped)
+        self.assertFalse(client.writer.is_alive())
+        self.assertFalse(identity_alive(client.identity))
+
+    def test_request_byte_bound_rejects_without_starting_a_writer(self):
+        client=_AppServer([sys.executable,str(self.fake),'no-reader','app-server','--stdio'],
+                          self.project,dict(os.environ),.5)
+        try:
+            with self.assertRaisesRegex(HarnessError,'MCP_CLIENT_REQUEST_BOUND'):
+                client.request('initialize',{'padding':'x'*MAX_REQUEST_BYTES})
+            self.assertIsNone(client.writer)
+        finally:
+            client.close()
+
+    def test_closed_stdin_flush_cannot_leave_live_child_or_process_tree(self):
+        client=_AppServer([sys.executable,str(self.fake),'closed-stdin','app-server','--stdio'],
+                          self.project,dict(os.environ),2)
+        marker=self.project/'closed-stdin.ready'
+        try:
+            deadline=time.monotonic()+2
+            while not marker.exists() and time.monotonic()<deadline:
+                time.sleep(.01)
+            self.assertTrue(marker.exists())
+            child_identity=process_identity(int(marker.read_text()))
+            self.assertTrue(identity_alive(client.identity))
+            # Small buffered bytes are flushed by close(), which raises EPIPE
+            # if cleanup attempts to close stdin before killing the live tree.
+            client.process.stdin.write(b'pending')
+            client.close()
+            self.assertTrue(client.stopped)
+            self.assertFalse(identity_alive(client.identity))
+            self.assertFalse(identity_alive(child_identity))
+        finally:
+            if not client.stopped:
+                _stop_owned_tree(client.process,client.job,client.identity)
+                client.job.close()
 
     def test_timeout_stops_real_owned_process(self):
         result=self.audit('timeout',timeout=.15)
@@ -144,6 +208,13 @@ class CodexToolCatalogTests(unittest.TestCase):
         for timeout in (0,61,True,float('nan')):
             with self.assertRaises(HarnessError):audit_catalog(adapter,self.config,self.project,timeout=timeout)
         with self.assertRaises(HarnessError):audit_catalog(adapter,self.config,Path('relative'))
+
+    def test_fractional_native_timeouts_remain_supported_but_nonfinite_reject(self):
+        self.config['mcp_servers']['fixture']['startup_timeout_sec']=.3
+        self.assertEqual(self.audit()['status'],'READY')
+        for value in (float('nan'),float('inf')):
+            self.config['mcp_servers']['fixture']['startup_timeout_sec']=value
+            with self.assertRaises(HarnessError):_config_args(self.config)
 
     @unittest.skipUnless(os.environ.get('HARNESS_LIVE_CODEX_CATALOG')=='1' and shutil.which('codex'),
                          'Live Codex app-server requires explicit no-inference smoke opt-in')
