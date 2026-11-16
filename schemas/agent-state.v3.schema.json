@@ -1,0 +1,362 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "enum": [
+        1,
+        2,
+        3
+      ]
+    },
+    "id": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "role": {
+      "enum": [
+        "owner",
+        "reviewer",
+        "architect",
+        "diagnostician"
+      ]
+    },
+    "task_contract_digest": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "worktree": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "path": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "base_revision": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "branch": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "ownership_token": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "created_at": {
+          "type": "string",
+          "maxLength": 16384,
+          "format": "utc"
+        }
+      },
+      "required": [
+        "schema_version",
+        "id",
+        "path",
+        "base_revision",
+        "branch",
+        "role",
+        "ownership_token",
+        "created_at"
+      ]
+    },
+    "thread_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "process_identity": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "pid": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "created": {
+          "type": "string",
+          "maxLength": 16384
+        }
+      },
+      "required": [
+        "pid",
+        "created"
+      ]
+    },
+    "status": {
+      "enum": [
+        "spawned",
+        "running",
+        "ready_for_review",
+        "verified",
+        "integrated",
+        "stopped",
+        "timed_out",
+        "cancelled",
+        "blocked",
+        "unknown_outcome",
+        "failed",
+        "prepared"
+      ]
+    },
+    "started_at": {
+      "type": "string",
+      "maxLength": 16384,
+      "format": "utc"
+    },
+    "last_progress_at": {
+      "type": "string",
+      "maxLength": 16384,
+      "format": "utc"
+    },
+    "allowed_write_scope": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 16384
+      },
+      "maxItems": 128
+    },
+    "read_only": {
+      "type": "boolean"
+    },
+    "deadline": {
+      "type": "string",
+      "maxLength": 16384,
+      "format": "utc"
+    },
+    "max_attempts": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "attempts_used": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "stdout_offset": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "stderr_offset": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "checkpoint": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "spawn_reason": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "node_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "plan_digest": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "attempt_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "owner_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "worker_checkout_ref": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "result_digest": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "completion_ref": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "integration_ref": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 16384
+    },
+    "invocation_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 16384
+      },
+      "maxItems": 128
+    },
+    "dependency_vector": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 16384
+      },
+      "maxItems": 128
+    },
+    "last_failure": {
+      "type": "string",
+      "maxLength": 2048
+    },
+    "failures": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "verified_ref": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "repair_base_tree": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40,64}$"
+    },
+    "retry_decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "repair",
+            "stop"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 2048
+        }
+      },
+      "required": [
+        "action",
+        "status",
+        "reason"
+      ]
+    },
+    "tool_provenance": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "path",
+        "digest"
+      ]
+    },
+    "tool_source_checkpoint": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "required": [
+    "schema_version",
+    "id",
+    "role",
+    "task_contract_digest",
+    "worktree",
+    "thread_id",
+    "process_identity",
+    "status",
+    "started_at",
+    "last_progress_at",
+    "allowed_write_scope",
+    "read_only",
+    "deadline",
+    "max_attempts",
+    "attempts_used",
+    "stdout_offset",
+    "stderr_offset",
+    "checkpoint",
+    "spawn_reason"
+  ],
+  "title": "Agent state reader v3, retaining closed historical v1/v2 states",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "const": 3
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "tool_provenance",
+          "tool_source_checkpoint"
+        ]
+      },
+      "else": {
+        "properties": {
+          "tool_provenance": false,
+          "tool_source_checkpoint": false
+        }
+      }
+    }
+  ]
+}

@@ -10,6 +10,22 @@ from .core import HarnessError, IDENTIFIER, digest, validate_contract
 from .orchestration import _path
 
 
+WORK_CONTRACT_TOOLING_SCHEMA = "work-contract.tooling.v1.schema.json"
+AGENT_PLAN_TOOLING_SCHEMA = "agent-plan.tooling.v1.schema.json"
+
+
+def validate_execution_selection(value):
+    """Closed tool selection belongs to its explicitly versioned contract schema."""
+    from .strict_yaml import validate, _schema
+    validate(value, _schema(WORK_CONTRACT_TOOLING_SCHEMA)["properties"]["execution"])
+    reference = value.get("tool_profile", {})
+    if reference.get("path") and not Path(reference["path"]).is_absolute():
+        raise HarnessError("Tool profile path must be absolute; relative resume identity is ambiguous")
+    if value.get("graph_index") and not Path(value["graph_index"]["path"]).is_absolute():
+        raise HarnessError("Graph index receipt path must be absolute")
+    return value
+
+
 def normalize(value):
     from .strict_yaml import validate
     value = deepcopy(value)
@@ -31,11 +47,12 @@ def normalize(value):
         for check in value["acceptance"] + value.get("node_checks", []):
             if isinstance(check, dict) and check.get("kind") == "command":
                 check.setdefault("timeout", 300)
-    validate(value, "work-contract.schema.json")
-    from .execution import validate_selection
+    if "execution" in value or "review_execution" in value:
+        value.setdefault("tooling_schema_version", 1)
+    validate(value, WORK_CONTRACT_TOOLING_SCHEMA if "tooling_schema_version" in value else "work-contract.schema.json")
     for field in ("execution", "review_execution"):
         if field in value:
-            validate_selection(value[field])
+            validate_execution_selection(value[field])
     if value["mode"] == "native" and value.get("execution", {}).get("backend", "codex") != "codex":
         raise HarnessError("OpenCode native subagents are BLOCKED_NOT_QUALIFIED; use managed leaf workers")
     if not IDENTIFIER.fullmatch(value["task"]["id"]):

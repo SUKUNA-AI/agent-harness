@@ -27,7 +27,12 @@ def plan_reviewer_effort(plan):
 
 def validate_plan(plan, contract):
     from .strict_yaml import validate
-    validate(plan, "agent-plan.schema.json")
+    from .work_contract import AGENT_PLAN_TOOLING_SCHEMA, validate_execution_selection
+    tasks = plan.get("tasks") if isinstance(plan, dict) else None
+    node_selection = isinstance(tasks, list) and any(isinstance(node, dict) and "execution" in node for node in tasks)
+    if isinstance(plan, dict) and (node_selection or contract.get("tooling_schema_version") == 1):
+        plan.setdefault("tooling_schema_version", 1)
+    validate(plan, AGENT_PLAN_TOOLING_SCHEMA if isinstance(plan, dict) and "tooling_schema_version" in plan else "agent-plan.schema.json")
     nodes = plan["tasks"]
     by_id = {node["id"]: node for node in nodes}
     if len(by_id) != len(nodes):
@@ -50,8 +55,7 @@ def validate_plan(plan, contract):
         node_checks = {c["id"] for c in contract["node_checks"]}
     for node in nodes:
         if "execution" in node:
-            from .execution import validate_selection
-            validate_selection(node["execution"])
+            validate_execution_selection(node["execution"])
         worker_effort(node)
         if not IDENTIFIER.fullmatch(node["id"]):
             raise HarnessError("Invalid task ID")

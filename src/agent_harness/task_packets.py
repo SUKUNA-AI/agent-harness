@@ -63,7 +63,7 @@ def compile_packet(supervisor, instructions, payload):
     return prompt
 
 
-def schema_file(supervisor, name, version):
+def schema_file(supervisor, name, version, *, plan=None):
     """Give the client one concrete schema, without conditional legacy branches."""
     from .strict_yaml import _schema
     if name == "managed-review.schema.json" and version == 3:
@@ -71,7 +71,18 @@ def schema_file(supervisor, name, version):
         return _publish(supervisor, (json.dumps(schema, sort_keys=True) + "\n").encode("utf-8"), ".schema.json")["path"]
     if version not in (1, 2):
         raise HarnessError("Unsupported output schema version")
-    schema = deepcopy(_schema(name))
+    selected_name = name
+    if name == "agent-plan.schema.json":
+        contract = getattr(supervisor, "contract", {})
+        state = getattr(supervisor, "state", {})
+        if plan is None and getattr(supervisor, "plan_input", None):
+            from .strict_yaml import load
+            plan = load(supervisor.plan_input)
+        if (contract.get("tooling_schema_version") == 1 or state.get("tooling_schema_version") == 1
+                or isinstance(plan, dict) and "tooling_schema_version" in plan):
+            from .work_contract import AGENT_PLAN_TOOLING_SCHEMA
+            selected_name = AGENT_PLAN_TOOLING_SCHEMA
+    schema = deepcopy(_schema(selected_name))
     schema.pop("allOf", None)
     schema["properties"]["schema_version"] = {"const": version}
     if name == "managed-review.schema.json":
