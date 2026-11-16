@@ -265,8 +265,17 @@ def execute_managed(supervisor, *, recovering=False):
         if state["plan_path"]:
             proposed = supervisor.store.read(state["plan_path"], "agent-plan.tooling.v1.schema.json")
         elif explicit:
-            proposed = load(explicit, "agent-plan.tooling.v1.schema.json")
+            # Inspect opt-in fields only. Legacy plan validation belongs after
+            # the existing durable planning-round reservation, including YAML
+            # and schema errors; admission must not erase that accounting.
+            try:
+                proposed = load(explicit)
+            except (HarnessError, OSError, ValueError):
+                if tooling_enabled(contract):
+                    raise
         if tooling_enabled(contract, proposed):
+            if proposed is not None:
+                validate(proposed, "agent-plan.tooling.v1.schema.json")
             backend = contract.get("review_execution", {}).get("backend", "codex")
             if supervisor._adapter(backend).capabilities().get("reviewer_isolation_qualified") is not True:
                 supervisor.transition("BLOCKED_ENVIRONMENT", "BLOCKED_NOT_QUALIFIED: tooling DAG requires effective final-reviewer isolation before planning/worker admission")

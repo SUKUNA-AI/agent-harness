@@ -11,10 +11,12 @@ from .strict_yaml import validate
 
 
 def enabled(contract, plan=None):
+    nodes = plan.get("tasks") if isinstance(plan, dict) else None
+    nodes = nodes if isinstance(nodes, list) else []
     return (contract.get("tooling_schema_version") == 1
             or "execution" in contract or "review_execution" in contract
-            or plan is not None and (plan.get("tooling_schema_version") == 1
-                or any("execution" in node for node in plan["tasks"])))
+            or isinstance(plan, dict) and (plan.get("tooling_schema_version") == 1
+                or any(isinstance(node, dict) and "execution" in node for node in nodes)))
 
 
 def upgraded(state):
