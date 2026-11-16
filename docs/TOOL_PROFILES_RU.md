@@ -164,18 +164,85 @@ receipt = ast_grep_migrate(
 
 ## Playwright и Docling
 
-`browser-testing` описывает isolated context, controlled artifact directory и
-отдельное разрешение `allow_test_writes`. Наличие CLI не доказывает browser binary,
-context isolation и cleanup. До live qualification профиль возвращает
-`BLOCKED_NOT_QUALIFIED`; screenshot/log не заменяет автоматизированный regression.
+Standalone utilities реализованы в
+[optional_tool_jobs.py](../src/agent_harness/optional_tool_jobs.py). Они используют
+существующее containment процессов и пишут обычные receipt/artifacts в явно
+указанный private root. Они не квалифицируют managed client permissions:
+`browser-testing`/`documents` managed preflight остаётся BLOCKED до соответствующей
+квалификации клиента. Запуск helper — отдельная явная операторская операция.
 
-`documents` имеет явный `local-only|remote` mode, input/output roots, byte/time
-bounds. По умолчанию local-only. Наличие Docling CLI и offline env flags не
-доказывает запрет сетевых вызовов. Контролируемый conversion runner ещё не реализован/квалифицирован. Оба режима
-возвращают `BLOCKED_NOT_QUALIFIED`, `requested_conversion_mode` и
-`actual_conversion_mode: not_run`; remote не обходит path/byte/time ограничения.
-Никакого скрытого remote fallback.
-[Docling usage](https://docling-project.github.io/docling/usage/).
+`run_document_job(DocumentJob(...))` принимает local/remote mode, input root и
+ordinary input file, existing private output root вне source, проверенный argv
+converter, точный version output, input/output byte bounds и timeout. В argv
+обязательны `{input}` и `{output}`/`{output_dir}`; флаги Docling не угадываются.
+Input копируется в отдельный job, output inventory отвергает links/special files,
+сохранены hash исходного документа, tool identity, output hashes, реальные
+process events JSONL и actual/requested conversion modes. stdout/stderr bounded
+и представлены hash/count, содержимое документа в receipt не копируется.
+
+Для `local-only` обязателен **реальный** Linux bwrap net namespace: отдельный
+probe без внешних запросов подтверждает изменённую `/proc/self/ns/net` identity
+и loopback-only interfaces. Version probe и conversion выполняются под
+`--unshare-net`; conversion повторно проверяет namespace до exec. Отсутствие
+bwrap, отказ namespace setup или identity mismatch дают `BLOCKED_NOT_QUALIFIED`
+без host-network fallback. Offline environment flags сами по себе недостаточны.
+На текущем проверенном host bwrap установлен, но namespace setup запрещён ОС.
+Windows local-only остаётся BLOCKED, baseline Windows не зависит от bwrap.
+
+Remote mode разрешается только явно: это запуск доверенной оператором CLI
+команды с private HOME/cache/tmp и контролируемыми входными/output paths.
+Это не универсальная OS sandbox произвольной враждебной программы: remote
+converter должен быть проверен оператором. Receipt `actual_conversion_mode`
+показывает выбранную execution policy, а не доказывает вызов удалённого endpoint.
+Успешная конвертация fake fixture не квалифицирует Docling; реальный Docling
+не установлен в проверенном окружении. [Docling usage](https://docling-project.github.io/docling/usage/).
+
+```python
+from pathlib import Path
+from agent_harness.optional_tool_jobs import DocumentJob, run_document_job
+
+# command/version_argv задаются по help реально установленного converter.
+receipt = run_document_job(DocumentJob(
+    input_root=Path('/absolute/documents'),
+    input_path=Path('/absolute/documents/small.txt'),
+    output_root=Path('/private/document-jobs'),
+    command=('/absolute/verified-converter', '{input}', '{output}'),
+    tool_version='EXACT VERIFIED VERSION',
+    mode='local-only',
+))
+```
+
+`run_browser_job(BrowserJob(...))` использует lazy Playwright Python import и
+новый browser/context с сохранённой Chromium sandbox. URL ограничен localhost;
+context routes блокируют запросы к другим origins, downloads/service workers
+отключены. Поддержаны bounded `click`, `fill`, `expect_text`, `expect_visible`.
+Нужна хотя бы одна assertion и обязательный независимый `regression_argv`.
+Screenshot/result bounded, context/browser закрываются через finally, parent
+останавливает всё дерево на timeout/crash и проверяет неизменность source.
+
+`expectation='reproduces'` требует реальную failed browser assertion и ненулевой
+результат regression; timeout/cleanup failure не считаются воспроизведением.
+`expectation='passes'` требует passing browser assertions **и** regression.
+Screenshot отдельно не даёт успех. REPRODUCED и COMPLETED — статусы helper;
+source/scope/reviewer/final gate supervisor остаются обязательными.
+
+```python
+from agent_harness.optional_tool_jobs import BrowserJob, run_browser_job
+receipt = run_browser_job(BrowserJob(
+    root=Path('/absolute/project'),
+    url='http://127.0.0.1:8000/example',
+    artifact_root=Path('/private/browser-jobs'),
+    actions=({'kind': 'expect_text', 'selector': '#result', 'value': '42'},),
+    regression_argv=('python', '-m', 'unittest', 'tests.test_example'),
+    expectation='passes',
+))
+```
+
+При отсутствии package/browser — явный BLOCKED. Детерминированные tests используют
+fixture converter и fixture Playwright module, отмеченные version `fixture`;
+это проверка wrapper, routing, lifecycle и negative acceptance. Live net namespace
+и Playwright tests имеют controlled skips с причиной; skip не равен qualification.
+Команда: `python -m unittest discover -s tests -p test_optional_tool_jobs.py -v`.
 
 ## Диагностика отказов
 
