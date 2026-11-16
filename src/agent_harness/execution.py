@@ -213,7 +213,7 @@ def require_native_dependencies(profile, adapter, capabilities):
             raise HarnessError("Required MCP tools absent from native execution catalog: " + server["id"])
 
 
-def _verify_qualification_ref(supervisor, binding, *, require_execution=False, session_id=None, catalog_artifacts=None):
+def _verify_qualification_ref(supervisor, binding, *, require_execution=False, session_id=None, catalog_artifacts=None, execution_log=None):
     """Persisted evidence verifies closure; it never grants native capabilities."""
     ref = binding.get("client_qualification")
     if ref is None:
@@ -229,7 +229,8 @@ def _verify_qualification_ref(supervisor, binding, *, require_execution=False, s
         raise HarnessError("Native qualification evidence verifier unavailable") from error
     verify_qualification_evidence({"path": str(path), "sha256": ref["sha256"]},
         root=Path(binding["identity"]["root"]), role=ref["role"],
-        require_execution=require_execution, session_id=session_id, catalog_artifacts=catalog_artifacts)
+        require_execution=require_execution, session_id=session_id, catalog_artifacts=catalog_artifacts,
+        execution_log=execution_log)
 
 
 def _configured(supervisor, selected, *, root, role, node_id, attempt_id):
@@ -424,7 +425,9 @@ def evidence_errors(supervisor):
                         if not catalog_artifacts:
                             raise HarnessError("Native execution catalog has no immutable completion artifact")
                     _verify_qualification_ref(supervisor, binding, require_execution=True,
-                        session_id=session_id, catalog_artifacts=catalog_artifacts)
+                        session_id=session_id, catalog_artifacts=catalog_artifacts,
+                        execution_log={"path": completion["payload"].get("logs", {}).get("stdout"),
+                            "sha256": completion["payload"].get("logs", {}).get("stdout_digest")})
             else:
                 _verify_qualification_ref(supervisor, binding)
         except (HarnessError, OSError, ValueError, ImportError):

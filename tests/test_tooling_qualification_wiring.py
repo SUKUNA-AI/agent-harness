@@ -149,6 +149,7 @@ class ToolingQualificationWiringTests(unittest.TestCase):
             self.assertEqual(evidence_errors(supervisor), [])
             self.assertEqual(calls[0]["session_id"], "ses_fixture")
             self.assertTrue(calls[0]["require_execution"])
+            self.assertEqual(calls[0]["execution_log"], {"path": None, "sha256": None})
             self.assertEqual(calls[0]["catalog_artifacts"][0]["sha256"], configured.adapter.proof["sha256"])
             with patch("agent_harness.execution_receipts.verify_tool_artifacts", create=True, return_value=[]):
                 self.assertTrue(any("qualification" in item for item in evidence_errors(supervisor)))
