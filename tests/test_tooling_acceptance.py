@@ -42,7 +42,8 @@ class QualifiedFixtureCodex(BoundFixtureCodexAdapter):
 
 class QualifiedFixtureOpenCode(BoundFixtureCodexAdapter, FixtureOpenCodeAdapter):
     def capabilities(self, **options):
-        return {**super().capabilities(**options), "effective_tool_catalog": True}
+        return {**super().capabilities(**options), "effective_tool_catalog": True,
+                "effective_catalog_digest": digest(["fixture-only", self.tool_config])}
 
 
 class ToolingAcceptanceTests(unittest.TestCase):
