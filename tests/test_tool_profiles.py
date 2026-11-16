@@ -82,6 +82,19 @@ class ToolProfileTests(unittest.TestCase):
         self.assertNotIn("model", opencode)
         self.assertNotIn("approval_policy", codex)
 
+    def test_render_nested_uncreated_cache_is_pure_and_root_isolated(self):
+        cache = self.root / "private" / "tools" / "node"
+        first = resolved_servers(self.profile(), self.source, cache_root=cache)
+        self.assertEqual(first[0]["cwd"], str(self.source))
+        self.assertFalse(cache.exists())
+        serena = load_profile("coding")
+        original = resolved_servers(serena, self.source, cache_root=cache)[0]["environment"]["SERENA_HOME"]
+        other = self.root / "other"
+        other.mkdir()
+        distinct = resolved_servers(serena, other, cache_root=cache)[0]["environment"]["SERENA_HOME"]
+        self.assertNotEqual(original, distinct)
+        self.assertFalse(cache.exists())
+
     def test_baseline_without_optional_executables_is_ready(self):
         for backend in ("codex", "opencode"):
             result = preflight_profile("baseline", backend, self.source)

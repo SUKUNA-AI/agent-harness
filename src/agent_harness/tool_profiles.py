@@ -148,9 +148,13 @@ def _roots(root, cache_root):
     cache_root = Path(cache_root)
     if not cache_root.is_absolute():
         raise HarnessError("Tool cache requires an absolute path")
-    _parents(cache_root)
-    if cache_root.exists():
-        _ordinary(cache_root, directory=True)
+    if ".." in cache_root.parts:
+        raise HarnessError("Tool cache path must not contain parent traversal")
+    # Pure render tolerates not-yet-created private cache parents, but inspects
+    # every existing ancestor without following links/reparse points.
+    for candidate in [*reversed(cache_root.parents), cache_root]:
+        if candidate.exists() or candidate.is_symlink():
+            _ordinary(candidate, directory=True)
     # Even a shared operator cache base gets a separate mutable worktree namespace.
     return canonical, str(cache_root / digest(canonical)[:16])
 
