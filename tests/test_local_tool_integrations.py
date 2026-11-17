@@ -225,7 +225,7 @@ class LiveLocalToolsTests(unittest.TestCase):
         exe=self.tool('node/node_modules/.bin/ast-grep')
         (self.source/'symbol.py').write_text('def old_call(x): return x+1\ndef new_call(x): return x+1\nVALUE = old_call(1)\n')
         receipt=ast_grep_migrate(self.source,['symbol.py'],pattern='old_call($A)',rewrite='new_call($A)',language='python',
-            executable=exe,checks=[[sys.executable,'-c','from symbol import VALUE; assert VALUE == 2']],timeout=30)
+            executable=exe,checks=[[sys.executable,'-B','-c','from symbol import VALUE; assert VALUE == 2']],timeout=30)
         self.assertEqual(receipt['status'],'verified_migration')
         self.assertEqual(receipt['old_pattern_scan']['count'],0)
         self.assertEqual(receipt['changed_paths'],['symbol.py'])
