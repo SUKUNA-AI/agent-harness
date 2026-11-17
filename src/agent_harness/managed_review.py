@@ -366,9 +366,13 @@ def review_candidate(supervisor, run, candidate):
                     raise HarnessError("Final-review output schema integrity conflict")
             else:
                 atomic_write(schema, data, exclusive=True)
-        context_paths, read_context = _readonly_context(supervisor, run, schema, candidate) if backend == "opencode" else (None, None)
-        if ("review_execution" in supervisor.contract or "execution" in supervisor.contract
-                or any("execution" in row for row in supervisor.store.read(supervisor.state["plan_path"], "agent-plan.tooling.v1.schema.json")["tasks"])):
+        # Both qualified native clients receive only source plus these exact
+        # frozen evidence files; neither reviewer gains the private run store.
+        tooling_selected = ("review_execution" in supervisor.contract or "execution" in supervisor.contract
+                or any("execution" in row for row in supervisor.store.read(supervisor.state["plan_path"], "agent-plan.tooling.v1.schema.json")["tasks"]))
+        context_paths, read_context = (_readonly_context(supervisor, run, schema, candidate)
+            if tooling_selected and backend in {"codex", "opencode"} else (None, None))
+        if tooling_selected:
             from .execution import prepare as prepare_execution, selection
             try:
                 review_adapter, tool_ref = prepare_execution(supervisor, selection(supervisor.contract, review=True),

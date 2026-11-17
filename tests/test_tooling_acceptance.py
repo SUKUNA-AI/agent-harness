@@ -30,6 +30,14 @@ FIXTURES = Path(__file__).parent / "tooling"
 
 
 class QualifiedFixtureCodex(BoundFixtureCodexAdapter):
+    def with_read_context(self, paths):
+        # Synthetic final-review transport: native read enforcement is covered
+        # separately by the real-client qualification tests.
+        import copy
+        clone = copy.copy(self)
+        clone.fixture_read_context = tuple(paths)
+        return clone
+
     def capabilities(self, **options):
         return {**super().capabilities(**options), "native_children_disabled": True,
                 "effective_tool_catalog": True, "reviewer_isolation_qualified": True}

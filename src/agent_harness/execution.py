@@ -99,6 +99,9 @@ class ProfileExecution:
     """Policy observer around a native client; never an MCP tool proxy."""
     def __init__(self, adapter, profile, binding):
         self.adapter, self.profile, self.binding = adapter, profile, binding
+        from .tool_profiles import resolved_servers
+        self.servers = resolved_servers(profile, binding["identity"]["root"],
+            cache_root=binding["identity"]["cache_root"])
 
     def capabilities(self, **kwargs):
         return self.adapter.capabilities(**kwargs)
@@ -109,8 +112,9 @@ class ProfileExecution:
     def run(self, prompt, **options):
         previous = options.get("on_event")
         failed = []
-        mandatory = {s["id"] for s in self.profile["servers"] if s.get("required")}
-        required = {(s["id"], tool) for s in self.profile["servers"] if s.get("required") for tool in s["required_tools"]}
+        mandatory = {s["id"] for s in self.servers if s.get("required")}
+        required = {(s["id"], tool) for s in self.servers if s.get("required")
+                    for tool in s.get("required_results", s["required_tools"])}
         confirmed = set()
         def observe(event):
             item = event.get("item", {})
@@ -205,11 +209,12 @@ def require_native_dependencies(profile, adapter, capabilities):
         raise HarnessError("Required MCP is not connected in the native execution client")
     catalog = adapter.effective_tool_catalog()
     names = {tool["name"] for tool in catalog}
+    native_pairs = {(tool.get("server"), tool["name"]) for tool in catalog}
     for server in required:
         prefix = re.sub(r"[^A-Za-z0-9_]", "_", server["id"])
         wanted = {prefix + "_" + re.sub(r"[^A-Za-z0-9_]", "_", name)
                   for name in server["required_tools"]}
-        if not wanted <= names:
+        if not wanted <= names and not {(server["id"], name) for name in server["required_tools"]} <= native_pairs:
             raise HarnessError("Required MCP tools absent from native execution catalog: " + server["id"])
 
 
@@ -221,10 +226,14 @@ def _verify_qualification_ref(supervisor, binding, *, require_execution=False, s
     path = supervisor.store.path(ref["path"])
     if hashlib.sha256(read_regular_file(path, max_bytes=4 * 1024 * 1024)).hexdigest() != ref["sha256"]:
         raise HarnessError("Native qualification evidence changed")
-    if binding["identity"]["backend"] != "opencode":
-        raise HarnessError("Unsupported native qualification evidence backend")
     try:
-        from .opencode_qualification import verify_qualification_evidence
+        backend = binding["identity"]["backend"]
+        if backend == "opencode":
+            from .opencode_qualification import verify_qualification_evidence
+        elif backend == "codex":
+            from .codex_qualification import verify_qualification_evidence
+        else:
+            raise HarnessError("Unsupported native qualification evidence backend")
     except ImportError as error:
         raise HarnessError("Native qualification evidence verifier unavailable") from error
     verify_qualification_evidence({"path": str(path), "sha256": ref["sha256"]},
@@ -239,7 +248,7 @@ def _configured(supervisor, selected, *, root, role, node_id, attempt_id, read_c
     This helper does not reserve a model/planning slot or mutate run state. Its
     bounded qualification artifacts belong to the existing private run store.
     """
-    from .tool_profiles import load_profile, preflight_profile, render_codex, render_opencode
+    from .tool_profiles import load_profile, preflight_profile, render_codex, render_opencode, execution_profile
     from .strict_yaml import load
     validate_selection(selected)
     profile_role = {"owner": "worker", "helper": "worker", "architect": "planner"}.get(role, role)
@@ -261,14 +270,21 @@ def _configured(supervisor, selected, *, root, role, node_id, attempt_id, read_c
         raise HarnessError("TOOL_PROFILE_NOT_READY: " + json.dumps(readiness, ensure_ascii=False))
     if supervisor.remaining() <= 0:
         raise HarnessError("Absolute task deadline expired during tool readiness")
-    runtime_profile = available_profile(profile, readiness) if backend == "opencode" else profile
+    # A managed browser adds a core-owned server only after its complete policy
+    # is selected. Keep the original profile bytes for identity/resume checks.
+    resolved_profile = execution_profile(profile, root, cache_root=cache)
+    runtime_profile = available_profile(resolved_profile, readiness)
     native = (render_codex if backend == "codex" else render_opencode)(runtime_profile, root, role=profile_role, cache_root=cache)
     configure = getattr(adapter, "with_tool_config", None)
     if native and callable(configure):
         adapter = configure(native, root=root)
+    if backend == "codex":
+        managed_tools = getattr(adapter, "with_managed_tools", None)
+        if callable(managed_tools):
+            adapter = managed_tools(root=root)
     if read_context:
         configure_reads = getattr(adapter, "with_read_context", None)
-        if backend != "opencode" or profile_role not in {"reviewer", "planner"} or not callable(configure_reads):
+        if profile_role not in {"reviewer", "planner"} or not callable(configure_reads):
             raise HarnessError("BLOCKED_NOT_QUALIFIED: exact read-only context grants unavailable")
         adapter = configure_reads(read_context)
     elif profile["id"] != "baseline" and not callable(configure):
@@ -295,7 +311,7 @@ def _configured(supervisor, selected, *, root, role, node_id, attempt_id, read_c
     for name in selected.get("required_capabilities", []):
         if capabilities.get(name) is not True:
             raise HarnessError("BLOCKED_NOT_QUALIFIED: required backend capability " + name)
-    if profile["servers"] and capabilities.get("effective_tool_catalog") is not True:
+    if runtime_profile["servers"] and capabilities.get("effective_tool_catalog") is not True:
         raise HarnessError("BLOCKED_NOT_QUALIFIED: execution-bound effective MCP catalog is unqualified; diagnostic catalog is insufficient")
     if callable(qualify):
         if capabilities.get("effective_tool_catalog") is not True:
@@ -303,8 +319,7 @@ def _configured(supervisor, selected, *, root, role, node_id, attempt_id, read_c
         validate(capabilities.get("effective_catalog_digest"),
             _schema("tool-execution.schema.json")["properties"]["identity"]["properties"]["catalog_digest"])
         _qualification_ref(supervisor, adapter, profile_role)
-        if backend == "opencode":
-            require_native_dependencies(profile, adapter, capabilities)
+        require_native_dependencies(runtime_profile, adapter, capabilities)
     if role == "reviewer" and capabilities.get("reviewer_isolation_qualified") is not True:
         raise HarnessError("BLOCKED_NOT_QUALIFIED: effective reviewer catalog, shell, plugins and MCP isolation need live enforcement")
     if supervisor.remaining() <= 0:
@@ -354,8 +369,8 @@ def prepare(supervisor, selected, *, root, role, node_id, attempt_id, worktree=N
             saved = supervisor.store.read(prior["path"], "tool-execution.schema.json")
             if digest(saved) != prior["digest"] or saved["identity"] != identity:
                 raise HarnessError("EXACT_RESUME_DRIFT: backend/profile/catalog/config/worktree identity changed")
-            if backend == "opencode" and capabilities.get("exact_resume_qualified") is not True:
-                raise HarnessError("BLOCKED_NOT_QUALIFIED: OpenCode exact resume")
+            if callable(getattr(adapter, "qualify", None)) and capabilities.get("exact_resume_qualified") is not True:
+                raise HarnessError("BLOCKED_NOT_QUALIFIED: " + backend + " exact resume")
         # Snapshot includes dirty and untracked source bytes, unlike HEAD.
         from .work_contract import legacy_contract
         from .core import snapshot

@@ -52,13 +52,23 @@ def schema_for_record(record):
     needed, including receipts already published by the tooling writer.
     """
     payload = record.get("payload")
+    artifacts = payload.get("tool_artifacts") if isinstance(payload, dict) else None
+    if isinstance(artifacts, list) and any(row.get("kind") == "codex_catalog"
+            for row in artifacts if isinstance(row, dict)):
+        # New native Codex receipts have their own closed extension. Never
+        # broaden the previously persisted OpenCode artifact schemas.
+        version = record["schema_version"]
+        record_schema(version)
+        return "execution-receipt.codex-tooling.v" + str(version) + ".schema.json"
     return record_schema(record["schema_version"],
         tooling=isinstance(payload, dict) and "tool_artifacts" in payload)
 
 
-def _catalog_artifacts(supervisor, artifacts):
+def _catalog_artifacts(supervisor, artifacts, *, kind="opencode_catalog"):
     """Pin ordinary run-owned runtime catalogs; never accept a path-only claim."""
     from .file_io import read_regular_file
+    if kind not in {"opencode_catalog", "codex_catalog"}:
+        raise HarnessError("Unsupported native tool catalog backend")
     if not isinstance(artifacts, list) or not 1 <= len(artifacts) <= 64:
         raise HarnessError("Tool catalog artifacts require a bounded nonempty list")
     base = Path(supervisor.path)
@@ -85,7 +95,7 @@ def _catalog_artifacts(supervisor, artifacts):
         raw = read_regular_file(path, max_bytes=2 * 1024 * 1024)
         if hashlib.sha256(raw).hexdigest() != artifact["sha256"]:
             raise HarnessError("Tool catalog artifact digest mismatch")
-        result.append({"kind": "opencode_catalog", "path": relative, "sha256": artifact["sha256"]})
+        result.append({"kind": kind, "path": relative, "sha256": artifact["sha256"]})
     return result
 
 
@@ -97,11 +107,17 @@ def verify_tool_artifacts(supervisor, completion):
     if (not completion.get("capability_receipt_ref")
             or completion["capability_receipt_ref"] not in completion.get("input_refs", [])):
         raise HarnessError("Tool catalog artifacts lack invocation capability binding")
-    if (not isinstance(supplied, list) or any(not isinstance(row, dict)
-            or set(row) != {"kind", "path", "sha256"} or row["kind"] != "opencode_catalog"
+    if (not isinstance(supplied, list) or not supplied or any(not isinstance(row, dict)
+            or set(row) != {"kind", "path", "sha256"} or row["kind"] not in {"opencode_catalog", "codex_catalog"}
             for row in supplied)):
         raise HarnessError("Invalid completion tool catalog artifact fields")
-    rows = _catalog_artifacts(supervisor, [{"path": r["path"], "sha256": r["sha256"]} for r in supplied])
+    kinds = {row["kind"] for row in supplied}
+    if len(kinds) != 1:
+        raise HarnessError("Mixed native tool catalog backends")
+    kind = supplied[0]["kind"]
+    if kind == "codex_catalog" and not completion.get("client_version", "").startswith("codex:"):
+        raise HarnessError("Codex tool catalog backend differs from execution")
+    rows = _catalog_artifacts(supervisor, [{"path": r["path"], "sha256": r["sha256"]} for r in supplied], kind=kind)
     if not {row["sha256"] for row in rows} <= set(completion["input_refs"]):
         raise HarnessError("Completion lacks pinned tool catalog digests")
     return [{"path": str(Path(supervisor.path) / row["path"]), "sha256": row["sha256"]} for row in rows]
@@ -125,6 +141,9 @@ def validate_record(record, *, replay_schemas=None):
                 or record["capability_receipt_ref"] not in record["input_refs"]
                 or not {row["sha256"] for row in record["payload"]["tool_artifacts"]} <= set(record["input_refs"])):
             raise HarnessError("Tool catalog evidence lacks exact capability/digest binding")
+        if (any(row["kind"] == "codex_catalog" for row in record["payload"]["tool_artifacts"])
+                and not record["client_version"].startswith("codex:")):
+            raise HarnessError("Codex tool catalog backend differs from execution")
     if record["schema_version"] == 2 and record["record_type"] == "completion" and record["payload"]["dispatch_state"] == "not_dispatched_proven":
         value = record["payload"]
         if (value["outcome"] not in {"failed", "cancelled", "timed_out"} or value["turn_started"] is not False
@@ -295,7 +314,8 @@ class ExecutionReceipts:
         if result.get("catalog_artifacts") is not None:
             if not intent["capability_receipt_ref"]:
                 raise HarnessError("Unbound execution cannot publish tool catalog artifacts")
-            artifacts = _catalog_artifacts(self.supervisor, result["catalog_artifacts"])
+            kind = "codex_catalog" if intent["client_version"].startswith("codex:") else "opencode_catalog"
+            artifacts = _catalog_artifacts(self.supervisor, result["catalog_artifacts"], kind=kind)
             value["payload"]["tool_artifacts"] = artifacts
             value["input_refs"] = list(dict.fromkeys([*value["input_refs"], *(r["sha256"] for r in artifacts)]))
         for existing in self.records():

@@ -27,6 +27,10 @@ bound.unlink()
 
 
 class BoundFixtureCodexAdapter(CodexAdapter):
+    # This deterministic CLI is not a native app-server and cannot qualify
+    # the real client's tool permissions. Keep that boundary explicit.
+    with_managed_tools = None
+
     def __init__(self, executable=('codex',)):
         super().__init__(executable)
         self.bound_children = []

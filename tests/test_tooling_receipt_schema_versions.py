@@ -72,7 +72,7 @@ class ToolingReceiptSchemaVersionTests(unittest.TestCase):
         record = receipts.completion(intent, result)
         for version in (1, 2):
             value = dict(record, schema_version=version)
-            schema = "execution-receipt.tooling.v" + str(version) + ".schema.json"
+            schema = "execution-receipt.codex-tooling.v" + str(version) + ".schema.json"
             self.assertEqual(validate_record(value), schema)
             validate(value, schema)
             with self.assertRaises(ValueError):
@@ -87,6 +87,20 @@ class ToolingReceiptSchemaVersionTests(unittest.TestCase):
         self.assertEqual(receipts.records(repair=True)[-1], record)
         self.assertEqual(projection.read_bytes(), original)
         self.assertEqual(receipts.completion(intent, ExecutionReceipts.result(record)), record)
+
+    def test_codex_extension_keeps_historical_opencode_artifacts_readable(self):
+        _, receipts, intent, result, _ = self.subject()
+        record = receipts.completion(intent, result)
+        self.assertEqual(record["payload"]["tool_artifacts"][0]["kind"], "codex_catalog")
+        legacy = deepcopy(record)
+        for version in (1, 2):
+            legacy["schema_version"] = version
+            legacy["payload"]["tool_artifacts"][0]["kind"] = "opencode_catalog"
+            self.assertEqual(validate_record(legacy), record_schema(version, tooling=True))
+        wrong = deepcopy(record)
+        wrong["client_version"] = "opencode:fixture"
+        with self.assertRaisesRegex(HarnessError, "backend"):
+            validate_record(wrong)
 
     def test_unbound_bad_hash_and_unpinned_artifact_variants_are_rejected(self):
         supervisor, receipts, intent, result, _ = self.subject()
