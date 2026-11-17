@@ -148,8 +148,9 @@ Codex 0.167.0 не квалифицирует paid workload. OpenCode-native sub
 конкретный сценарий, а не любую модель или новый проект. `documents` остаётся
 шаблоном профиля; Docling исключён по выбору оператора и не установлен.
 
-В OpenCode runtime proof входят `before_dispatch`, `after_response`, native
-finish, exit 0 и остановка дерева процессов. SSE audit допустим после actual
+В OpenCode runtime proof обязательны `before_dispatch`, native finish, exit 0
+и остановка дерева процессов. При подключённых MCP также обязателен
+`after_response`. SSE audit допустим после actual
 EOF либо подтверждённого consumer cancel; read error, failed cancel и disconnect
 не дают успешного audit receipt. Неполный JSONL / native finish остаётся UNKNOWN.
 Source/index drift инвалидирует evidence; зелёный MCP call не означает ACCEPTED.
