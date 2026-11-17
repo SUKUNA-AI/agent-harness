@@ -195,7 +195,14 @@ def verify_graph_index(receipt, expected_snapshot, *, required=True):
             reasons.append("index_bytes_drift")
         if file_hash(receipt["executable"]) != receipt["binary_sha256"]:
             reasons.append("builder_binary_drift")
-    except (OSError, KeyError, HarnessError):
+        toolchain = receipt.get("provider_toolchain")
+        if toolchain is not None:
+            from .local_tool_integrations import installed_tool_digest
+            path = Path(toolchain["executable"])
+            if (not path.is_absolute() or ".." in path.parts or str(path.resolve(strict=True)) != str(path)
+                    or installed_tool_digest(str(path)) != toolchain["implementation_digest"]):
+                reasons.append("provider_implementation_drift")
+    except (OSError, ValueError, KeyError, HarnessError):
         reasons.append("artifact_unavailable")
     if reasons and required:
         raise HarnessError("STALE_GRAPH_INDEX: " + ",".join(reasons))

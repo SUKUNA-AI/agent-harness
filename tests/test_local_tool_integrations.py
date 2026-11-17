@@ -50,7 +50,7 @@ class LocalToolIntegrationTests(unittest.TestCase):
         value["agent_interface"] = "REPL";config.write_text(json.dumps(value))
         with self.assertRaisesRegex(HarnessError, "policy changed"):
             prepare_serena(self.source, self.root / "cache-a", executable=exe)
-        self.assertTrue(Path(serena_stdio_argv(self.source, self.root / "other")[1]).is_absolute())
+        self.assertTrue(Path(serena_stdio_argv(self.source, self.root / "other", executable=exe)[1]).is_absolute())
 
     def test_serena_blocks_source_cache_unknown_cli_and_unbounded_timeout(self):
         for timeout in (True, 0, float('nan'), 301):
@@ -69,6 +69,9 @@ assert 'OPENAI_API_KEY' not in os.environ
 out=pathlib.Path(sys.argv[sys.argv.index('--out')+1])/'graphify-out';out.mkdir(parents=True)
 (out/'extraction.json').write_text(json.dumps({'nodes':[{'id':'symbol.py:shared_symbol'}],'edges':[]}))
 """)
+        implementation = self.root / "lib/python3.13/site-packages/graphify/extract.py"
+        implementation.parent.mkdir(parents=True)
+        implementation.write_text("MODE = 'initial'\n")
         frozen = source_snapshot(self.source)
         with patch.dict(os.environ, {"OPENAI_API_KEY": "fixture-only-not-a-real-key"}):
             receipt = build_local_graph_index(self.source, self.root / "indexes", executable=exe)
@@ -77,6 +80,11 @@ out=pathlib.Path(sys.argv[sys.argv.index('--out')+1])/'graphify-out';out.mkdir(p
         payload = json.loads(Path(receipt["index_path"]).read_text())
         self.assertEqual(payload["mode"], "local-code-only")
         self.assertEqual(payload["graph"]["nodes"][0]["id"], "symbol.py:shared_symbol")
+        implementation.write_text("MODE = 'changed'\n")
+        with self.assertRaises(HarnessError):verify_graph_index(receipt, frozen)
+        self.assertEqual(verify_graph_index(receipt, frozen, required=False)["status"], "HISTORICAL_ONLY")
+        implementation.write_text("MODE = 'initial'\n")
+        verify_graph_index(receipt, frozen)
         (self.source / "symbol.py").write_text("def changed(): return 2\n")
         with self.assertRaises(HarnessError):verify_graph_index(receipt, source_snapshot(self.source))
 
@@ -96,9 +104,28 @@ out=pathlib.Path(sys.argv[sys.argv.index('--out')+1])/'graphify-out';out.mkdir(p
                     with self.assertRaisesRegex(HarnessError,"SERENA_PROJECT_POLICY_FORBIDDEN"):
                         prepare_serena(self.source,self.root/"cache",executable=exe)
                     (project/filename).unlink()
+        config = Path(invocation["environment"]["SERENA_HOME"]) / "serena_config.yml"
+        original = json.loads(config.read_text())
+        for change in ({"projects": [str(self.root / "foreign.yml")]}, {"language_backend": "JetBrains"},
+                       {"ls_specific_settings": {"python": {"ls_base_cmd": ["sh"]}}}):
+            config.write_text(json.dumps({**original, **change}))
+            with self.assertRaisesRegex(HarnessError,"policy changed"):
+                prepare_serena(self.source,self.root/"cache",executable=exe)
+        config.write_text(json.dumps(original))
         other = self.root / "other-source";other.mkdir()
         with self.assertRaisesRegex(HarnessError,"WORKTREE_DRIFT"):
             prepare_serena(other,self.root/"cache",executable=exe)
+
+    def test_graphify_failure_keeps_only_bounded_exit_and_output_hashes(self):
+        exe = self.executable("import sys\nif '--version' in sys.argv: print('graphify 0.9.111');raise SystemExit\nprint('fixture public output');print('fixture diagnostics',file=sys.stderr);raise SystemExit(23)\n")
+        with self.assertRaises(HarnessError):
+            build_local_graph_index(self.source,self.root/"indexes",executable=exe)
+        files = list((self.root/"indexes/failures").glob("*.json"))
+        self.assertEqual(len(files),1)
+        value = json.loads(files[0].read_text())
+        self.assertEqual(value["exit_code"],23)
+        self.assertEqual(len(value["stderr_sha256"]),64)
+        self.assertNotIn("fixture diagnostics",files[0].read_text())
 
     def test_stdio_cleanup_cannot_be_skipped_by_broken_pipe_close(self):
         spec = {"transport":"stdio","command":[sys.executable,"-c","import time;time.sleep(60)"],

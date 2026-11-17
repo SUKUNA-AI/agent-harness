@@ -104,6 +104,29 @@
     "identity": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
+    },
+    "provider_toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "isolated-python-code-v1"
+        },
+        "executable": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        },
+        "implementation_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "kind",
+        "executable",
+        "implementation_digest"
+      ]
     }
   },
   "required": [
