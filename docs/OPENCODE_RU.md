@@ -97,8 +97,9 @@ cached catalog. Необязательный недоступный server мо�
 
 ## Завершение SSE и проверка MCP после ответа
 
-Изменение исходников после опубликованного 1.7.0: guard проверяет живые MCP
-connections и пишет `after_response` при сетевом EOF либо после успешной
+Изменение исходников после опубликованного 1.7.0: для OpenCode с подключёнными
+MCP guard проверяет живые connections и пишет `after_response` при сетевом EOF
+либо после успешной
 отмены чтения response body клиентом. Native provider SDK может получить
 terminal SSE и отменить оставшееся чтение до EOF; прежний `TransformStream.flush`
 не вызывался на этом пути. Поэтому настоящий model/tool turn мог завершиться,
@@ -106,7 +107,9 @@ terminal SSE и отменить оставшееся чтение до EOF; п�
 
 Проверка выполняется один раз и ожидается до завершения response path.
 Ошибка stream, отклонённый upstream cancel, потеря MCP или source drift не дают
-успешного post-response receipt. Сам `after_response` также не доказывает
+успешного post-response receipt. `before_dispatch` требуется всегда;
+`after_response` — дополнительно при подключённых MCP. Без подключённых MCP
+post-response receipt не требуется. Сам `after_response` также не доказывает
 завершение: normalizer отдельно требует native stop/finish и clean JSONL EOF,
 а contained runner — завершение process tree. Требование completion не ослаблено.
 

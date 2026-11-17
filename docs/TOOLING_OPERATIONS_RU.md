@@ -28,7 +28,7 @@ flowchart TD
     oc["OpenCode V2 native renderer<br/>harness-leaf · permissions · deny policies<br/>Code Mode off · pool off<br/>Fresh native permission / catalog / exact-session probes"]
     cxdeny["Strict Codex — EXPERIMENTAL transport<br/>Тот же owned app-server thread: census → turn → census<br/>0.167.0: проверен scripted provider; paid workload UNQUALIFIED<br/>Fresh runtime qualification перед каждым новым run<br/>Без доказательства → BLOCKED_NOT_QUALIFIED"]
     ocguard["Реальный OpenCode invocation + private guard<br/>Role / wire catalog audit → before_dispatch<br/>after_response: actual EOF или confirmed consumer cancel<br/>Read error / failed cancel / disconnect не дают receipt<br/>Native clean stop и полный JSONL обязательны отдельно"]
-    pin["Durable completion receipt — совместное доказательство<br/>Exact session · client/profile/config/source digests · usage · pinned JSONL/catalog<br/>Native finish + exit 0 + process tree stopped; неполный JSONL / finish → UNKNOWN<br/>Для OpenCode обязательны оба runtime audit stages: before_dispatch + after_response"]
+    pin["Durable completion receipt — совместное доказательство<br/>Exact session · client/profile/config/source digests · usage · pinned JSONL/catalog<br/>Native finish + exit 0 + process tree stopped; неполный JSONL / finish → UNKNOWN<br/>OpenCode: before_dispatch всегда; при подключённых MCP: before_dispatch + after_response"]
     gate["Freeze → independent checks / requirements → fresh independent review → final gate<br/>Тот же candidate и актуальные source/tool/index provenance<br/>Только gate подтверждает результат задачи; успешный MCP call не означает ACCEPTED"]
     bounds["Общая граница<br/>MCP server работает на пользовательском host; OpenRouter — provider модели native OpenCode.<br/>Baseline не требует новых MCP. Нет auto-install tools, новой БД, обязательного daemon или нового model API.<br/>Наблюдённый Hydrogen + Serena + Context7 smoke не является общей квалификацией всех моделей и проектов."]
     profiles --> policy
@@ -57,11 +57,17 @@ provenance. После исполнения исходный acceptance pipeline
 | `tool_profiles.py` | Закрытая policy, digest, renderer | Корректная конфигурация не доказывает её enforcement |
 | `tooling_probe.py` | Contained MCP process, initialize/tools/list/ping | Probe завершается; его каталог не является будущим каталогом модели |
 | `execution.py` | Backend/profile/role/worktree binding, capability checks | Required dependency или capability блокирует dispatch при отказе |
-| `opencode_qualification.py` | Native catalog, permissions, private guard, session proof | Каждый реальный invocation требует runtime evidence |
+| `opencode_qualification.py` | Native catalog, permissions, private guard, session proof | `before_dispatch` обязателен всегда; `after_response` дополнительно при подключённых MCP |
 | `codex_tool_catalog.py` | Disposable app-server thread и native MCP filtering | Диагностика не квалифицирует отдельный `codex exec` |
 | `execution_receipts.py` | Intent/completion/check/review records и artifact hashes | Intent не доказывает dispatch; completion не доказывает принятую задачу |
 | `supervisor.py`, `managed_execution.py` | DAG, quotas, worktrees, integration и repair | Зелёный tool call не отменяет failed independent check |
 | `runner.py`, `verified_flow.py` | Freeze, проверки candidate, requirements, final gate | Изменение inputs после проверки делает evidence устаревшими |
+
+Для OpenCode с подключёнными MCP completion proof требует matching
+`before_dispatch` и `after_response` для runtime context. При отсутствии
+подключённых MCP требуется `before_dispatch`; отсутствие `after_response`
+само по себе не означает ошибку. Native finish, полный JSONL и cleanup
+остаются обязательными независимо от наличия MCP.
 
 Файлы таблицы находятся в [src/agent_harness](../src/agent_harness).
 Архитектура использует существующие private files и journal. Общий MCP proxy,

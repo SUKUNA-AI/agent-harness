@@ -25,8 +25,10 @@ EOF. Старый `TransformStream.flush` тогда не запускал об�
 post-response MCP audit: реальные model/tool calls могли состояться, но
 completion оставался `UNKNOWN_OUTCOME` из-за отсутствующего `after_response`.
 
-Новый guard ожидает успешную upstream cancellation либо clean EOF, проверяет
-source и live MCP connections и пишет audit один раз. Stream error, failed
+Для OpenCode с подключёнными MCP новый guard ожидает успешную upstream
+cancellation либо clean EOF, проверяет source и live MCP connections и пишет
+`after_response` один раз. `before_dispatch` требуется всегда; без подключённых
+MCP дополнительный post-response audit не требуется. Stream error, failed
 cancel или disconnect не дают успешного receipt. Native step stop/finish,
 clean normalized JSONL EOF и process cleanup проверяются отдельно: audit
 не превращает незавершённый turn в completed. Реализация и точная граница —
