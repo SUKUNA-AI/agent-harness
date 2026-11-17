@@ -606,6 +606,30 @@ def qualify_browser(policy, *, root, private_root, timeout=30):
     return receipt
 
 
+def _tool_call_params(params):
+    """Accept only bounded native request metadata, with no tool authority.
+
+    MCP progress tokens and OpenCode's session correlation identifier are
+    transport metadata. Neither is forwarded to the browser or used as a path,
+    session selector, permission, invocation argument or persisted value.
+    """
+    if not isinstance(params, dict) or set(params) - {"name", "arguments", "_meta"}:
+        raise HarnessError("Invalid browser tool request")
+    meta = params.get("_meta", {})
+    if not isinstance(meta, dict) or set(meta) - {"progressToken", "ai.opencode/sessionID"}:
+        raise HarnessError("Unsupported browser request metadata")
+    if "progressToken" in meta:
+        token = meta["progressToken"]
+        if not ((type(token) is str and len(token) <= 256)
+                or type(token) is int or type(token) is float and math.isfinite(token)):
+            raise HarnessError("Invalid browser progress token")
+    if "ai.opencode/sessionID" in meta:
+        session = meta["ai.opencode/sessionID"]
+        if type(session) is not str or not 0 < len(session) <= 128 or any(ord(char) < 32 for char in session):
+            raise HarnessError("Invalid native browser request correlation")
+    return {"name": params.get("name"), "arguments": params.get("arguments", {})}
+
+
 def main():
     """Closed stdio MCP facade. Unsupported methods/tools never reach upstream."""
     policy, root, private = json.loads(base64.b64decode(sys.argv[1], altchars=b"-_", validate=True)), Path(sys.argv[2]), Path(sys.argv[3])
@@ -637,9 +661,7 @@ def main():
                 elif method == "tools/list":
                     result = {"tools": browser.catalog}
                 elif method == "tools/call":
-                    params = message.get("params", {})
-                    if not isinstance(params, dict) or set(params) - {"name", "arguments"}:
-                        raise HarnessError("Invalid browser tool request")
+                    params = _tool_call_params(message.get("params", {}))
                     try:
                         result = browser.call(params.get("name"), params.get("arguments", {}))
                     except (HarnessError, ValueError, TypeError) as error:

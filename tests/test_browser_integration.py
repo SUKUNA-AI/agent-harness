@@ -18,11 +18,11 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from agent_harness.browser_integration import (TOOLS, _PrivateProbe, browser_server,
+from agent_harness.browser_integration import (TOOLS, _PrivateProbe, _tool_call_params, browser_server,
     qualify_browser, run_managed_browser_job, validate_browser_policy)
 from agent_harness.core import HarnessError, identity_alive
 from agent_harness.optional_tool_jobs import BrowserJob
-from agent_harness.tooling_probe import StdioProbe
+from agent_harness.tooling_probe import ProbeFailure, StdioProbe
 
 LIVE_PREFIX = os.environ.get("HARNESS_PLAYWRIGHT_ENV")
 
@@ -79,6 +79,19 @@ class BrowserPolicyTests(unittest.TestCase):
                 if sys.platform.startswith("linux"):
                     child = Path(f"/proc/{connection.process.pid}/environ").read_bytes()
                     self.assertNotIn(b"BROWSER_FIXTURE_SECRET", child)
+
+    def test_native_metadata_is_bounded_correlation_and_never_tool_arguments(self):
+        params = {"name": "browser_snapshot", "arguments": {}}
+        for token in (0, 1.5, "native-progress"):
+            self.assertEqual(_tool_call_params({**params, "_meta": {
+                "progressToken": token, "ai.opencode/sessionID": "ses_fixture_native"}}), params)
+        for invalid in ({"_meta": None}, {"_meta": {"unknown": "value"}},
+                {"_meta": {"progressToken": True}}, {"_meta": {"progressToken": float("inf")}},
+                {"_meta": {"progressToken": float("nan")}}, {"_meta": {"progressToken": "x" * 257}},
+                {"_meta": {"ai.opencode/sessionID": "x" * 129}}, {"_meta": {"ai.opencode/sessionID": 1}},
+                {"_meta": {"ai.opencode/sessionID": "bad\ncorrelation"}}, {"task": {"ttl": 10}}):
+            with self.subTest(invalid=invalid), self.assertRaises(HarnessError):
+                _tool_call_params({**params, **invalid})
 
 
 class _Site(http.server.BaseHTTPRequestHandler):
@@ -151,6 +164,31 @@ class LiveManagedBrowserTests(unittest.TestCase):
 
     def _call(self, connection, name, arguments=None):
         return connection.request("tools/call", {"name": name, "arguments": arguments or {}}, timeout=30)
+
+    def test_real_stdio_accepts_native_metadata_and_keeps_unsupported_fields_closed(self):
+        (self.source / "app.html").write_text("<h1>metadata-native-ready</h1>")
+        with self._connection() as connection:
+            connection.inventory()
+            for index, (name, arguments) in enumerate((("browser_navigate", {"url": self.allowed + "/app"}),
+                    ("browser_snapshot", {}))):
+                result = connection.request("tools/call", {"name": name, "arguments": arguments,
+                    "_meta": {"progressToken": index, "ai.opencode/sessionID": "ses_fixture_native"}}, timeout=30)
+                self.assertFalse(result.get("isError"), result)
+                self.assertIn("metadata-native-ready", json.dumps(result))
+            for params in ({"name": "browser_snapshot", "arguments": {}, "_meta": {"unsupported": True}},
+                    {"name": "browser_snapshot", "arguments": {}, "task": {"ttl": 10}},
+                    {"name": "browser_snapshot", "arguments": {}, "_meta": {"progressToken": []}},
+                    {"name": "browser_snapshot", "arguments": {}, "_meta": {"ai.opencode/sessionID": {"role": "root"}}}):
+                with self.subTest(params=params), self.assertRaises(ProbeFailure):
+                    connection.request("tools/call", params)
+            denied = connection.request("tools/call", {"name": "browser_snapshot", "arguments": {"filename": "../../escape"},
+                "_meta": {"progressToken": "progress", "ai.opencode/sessionID": "ses_fixture_native"}})
+            self.assertTrue(denied.get("isError"))
+            closed = connection.request("tools/call", {"name": "browser_close", "arguments": {},
+                "_meta": {"progressToken": 2.5, "ai.opencode/sessionID": "ses_fixture_native"}})
+            self.assertFalse(closed.get("isError"), closed)
+        self.assertTrue(connection.stopped)
+        self.assertFalse(identity_alive(connection.identity))
 
     def test_real_qualification_launches_and_closes_browser_no_self_report_override(self):
         result = qualify_browser(self.policy, root=self.source, private_root=self.private)
