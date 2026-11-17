@@ -1,7 +1,9 @@
 """Bounded native HTTP diagnostics disclose routes and timing, never contents."""
 import io
 import json
+import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -12,7 +14,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 from agent_harness.opencode_execution import OpenCodeAdapter
-from agent_harness.opencode_qualification import NativeServer, qualify
+from agent_harness.opencode_qualification import GUARD_SOURCE, NativeServer, _allowed_tools, qualify
 from agent_harness.tool_profiles import render_opencode
 
 
@@ -52,6 +54,38 @@ class NativeHttpDiagnosticsTests(unittest.TestCase):
         self.assertEqual(view['requests'][0]['route'], '/api/session/{session}/permission')
         self.assertNotIn('fixture-secret-error-text', json.dumps(view))
         self.assertNotIn('private-session', json.dumps(view))
+
+    def test_mcp_role_validation_preserves_native_hyphenated_server_and_tool_names(self):
+        config = render_opencode('baseline', self.root)
+        config['mcp']['servers']['public-docs'] = {'codemode': False, 'pool': False}
+        config['agents']['harness-leaf']['permissions'].append(
+            {'action': 'public-docs_query-docs', 'resource': '*', 'effect': 'allow'})
+        _, allowed = _allowed_tools(config, 'worker')
+        self.assertIn('public-docs_query-docs', allowed)
+        self.assertNotIn('public_docs_query_docs', allowed)
+
+    @unittest.skipUnless(shutil.which('node'), 'Guard hook behavior needs a Node runtime; not native OpenCode qualification')
+    def test_prompt_guard_records_actual_hyphenated_names_before_readiness_wait(self):
+        script_path = Path(self.tmp.name)/'guard.mjs';script_path.write_text(GUARD_SOURCE)
+        output = Path(self.tmp.name)/'readiness.jsonl'
+        spec_path = Path(self.tmp.name)/'spec.json'
+        spec_path.write_text(json.dumps({'root': str(self.root), 'allowed_tools': ['public-docs_query-docs'],
+            'agent': 'harness-leaf', 'role': 'worker', 'phase': 'qualification', 'expected_tools': ['public-docs_query-docs'],
+            'connected_servers': ['public-docs'], 'readiness_timeout_ms': 100, 'readiness_path': str(output)}))
+        script = ('const plugin=await import('+json.dumps(script_path.as_uri())+');const hooks={};'
+            'await plugin.default.setup({location:{directory:'+json.dumps(str(self.root))+'},'
+            'session:{hook:async(name,callback)=>{hooks[name]=callback}},'
+            'tool:{hook:async()=>{},list:async()=>[{id:"public-docs_query-docs"}]},'
+            'permission:{hook:async()=>{}},mcp:{list:async()=>({data:[{name:"public-docs",status:{status:"connected"}}]})}});'
+            'await hooks.prompt();')
+        result = subprocess.run([shutil.which('node'), '--input-type=module', '-e', script], cwd=self.root,
+            env={'PATH': os.environ.get('PATH', ''), 'PWD': str(self.root), 'HARNESS_OPENCODE_GUARD_SPEC': str(spec_path)},
+            capture_output=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
+        value = json.loads(output.read_text())
+        self.assertEqual(value['observed_tools'], ['public-docs_query-docs'])
+        self.assertEqual(value['expected_tools'], value['observed_tools'])
+        self.assertEqual(set(value), {'schema_version', 'stage', 'observed_tools', 'expected_tools', 'connected_servers'})
 
     def test_qualification_failure_persists_exact_stage_and_safe_server_summary(self):
         class FailureServer:

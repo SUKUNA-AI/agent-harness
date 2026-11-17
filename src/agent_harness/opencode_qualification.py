@@ -103,11 +103,19 @@ export default {id:"agent-harness.execution-guard",async setup(ctx) {
     const readiness=spec.phase==="qualification"?JSON.parse(fs.readFileSync(specPath,"utf8")):spec;
     const expected=readiness.expected_tools??[];
     const deadline=Date.now()+spec.readiness_timeout_ms;
+    let recorded=false;
     while(expected.length || (readiness.connected_servers??[]).length) {
       const tools=await ctx.tool.list();
       const names=new Set(tools.map(tool=>tool.id));
       const servers=await ctx.mcp.list();
       const ready=new Set((servers.data??servers).filter(s=>s.status?.status==="connected").map(s=>s.name));
+      // Names only: never log tool descriptions, schemas, prompts or auth.
+      if(readiness.readiness_path && (!recorded || Date.now()>=deadline)) {
+        const safe=values=>Array.from(values).filter(value=>typeof value==="string" && /^[A-Za-z0-9_-]{1,128}$/.test(value)).sort().slice(0,512);
+        write(readiness.readiness_path,{schema_version:1,stage:"catalog_readiness",expected_tools:safe(expected),
+          observed_tools:safe(names),connected_servers:safe(ready)});
+        recorded=true;
+      }
       if(expected.every(name=>names.has(name)) && (readiness.connected_servers??[]).every(name=>ready.has(name)))return;
       if(Date.now()>=deadline)throw new Error("HARNESS_GUARD_LIVE_CATALOG_NOT_READY");
       await new Promise(resolve=>setTimeout(resolve,25));
@@ -593,7 +601,7 @@ def _allowed_tools(config, role):
         raise HarnessError("Qualified OpenCode leaves require default-deny tool permissions")
     allowed = set()
     servers = config.get("mcp", {}).get("servers", {})
-    prefixes = tuple(re.sub(r"[^A-Za-z0-9_]", "_", name) + "_" for name in servers)
+    prefixes = tuple(re.sub(r"[^A-Za-z0-9_-]", "_", name) + "_" for name in servers)
     for rule in rules:
         if not isinstance(rule, dict) or set(rule) != {"action", "resource", "effect"}:
             raise HarnessError("Unqualified OpenCode permission shape")
@@ -722,6 +730,7 @@ def qualify(adapter, *, root, role, evidence_dir, session_id=None, timeout=60):
     spec_path, probe_path = folder / "guard-spec.json", folder / "probe.jsonl"
     spec = {"schema_version": 1, "proof_id": secrets.token_hex(24), "root": str(root), "role": role,
         "agent": agent, "allowed_tools": allowed, "runtime_dir": str(runtime_dir),
+        "readiness_path": str(folder / "catalog-readiness.jsonl"),
         "read_context": read_context,
         "phase": "qualification", "probe_path": str(probe_path), "marker": secrets.token_hex(24),
         "readiness_timeout_ms": min(30000, int(timeout * 1000)),
@@ -785,7 +794,7 @@ def qualify(adapter, *, root, role, evidence_dir, session_id=None, timeout=60):
                         break
                     time.sleep(min(.05, _remaining(deadline)))
             connected = [item["name"] for item in mcp_status if item["status"] == "connected"]
-            prefixes = tuple(re.sub(r"[^A-Za-z0-9_]", "_", name) + "_" for name in connected)
+            prefixes = tuple(re.sub(r"[^A-Za-z0-9_-]", "_", name) + "_" for name in connected)
             spec.update(expected_tools=[name for name in allowed
                 if name in {"read", "glob", "grep", "edit", "skill"} or name.startswith(prefixes)],
                 connected_servers=connected)
@@ -800,7 +809,7 @@ def qualify(adapter, *, root, role, evidence_dir, session_id=None, timeout=60):
             if role != "worker":
                 checks.update(DENIED_REVIEWER)
                 for name in declared_servers:
-                    prefix = re.sub(r"[^A-Za-z0-9_]", "_", name)
+                    prefix = re.sub(r"[^A-Za-z0-9_-]", "_", name)
                     checks.update((prefix + "_write_file", prefix + "_execute_command"))
             stage = "permission_checks"
             for action in sorted(checks):
