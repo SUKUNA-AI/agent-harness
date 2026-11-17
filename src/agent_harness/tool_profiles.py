@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 
 from .core import HarnessError, digest, file_hash
 from .file_io import read_regular_file
@@ -214,7 +215,9 @@ def resolved_servers(profile, root, *, cache_root=None):
                 raise HarnessError("Managed local tool requires a worktree-bound stdio process")
             command = server["command"]
             helper = str(Path(local.__file__).resolve())
-            prepared = len(command) > 2 and command[1] == helper
+            if len(command) > 1 and command[1] == helper:
+                raise HarnessError("Managed tool requires an isolated Python -I launcher")
+            prepared = len(command) > 3 and command[1:3] == ["-I", helper]
             if server["id"] == "serena":
                 if prepared:
                     if "--executable" not in command or command[-1] == "--executable":
@@ -236,6 +239,8 @@ def resolved_servers(profile, root, *, cache_root=None):
                 else:
                     raise HarnessError("Context7 requires the managed public-read launcher")
                 expected = local.context7_stdio_argv(root, Path(cache) / "context7", executable=executable)
+            if expected[:3] != [sys.executable, "-I", helper]:
+                raise HarnessError("Managed tool requires an isolated Python -I launcher")
             if prepared and command != expected:
                 raise HarnessError("Managed tool launcher binding drifted")
             server["command"] = expected

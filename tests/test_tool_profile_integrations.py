@@ -3,6 +3,7 @@ from contextlib import redirect_stdout
 from copy import deepcopy
 import io
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -105,7 +106,7 @@ class ToolProfileIntegrationTests(unittest.TestCase):
     def test_serena_launch_is_lazy_worktree_bound_and_repeatable(self):
         from agent_harness import local_tool_integrations as local
         def launcher(root, cache, executable="serena"):
-            return [sys.executable, str(Path(local.__file__).resolve()), "serena-stdio", "--executable", "/fixture/serena",
+            return [sys.executable, "-I", str(Path(local.__file__).resolve()), "serena-stdio", "--executable", "/fixture/serena",
                 "--project", str(root), "--cache-root", str(cache)]
         with patch.object(local, "serena_stdio_argv", side_effect=launcher) as selected:
             profile = execution_profile("coding", self.source, cache_root=self.private)
@@ -115,7 +116,7 @@ class ToolProfileIntegrationTests(unittest.TestCase):
             self.assertNotIn("help_argv", first)
             self.assertTrue(selected.called)
         malformed = builtin_profiles()["coding"]
-        malformed["servers"][0]["command"] = [sys.executable, str(Path(local.__file__).resolve()), "serena-stdio", "--executable"]
+        malformed["servers"][0]["command"] = [sys.executable, "-I", str(Path(local.__file__).resolve()), "serena-stdio", "--executable"]
         with self.assertRaisesRegex(HarnessError, "executable binding"):
             resolved_servers(malformed, self.source, cache_root=self.private)
 
@@ -124,12 +125,40 @@ class ToolProfileIntegrationTests(unittest.TestCase):
         for name in ("coding", "architecture"):
             self.assertNotIn("context7", [server["id"] for server in builtins[name]["servers"]])
             self.assertIn("context7", [server["id"] for server in builtins[name + "-context7"]["servers"]])
-        with patch("agent_harness.local_tool_integrations.context7_stdio_argv", return_value=[sys.executable, "private-context7"]):
+        from agent_harness import local_tool_integrations as local
+        expected = [sys.executable, "-I", str(Path(local.__file__).resolve()), "private-context7"]
+        with patch("agent_harness.local_tool_integrations.context7_stdio_argv", return_value=expected):
             profile = deepcopy(builtins["coding-context7"])
             profile["servers"] = [server for server in profile["servers"] if server["id"] == "context7"]
             server = resolved_servers(profile, self.source, cache_root=self.private)[0]
-        self.assertEqual(server["command"], [sys.executable, "private-context7"])
+        self.assertEqual(server["command"], expected)
         self.assertFalse(server["required"])
+
+    def test_managed_local_launchers_reject_ambient_python_variants_before_selection(self):
+        from agent_harness import local_tool_integrations as local
+        helper = str(Path(local.__file__).resolve())
+        marker = self.private / "ambient-loader-ran"
+        (self.private / "sitecustomize.py").write_text("from pathlib import Path;Path(" + repr(str(marker)) + ").touch()")
+        for name in ("serena", "context7"):
+            source = deepcopy(builtin_profiles()["coding-context7"])
+            source["servers"] = [server for server in source["servers"] if server["id"] == name]
+            def launcher(root, cache, *, executable=name):
+                return [sys.executable, "-I", helper, name + "-stdio", "--executable", executable,
+                    "--project", str(root), "--cache-root", str(cache)]
+            with self.subTest(server=name), patch.object(local, name + "_stdio_argv", side_effect=launcher) as selected, \
+                    patch.dict(os.environ, {"PYTHONPATH": str(self.private), "PYTHONSTARTUP": str(self.private / "sitecustomize.py")}):
+                runtime = execution_profile(source, self.source, cache_root=self.private)
+                self.assertEqual(resolved_servers(runtime, self.source, cache_root=self.private)[0]["command"][1:3], ["-I", helper])
+                count = selected.call_count
+                old = deepcopy(runtime)
+                old["servers"][0]["command"].pop(1)
+                with self.assertRaisesRegex(HarnessError, "isolated Python -I"):
+                    resolved_servers(old, self.source, cache_root=self.private)
+                self.assertEqual(selected.call_count, count)
+                self.assertFalse(marker.exists())
+            with patch.object(local, name + "_stdio_argv", return_value=[sys.executable, helper, name + "-stdio"]):
+                with self.assertRaisesRegex(HarnessError, "isolated Python -I"):
+                    resolved_servers(source, self.source, cache_root=self.private)
 
     def test_browser_job_cli_passes_closed_dataclass_to_managed_node_driver(self):
         profile = self.private / "browser.yaml"
