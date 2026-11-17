@@ -201,9 +201,23 @@ export default {id:"agent-harness.execution-guard",async setup(ctx) {
       if(runtime)write(runtime,{...previous,stage:"after_response"});
     };
     if(!event.response.body){await finish();return;}
-    const body=event.response.body.pipeThrough(new TransformStream({
-      transform(chunk,controller){controller.enqueue(chunk)},flush:finish
-    }));
+    // Native providers may stop after terminal SSE and cancel the body before
+    // network EOF. TransformStream.flush does not run on that normal path.
+    // Audit the same live connection after EOF or confirmed consumer cancel;
+    // a stream error still has no receipt. Native stop/exit checks remain
+    // independently required before any completed execution can be accepted.
+    const reader=event.response.body.getReader();let completion,cancelling=false;
+    const finishOnce=()=>completion??=(async()=>{await finish()})();
+    const body=new ReadableStream({
+      async pull(controller){
+        try {
+          const item=await reader.read();
+          if(item.done){if(cancelling)return;await finishOnce();controller.close()}
+          else controller.enqueue(item.value);
+        } catch(error){controller.error(error)}
+      },
+      async cancel(reason){cancelling=true;await reader.cancel(reason);await finishOnce()}
+    });
     event.response=new Response(body,{status:event.response.status,statusText:event.response.statusText,headers:event.response.headers});
   });
 }};
