@@ -86,8 +86,11 @@ contract v2 plan-quality или frozen receipt schemas v1/v2.
 | SessionStart, checkpoint и native observations | `native_session.py`, `native_observability.py` |
 | Exact sessions и owned processes/worktrees | `codex_execution.py`, `agent_lifecycle.py` |
 | Optional native backend и роль/профиль | `execution.py`, `opencode_execution.py`, `tool_profiles.py` |
+| Strict Codex owned stdio execution | `codex_app_server.py`, `codex_qualification.py`, `codex_policy_probe.py`; legacy `codex_execution.py` сохраняется |
 | Dependency и native catalog qualification | `tooling_probe.py`, `codex_tool_catalog.py`, `opencode_qualification.py` |
 | Frozen graph, scoped migration и tooling formats | `tooling_provenance.py`, `tooling_state.py`, `execution_receipts.py` |
+| Native optional launchers и local Graphify builder | `local_tool_integrations.py` |
+| Finite managed browser MCP и independent regression | `browser_integration.py`, `optional_tool_jobs.py` |
 | Strict YAML, journal и replay | `strict_yaml.py`, `supervisor_store.py` |
 | Provenance, память и reducer | `execution_ledger.py`, `memory.py`, `context_reducer.py` |
 | Optional conservative reuse | `input_closure.py`, `check_cache.py`, `python_runtime.py` |
@@ -99,6 +102,21 @@ contract v2 plan-quality или frozen receipt schemas v1/v2.
 | Установка и наблюдение настроек | `installation.py`, `diagnostics.py`, `file_io.py` |
 
 Пути без префикса в таблице относятся к `src/agent_harness/`.
+
+Logical profile и resolved execution profile хранятся раздельно: первый задаёт
+исходную policy identity, второй раскрывает canonical worktree/cache bindings
+и dynamic browser dependency. Это позволяет сохранить original digest и
+одновременно проверить конкретную native конфигурацию. Lazy resolution не
+скачивает зависимости и не включает Context7 в coding/architecture без явного
+выбора `*-context7` варианта.
+
+Serena/Context7 launcher запускает исходный server с private HOME/XDG и
+implementation hash. Graphify builder читает frozen copy и связывает real AST
+artifact с source/toolchain. Browser facade ограничивает official MCP finite
+actions и exact numeric loopback HTTP origins; arbitrary code/upload tools
+не предоставляет. Browser artifacts плюс independent regression подтверждают
+конкретный job. Client qualification и source-bound final gate остаются
+следующими отдельными границами.
 
 На Windows root binding использует полный `VolumeSerialNumber` и opaque
 128-bit `FileId`, без fallback на усечённую `stat` identity. Перед чтением

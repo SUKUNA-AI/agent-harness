@@ -30,6 +30,8 @@
 qualification и проверки каталога внутри каждого реального исполнения.
 Диагностический Codex catalog не квалифицирует отдельный strict MCP exec или
 reviewer isolation. Baseline и опубликованный 1.6.1 ZIP сохраняют прежние границы.
+Отдельный Strict Codex API реализован экспериментально; текущая live
+qualification остаётся `BLOCKED_NOT_QUALIFIED`. [Точный статус](CODEX_MCP_RU.md#строгий-managed-transport-отдельная-граница).
 
 ## Понять и применять
 

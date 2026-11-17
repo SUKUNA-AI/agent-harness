@@ -29,13 +29,16 @@
         <mxCell id="f" value="native client" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=14;labelBackgroundColor=#FFFFFF;exitX=0.8;exitY=1;entryX=0.5;entryY=0;" parent="1" edge="1" source="probe" target="occat">
           <mxGeometry as="geometry" relative="1" />
         </mxCell>
-        <mxCell id="g" value="enforcement не доказан" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=14;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" parent="1" edge="1" source="cxcat" target="cxdeny">
+        <mxCell id="g" value="диагностика ≠ допуск" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=14;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" parent="1" edge="1" source="cxcat" target="cxdeny">
           <mxGeometry as="geometry" relative="1" />
         </mxCell>
         <mxCell id="h" value="перед каждым dispatch" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=14;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" parent="1" edge="1" source="occat" target="ocguard">
           <mxGeometry as="geometry" relative="1" />
         </mxCell>
         <mxCell id="i" value="session-bound artifacts" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=14;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;entryX=0.8;entryY=0;" parent="1" edge="1" source="ocguard" target="pin">
+          <mxGeometry as="geometry" relative="1" />
+        </mxCell>
+        <mxCell id="codex-completion" value="codex_catalog + JSONL" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=14;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;entryX=0.2;entryY=0;" parent="1" edge="1" source="cxdeny" target="pin">
           <mxGeometry as="geometry" relative="1" />
         </mxCell>
         <mxCell id="j" value="completion ≠ acceptance" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=14;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" parent="1" edge="1" source="pin" target="gate">
@@ -59,7 +62,7 @@
         <mxCell id="occat" value="OpenCode native rehearsal&#10;pre-turn catalog · permissions · exact session&#10;без provider dispatch; proof не переносится" style="rounded=1;whiteSpace=wrap;html=0;fontFamily=Arial;fontSize=17;align=center;verticalAlign=middle;strokeWidth=1.5;spacing=10;fillColor=#DAE8FC;strokeColor=#6C8EBF;" parent="1" vertex="1">
           <mxGeometry as="geometry" x="790" y="680" width="560" height="105" />
         </mxCell>
-        <mxCell id="cxdeny" value="Strict exec / reviewer&#10;Нужна отдельная квалификация execution&#10;Диагностический READY не даёт допуска" style="rounded=1;whiteSpace=wrap;html=0;fontFamily=Arial;fontSize=17;align=center;verticalAlign=middle;strokeWidth=1.5;spacing=10;fillColor=#F8CECC;strokeColor=#B85450;" parent="1" vertex="1">
+        <mxCell id="cxdeny" value="Strict Codex: owned stdio app-server&#10;Тот же thread: census → turn → census&#10;Fresh native qualification обязательна" style="rounded=1;whiteSpace=wrap;html=0;fontFamily=Arial;fontSize=17;align=center;verticalAlign=middle;strokeWidth=1.5;spacing=10;fillColor=#FFF2CC;strokeColor=#B58B00;" parent="1" vertex="1">
           <mxGeometry as="geometry" x="50" y="865" width="560" height="105" />
         </mxCell>
         <mxCell id="ocguard" value="Реальный OpenCode invocation&#10;Повторная qualification + private guard&#10;Runtime catalog / post-dispatch connection" style="rounded=1;whiteSpace=wrap;html=0;fontFamily=Arial;fontSize=17;align=center;verticalAlign=middle;strokeWidth=1.5;spacing=10;fillColor=#DAE8FC;strokeColor=#6C8EBF;" parent="1" vertex="1">

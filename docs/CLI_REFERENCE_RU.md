@@ -41,7 +41,9 @@ code. Полный managed JSON обычно форматирован;
 ## Optional Tool Profiles: `tools`
 
 Тот же dispatcher, без отдельного CLI framework. Команды не устанавливают
-зависимости, не вызывают модель и не меняют credentials/user config.
+зависимости и не меняют credentials/user config. Диагностика не отправляет
+платный model workload; native qualification может использовать локальный
+scripted provider для проверки реального dispatcher.
 
 | Команда | Аргументы и результат |
 | --- | --- |
@@ -50,12 +52,14 @@ code. Полный managed JSON обычно форматирован;
 | `tools dry-run` | Те же флаги; deterministic config/digests без записи |
 | `tools check` | Те же флаги; installed dependencies и live stdio MCP readiness |
 | `tools catalog` | Те же флаги; dependency catalog и native audit выбранного клиента без inference; временные артефакты диагностики |
-| `tools qualify` | `--backend opencode --root P --evidence-dir P`; те же profile/role флаги; native preflight и сохранённые proof/catalog без model calls |
+| `tools qualify` | `--backend codex\|opencode --root P --evidence-dir P`; те же profile/role флаги; core-issued native proof/catalog для поддержанного runtime |
 | `tools smoke` | Те же флаги; backend help/version, dependency probes и OpenCode standalone probe; без model calls |
 | `tools snapshot` | `--root P --output NEW_PRIVATE_YAML`; actual source manifest вне source |
+| `tools graphify-build` | `--root P --artifact-dir P`, optional `--executable graphify`, `--snapshot F`, `--timeout 120`; native local-code-only builder с implementation/parser/interpreter binding |
 | `tools index-build` | `--root P --snapshot F --artifact-dir P --command-json JSON --tool-version V`; optional `--version-argv-json`, `--settings-json`, `--timeout` (120s) |
 | `tools index-verify` | `--root P --receipt F`, optional `--historical`; повторная проверка source/artifact/builder bytes |
 | `tools apply` | Те же флаги плюс обязательные `--output NEW_PRIVATE_FILE --apply`; новый файл вне source/user config, без перезаписи |
+| `tools browser-job` | `--profile ID_OR_ABSOLUTE_YAML --job ABS_JSON_FILE_OR_BOUNDED_JSON`; finite Node Playwright actions, artifacts и независимая regression |
 
 Для `show/dry-run/check/catalog/smoke/qualify/apply`: `--profile baseline`, `--backend codex` и
 `--role owner` — defaults. `--root` должен быть существующим абсолютным каталогом.
@@ -70,7 +74,7 @@ code. Полный managed JSON обычно форматирован;
 handshake не доказывает model session/exact resume/effective permissions.
 У `apply` target parent должен уже существовать; произвольная перезапись и
 изменения auth/config запрещены. JSON содержит `applied` и output path.
-У `qualify` backend должен быть `opencode`; evidence directory должен уже
+У `qualify` evidence directory должен уже
 существовать вне source и пользовательских config roots. Вывод не служит
 переносимым разрешением: supervisor повторяет qualification для конкретного
 worktree и проверяет каталог внутри каждого исполнения. При required MCP
@@ -84,6 +88,7 @@ python tools/harness.py tools check --profile coding --backend codex --root /abs
 python tools/harness.py tools catalog --profile reviewer-readonly --backend codex --role reviewer --root /absolute/worktree
 python tools/harness.py tools smoke --profile baseline --backend opencode --root /absolute/project
 python tools/harness.py tools qualify --profile reviewer-readonly --backend opencode --role reviewer --root /absolute/worktree --evidence-dir /private/opencode-proof
+python tools/harness.py tools qualify --profile reviewer-readonly --backend codex --role reviewer --root /absolute/worktree --evidence-dir /private/codex-proof
 python tools/harness.py tools apply --profile baseline --backend codex --root /absolute/project --output /private/run/tool-config.toml --apply
 ```
 
@@ -95,6 +100,59 @@ pre-turn hook с прерыванием до provider dispatch; реальный
 проверяет catalog/permissions и сохраняет привязанные к completion артефакты.
 Допуск reviewer требует enforcement. Подробнее:
 [Tool Profiles](TOOL_PROFILES_RU.md) и [Tooling acceptance](TOOLING_ACCEPTANCE_RU.md).
+
+`tools list` включает восемь builtins: baseline, coding, architecture,
+reviewer-readonly, browser-testing, documents, coding-context7,
+architecture-context7. Context7 variants включают optional public anonymous
+read; базовые coding/architecture его не запускают. Serena/Context7 recipes
+лениво разрешаются через private native launchers. Dry-run не создаёт caches.
+
+`browser-testing` без явной browser policy возвращает `CONFIG_REQUIRED`.
+`tools browser-job` читает закрытый JSON `BrowserJob`: обязательны `root`,
+`url`, `artifact_root`, `actions`, `regression_argv`; optional `expectation`
+(default `passes`), `timeout` (30 s), `max_artifact_bytes` (8 MiB). JSON input
+ограничен 65536 bytes, неизвестные/повторные keys отклоняются. `root` и
+`artifact_root` — absolute paths; artifacts находятся вне source.
+Есть хотя бы одна assertion, например `expect_text`; произвольного JS action нет.
+Exit 0 — `COMPLETED` или `REPRODUCED`, остальные исходы дают exit 2. Это результат
+job и независимой regression, не final acceptance gate всей задачи.
+
+```text
+python tools/harness.py tools graphify-build --root /absolute/source --artifact-dir /private/graph --executable graphify --timeout 120
+python tools/harness.py tools browser-job --profile /private/browser-profile.yaml --job /private/browser-job.json
+```
+
+Обе команды запускают реальные инструменты, без model calls. Graphify создаёт
+frozen snapshot при отсутствии `--snapshot`, использует native code-only
+extraction и публикует receipt с toolchain identity. Browser job требует
+запущенное разрешённое local HTTP приложение, configured official MCP path,
+private Chromium cache и origin allowlist. Полный browser блок —
+[Tool Profiles](TOOL_PROFILES_RU.md#playwright-и-docling).
+
+Пример `browser-job.json` для приложения с кнопкой `#add` и результатом `#out`.
+До запуска нужен настоящий `tests/browser_regression.py` данного проекта;
+замените его на независимый тест конкретного дефекта.
+
+```json
+{
+  "root": "/absolute/project",
+  "url": "http://127.0.0.1:4173/app",
+  "artifact_root": "/absolute/private/browser-jobs",
+  "actions": [
+    {"kind": "click", "selector": "#add"},
+    {"kind": "expect_text", "selector": "#out", "value": "1"}
+  ],
+  "regression_argv": ["python", "-B", "tests/browser_regression.py"],
+  "expectation": "passes",
+  "timeout": 30
+}
+```
+
+Для воспроизведения задайте `expectation: reproduces`: browser assertion должен
+реально не пройти, а независимая regression завершиться ненулевым exit code.
+Timeout, отсутствующий binary и неподтверждённый cleanup не считаются
+воспроизведением. После scoped fix тот же job с `passes` требует успеха обеих
+проверок и неизменности source во время проверки.
 
 ## Foreground work supervisor
 

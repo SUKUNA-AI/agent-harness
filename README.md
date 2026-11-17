@@ -38,6 +38,13 @@ MCP, live dependency diagnostics, native client renderers, Graphify provenance �
 overrides без перезаписи auth/config; [OpenCode V2](docs/OPENCODE_RU.md) —
 дополнительный optional adapter для managed leaf worker.
 
+Coding/architecture используют private native Serena launchers. Публичная
+Context7 документация добавляется явным выбором `coding-context7` или
+`architecture-context7`. `tools graphify-build` строит проверяемый local AST
+index, `tools browser-job` запускает finite Playwright actions и независимую
+regression. Browser profile требует явные origin/runtime paths; наличие
+установленного браузера само не включает grants.
+
 OpenCode V2 проходит native preflight без inference, затем проверяет каталог
 и права в процессе каждого исполнения. Непрошедшая проверка даёт
 `BLOCKED_NOT_QUALIFIED`; fixture PASS сам по себе допуска не даёт.

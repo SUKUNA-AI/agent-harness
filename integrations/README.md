@@ -14,6 +14,12 @@ receipts. Это отдельный путь от read-only metadata MCP сам�
 
 Serena, Graphify, Context7, ast-grep и browser tooling — optional dependencies
 выбранного сценария. Core installer их автоматически не устанавливает.
+В исходной ветке реализованы private native launchers Serena 2.1.0/Context7
+4.6.0, local-code-only Graphify 0.9.111 builder, ast-grep 0.51.3 migration и
+finite browser runner поверх official Playwright MCP 0.0.85. Наблюдённые
+native scenarios и их пределы перечислены в
+[матрице квалификации](../docs/TOOLING_ACCEPTANCE_RU.md); versions в тексте
+не являются доказательством готовности другой машины.
 Docling не нужен обычной разработке; documents profile можно явно исключить
 по выбору оператора. Required dependency выбранного профиля нельзя считать
 успешной при отсутствии binary, соединения или qualification.

@@ -2,8 +2,10 @@
 
 Tool Profile — Strict YAML политика воспроизводимой конфигурации. MCP server
 предоставляет инструменты клиенту Codex/OpenCode; `ast-grep`, тесты и компиляторы
-остаются обычными CLI. Harness не проксирует модельные MCP вызовы и не создаёт
-новую БД, daemon или LLM API. Supervisor сохраняет scopes, slots, review и gate.
+остаются обычными CLI. Code/docs MCP обслуживает штатный native client;
+browser profile имеет отдельную узкую finite-action facade. Общий MCP proxy,
+новая БД, daemon или LLM API не создаются. Supervisor сохраняет scopes, slots,
+review и gate.
 
 Пошаговая настройка, матрица native/managed, interruption и troubleshooting:
 [Эксплуатация Tool Profiles](TOOLING_OPERATIONS_RU.md).
@@ -15,8 +17,10 @@ Tool Profile — Strict YAML политика воспроизводимой к�
 | `baseline`, 1 | Прежний flow | Ни одного нового MCP/CLI |
 | `coding`, 1 | Поиск символов | Serena required; ast-grep optional |
 | `architecture`, 1 | Архитектурный анализ | Serena и Graphify required; frozen index |
+| `coding-context7`, 1 | Coding с публичной документацией | Как coding плюс optional anonymous Context7 |
+| `architecture-context7`, 1 | Architecture с публичной документацией | Как architecture плюс optional anonymous Context7 |
 | `reviewer-readonly`, 1 | Независимый reviewer | Только квалифицированный backend и read-only catalog |
-| `browser-testing`, 1 | Проверка интерфейса | Playwright required; live browser qualification |
+| `browser-testing`, 1 | Проверка интерфейса | Требуется явная browser policy; official Playwright MCP и живой browser lifecycle |
 | `documents`, 1 | Конвертация документов | Docling required; local-only qualification |
 
 Наличие шаблона не доказывает установленную зависимость или квалификацию клиента.
@@ -125,10 +129,10 @@ CLI capabilities профиля не открывают shell автоматич
 
 ## Serena: один worktree — один stdio process
 
-Встроенный рецепт использует `serena start-mcp-server --project {worktree}`.
-Перед запуском обязательно проверяется **установленный**
-`serena start-mcp-server --help` и наличие `--project`; команда из документации
-сама по себе недостаточна. При отсутствии исполняемого файла профиль BLOCKED.
+Встроенный рецепт хранит логический `serena start-mcp-server --project
+{worktree}`, а `resolved_servers` лениво заменяет его на native launcher,
+описанный ниже. До запуска проверяются установленная версия, CLI help,
+implementation и policy. При отсутствии executable профиль BLOCKED.
 Каждый клиент запускает отдельный stdio process, cwd и project path совпадают
 с его harness-owned worktree. `SERENA_HOME` направляется в отдельный private
 cache. Один shared HTTP instance для разных активных проектов не допускается.
@@ -138,6 +142,64 @@ Serena stateful; [официальная документация](https://oraio
 проверяет параллельный поиск одинакового имени с разными исходниками и отдельными
 PID/cwd/project roots. Это проверка механизма изоляции; live Serena при её
 отсутствии остаётся `BLOCKED_NOT_QUALIFIED`.
+
+### Квалифицированный native launcher Serena 2.1.0
+
+Ветка содержит отдельный
+[`local_tool_integrations.py`](../src/agent_harness/local_tool_integrations.py).
+`prepare_serena(root, cache, executable=...)` сверяет установленную версию
+**serena-agent 2.1.0**, CLI help и implementation digest. У этой версии default
+interface может предоставлять Python REPL; launcher явно выбирает
+`--agent-interface tools --transport stdio` и отключает web dashboard/GUI.
+Native MCP client подключается к исходному Serena server; launcher не является
+прокси вызовов.
+
+Разрешены ровно пять read tools: `find_symbol`, `find_referencing_symbols`,
+`get_symbols_overview`, `search_for_pattern`, `read_file`. Private policy
+закрепляет этот список; project startup commands, API/mode overrides и
+дополнительные workspace folders отклоняются. Mutable Serena project data,
+HOME/XDG и cache находятся вне source. Cache связан с physical worktree
+identity; перенос cache на другой worktree или policy drift требует отказа,
+а не исправления grants по месту.
+
+Live-проверка 2026-11-17 запустила две настоящие Serena stdio sessions
+одновременно в разных Git worktrees. В обоих каталогах объявлено одно имя
+symbol, но поиск вернул соответствующие разные реализации. Наблюдались пять
+разрешённых tools, разные process/cwd/project/cache identities, неизменность
+source/head и завершение owned process trees. Это подтверждает проверенный
+native launcher и isolation scenario, не весь будущий managed DAG или любую
+версию Serena. На другой машине нужны новые executable/help/catalog checks.
+
+Дополнительно проверены **два настоящих OpenCode 2.2.5 workers с Serena**:
+разные Git worktrees/session IDs, native catalog из пяти tools и реальные
+`serena_find_symbol` calls вернули свои left/right implementations. Native
+runtime guard artifacts и process cleanup сохранены, source остался неизменным.
+Provider endpoint был локальным scripted endpoint: оплачиваемой или внешней
+model inference не было. Этот test проверил действующий lazy launcher через
+native клиент; полный supervisor plan/check/review/gate этим proof не заявлен.
+
+`serena_stdio_argv(...)` создаёт argv с hash binding установленного кода.
+Python launcher запускается с `-I` до загрузки helper, поэтому cwd/user site
+и ambient Python startup не подменяют импорт управляющего модуля. Resolver
+отклоняет старый prepared argv без `-I`, несовпавший interpreter и forged
+launcher args; raw логический recipe раскрывается заново штатным helper.
+По умолчанию cache namespace — `CACHE_ROOT/ROOT_DIGEST_PREFIX/serena`, где prefix
+содержит первые 16 hex символов digest canonical root. Context7 использует
+соседний namespace `context7`; его добавляют только явные `*-context7` профили.
+Fingerprint включает launcher, interpreter и implementation files из
+изолированного package environment; same-version подмена implementation также
+обнаруживается. Это проверка локальной identity, а не аттестация издателя пакета.
+
+## Context7: optional public documentation read
+
+Проверен **@upstash/context7-mcp 4.6.0** в anonymous stdio mode: реальные
+`resolve-library-id` и `query-docs` запросили публичную документацию.
+`prepare_context7` создаёт private HOME/XDG, не переносит credentials и
+ambient Node hooks; связывает entrypoint, Node runtime и dependency tree.
+`context7_stdio_argv` формирует native server argv с implementation digest.
+Секреты, private repositories и authenticated capability этим сценарием
+не квалифицируются. Оба tools объявлены как documentation reads; сетевые
+запросы остаются внутри исходного Context7 server.
 
 ## Graphify: frozen source и invalidation
 
@@ -162,6 +224,26 @@ settings digest, index bytes/digest/path и время. Замена исход�
 индекс; build не выполняется внутри reviewer.
 Граф не заменяет чтение импортов/вызовов, dependency checks, tests и gate.
 
+### Проверенный local-code-only Graphify builder
+
+`build_local_graph_index(root, artifact_dir, executable=..., frozen=...)`
+использует distribution **graphifyy 0.9.111** проекта Graphify-Labs/graphify.
+Реальный argv — `graphify extract SOURCE --code-only --no-cluster
+--max-workers 1 --out OUTPUT`. Это AST extraction без provider keys или
+синтезированных LLM edges. Полученные native nodes/edges сохраняются внутри
+provenance artifact; wrapper не генерирует вместо Graphify собственный граф.
+
+Builder работает на frozen copy. Receipt дополнительно связывает installed
+package/parser/interpreter bytes через `provider_toolchain`. Live-проверка
+2026-11-17 построила реальный индекс, затем отдельно подменила source,
+implementation, parser и interpreter inputs: каждая подмена сделала receipt
+непригодным. Также проверен отказ native Graphify build с сохранением
+bounded failure receipt. Исторический индекс можно просмотреть, но нельзя
+принять как mandatory индекс изменённого candidate.
+Builder/version launcher также использует `python -I`. После изменения этих
+helper bytes нужен новый frozen build/receipt; прежний индекс остаётся
+историческим, даже если native Graphify version не изменилась.
+
 ## ast-grep
 
 `inspect_cli` проверяет `ast-grep` и `sg`, включая version signature: Linux `sg`
@@ -172,6 +254,13 @@ settings digest, index bytes/digest/path и время. Замена исход�
 целевые tests → проверка полного source snapshot: regression не может менять
 исходники после подтверждённых structural postconditions. Нулевой rewrite exit недостаточен.
 
+Live-проверка **ast-grep 0.51.3** выполнила настоящий before scan, scoped rewrite
+и after scan, затем независимый Python regression. Regression запускался с
+`python -B`, чтобы проверка не создавала bytecode в frozen source. Отрицательный
+сценарий подтвердил отказ при изменении source самой regression-командой.
+Это проверка данного migration helper, не универсальная корректность rewrite
+для любого языка или проекта.
+
 Воспроизводимый пример для отдельной fixture с `calc.py`:
 
 ```python
@@ -179,7 +268,7 @@ from agent_harness.tooling_provenance import ast_grep_migrate
 receipt = ast_grep_migrate(
     '/absolute/fixture', ['calc.py'],
     pattern='old_api($A)', rewrite='new_api($A)', language='python',
-    checks=[['python', '-c', 'import calc; assert calc.result == 42']],
+    checks=[['python', '-B', '-c', 'import calc; assert calc.result == 42']],
 )
 ```
 
@@ -189,12 +278,59 @@ receipt = ast_grep_migrate(
 
 ## Playwright и Docling
 
-Standalone utilities реализованы в
-[optional_tool_jobs.py](../src/agent_harness/optional_tool_jobs.py). Они используют
-существующее containment процессов и пишут обычные receipt/artifacts в явно
-указанный private root. Они не квалифицируют managed client permissions:
-`browser-testing`/`documents` managed preflight остаётся BLOCKED до соответствующей
-квалификации клиента. Запуск helper — отдельная явная операторская операция.
+Document/Python browser utilities находятся в
+[optional_tool_jobs.py](../src/agent_harness/optional_tool_jobs.py). Новый
+managed browser путь использует
+[browser_integration.py](../src/agent_harness/browser_integration.py) и исходный
+официальный **@playwright/mcp 0.0.85**. Core-owned stdio facade предоставляет
+конечный набор проверяемых browser actions, проверяет request policy и сохраняет
+реальные artifacts. Это специальная browser boundary, не универсальный MCP
+proxy и не произвольное исполнение JavaScript из модели.
+
+У базового `browser-testing` нет угаданного browser executable/origin.
+Без `allowed_origins`, `mcp_package`, `browser_executable`, `browser_cache`
+он возвращает `CONFIG_REQUIRED`. Origin — точный numeric loopback HTTP URL;
+wildcards, DNS hostnames и произвольные внешние origins не поддержаны.
+`mcp_package` указывает ordinary absolute официальный `cli.js`, browser executable
+должен находиться внутри явно выбранного browser cache. `isolated:true` и
+`allow_test_writes:false` остаются обязательными.
+
+Пример закрытого browser блока custom profile; пути и порт заменяются
+существующими разрешёнными значениями:
+
+```yaml
+browser:
+  isolated: true
+  artifacts: browser-artifacts
+  allow_test_writes: false
+  allowed_origins: [http://127.0.0.1:4173]
+  mcp_package: /absolute/node_modules/@playwright/mcp/cli.js
+  browser_executable: /absolute/private/browser-cache/chromium/chrome
+  browser_cache: /absolute/private/browser-cache
+```
+
+Preflight запускает настоящий isolated Chromium, получает восемь finite tools
+и закрывает browser/process tree. Configured execution profile разворачивает
+dynamic dependency `playwright-managed`, сохраняя original profile digest
+отдельно. `required_tools` проверяет каталог; `required_results` задаёт subset
+обязательных результатов именно execution. Для browser достаточно
+`browser_snapshot`; при отсутствии нового поля сохраняется прежнее требование
+результата каждого required tool.
+
+`tools browser-job --profile ABS_PROFILE --job ABS_JOB_JSON` выполняет finite
+actions отдельным Node Playwright worker из того же pinned runtime tree,
+сохраняет screenshot/result/log receipts и запускает независимый regression
+argv. Это отдельный путь от native model calls в MCP facade.
+`COMPLETED`/`REPRODUCED` означают результат этого
+bound job, не final gate всей задачи. Live-проверки настоящего MCP/Chromium
+покрывают positive lifecycle, запрещённые code/upload/path/origin/redirect
+операции и воспроизведение дефекта с последующей проверкой исправления.
+Admission конкретного managed model client требует его отдельной qualification.
+
+Docling по явному выбору оператора исключён и не устанавливался. `documents`
+не выбирается для обычной инженерной работы. При его явном выборе остаются
+отдельные dependencies, local-only qualification и ограничения ниже; его статус
+нельзя объединять с проверенным browser runner.
 
 `run_document_job(DocumentJob(...))` принимает local/remote mode, input root и
 ordinary input file, existing private output root вне source, проверенный argv

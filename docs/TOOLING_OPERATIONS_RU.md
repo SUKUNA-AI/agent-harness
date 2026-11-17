@@ -51,9 +51,9 @@ dependencies и свежая квалификация выбранной рол�
 | Managed leaf без нового профиля | Совместимый baseline | Optional adapter, только после native qualification |
 | MCP policy render | `mcp_servers`, enabled/disabled tools, connection readiness | `mcp.servers`, per-agent permissions, запрет pooled sessions и Code Mode |
 | Диагностический effective catalog | App-server ephemeral thread без model turn | Native pre-turn rehearsal без provider dispatch |
-| Строгий tooling dispatch | Требует отдельной exec-квалификации; диагностический catalog её не даёт | При успешной qualification и guard каждого реального invocation |
-| Reviewer read-only | Диагностическая allowlist сама не доказывает изоляцию exec reviewer | Аудированный набор read tools, отрицательные native probes, guard |
-| Shell/компилятор внутри leaf | Определяется отдельной разрешённой границей baseline | В квалифицированном managed leaf запрещён; checks запускает supervisor |
+| Строгий tooling dispatch | Отдельный owned stdio app-server transport; fresh native qualification, diagnostic catalog её не даёт | При успешной qualification и guard каждого реального invocation |
+| Reviewer read-only | Отдельный StrictCodexAdapter с native tool ceiling и exact-file read context; обязательна квалификация | Аудированный набор read tools, отрицательные native probes, guard |
+| Shell/компилятор внутри leaf | Baseline сохраняет прежние permissions; strict boundary запрещает shell | В квалифицированном managed leaf запрещён; checks запускает supervisor |
 | Exact resume | Сохранённый конкретный session ID и прежняя identity | Сохранённый `--session`, проверка истории, root/profile/client binding |
 | Output schema | Штатный механизм Codex | Нет native `--output-schema`; prompt instruction и последующая core validation |
 | Общая квота | До 12 managed sessions, в том числе до 3 reviewers | Та же квота; отдельного второго пула нет |
@@ -63,6 +63,11 @@ runtime и сценарий, `READY` — результат определённ
 `BLOCKED_NOT_QUALIFIED`, `NOT_AVAILABLE`, `not_run` и `skipped` не равны PASS.
 Fixture tests проверяют механизм harness; native tests проверяют указанный
 клиент. Ни те, ни другие не доказывают доступ к выбранной платной модели.
+
+На 2026-11-17 новый strict Codex transport имеет EXPERIMENTAL API; текущая
+live qualification закрыта `BLOCKED_NOT_QUALIFIED` после отказа builtin policy
+ceiling. Его production RPC/reviewer/resume не объявлены квалифицированными.
+Подробнее — [Codex](CODEX_MCP_RU.md#строгий-managed-transport-отдельная-граница).
 
 Лимит 12 — верхняя граница supervisor, а не требование запускать 12 процессов.
 Contract может задать меньшую конкуренцию; scheduler учитывает dependencies,
@@ -108,13 +113,23 @@ Baseline не содержит внешних MCP/CLI dependencies. Его `chec
 | Symbols/references | `coding` или custom Serena profile | Help подтверждает `--project`; отдельный stdio process и private cache на worktree |
 | Архитектурный граф | `architecture` или custom graph profile | Verified builder argv, frozen source/index receipt и invalidation |
 | Структурная миграция | ast-grep CLI | Version signature именно ast-grep; targeted diff, scans и независимые checks |
-| Документация API | Явный custom Context7 MCP profile, если он нужен задаче | Installed transport, auth без secret в argv, audited tool IDs и native connection |
+| Документация API | `coding-context7`/`architecture-context7` либо custom profile | Anonymous public reads, audited IDs, private Node environment и native connection |
 | Browser acceptance | `browser-testing` | Реальный managed runner с profile/artifact binding; один установленный Playwright недостаточен |
 | Конвертация документов | Optional `documents` | Только по отдельной потребности и квалификации; Docling не нужен обычной разработке |
+
+На 2026-11-17 отдельно проверены native Serena 2.1.0 (две concurrent stdio
+sessions), Context7 4.6.0 (public reads), Graphify 0.9.111 (actual index и
+toolchain drift), ast-grep 0.51.3 (native migration и independent regression),
+official Playwright MCP 0.0.85 (семь реальных browser scenarios). Это scoped
+qualification, не разрешение пропустить checks нового проекта. Подробности и
+границы — [матрица приёмки](TOOLING_ACCEPTANCE_RU.md).
 
 Если оператор исключил Docling, оставьте `documents` невыбранным и запишите
 `skipped: operator choice` в private qualification report. Это не дефект
 baseline. Отсутствующая required dependency выбранного профиля остаётся BLOCKED.
+В текущей поставке работ Docling явно исключён по выбору оператора и не
+устанавливался. Browser profile до задания exact origins и absolute runtime
+paths остаётся `CONFIG_REQUIRED`.
 
 ## 4. Настроить и проверить профиль
 
@@ -146,11 +161,16 @@ python tools/harness.py tools qualify --profile reviewer-readonly --backend open
 `qualified_for_exec:false` и `reusable_as_authorization:false`: supervisor
 перед реальным dispatch квалифицирует конкретные worktree/role/model/config
 и включает runtime guard. Нельзя перенести JSON результата на другой запуск.
+Final reviewer policy повторно проверяется после ожидания/admission model slot
+и непосредственно до dispatch: истёкший proof или drift за время ожидания
+не сохраняет допуск от старого preflight.
 
 Для Codex `tools catalog --backend codex` создаёт disposable app-server без
 копирования пользовательского auth. Native MCP filtering наблюдается в этом
 thread. Ограничения shell, wrappers, plugins и reviewer execution проверяются
-отдельно; `tools qualify --backend codex` не является доступным заменителем.
+отдельно. `tools qualify --backend codex` использует отдельный native strict
+verifier, а не повышает trust диагностического каталога. При отсутствии
+необходимого proof выполнение остаётся `BLOCKED_NOT_QUALIFIED`.
 
 `tools apply` сохраняет **новый** per-run fragment; это не установка в профиль:
 

@@ -4,9 +4,11 @@
 [Приёмка](TOOLING_ACCEPTANCE_RU.md) · [OpenCode](OPENCODE_RU.md)
 
 Codex остаётся основным backend. Контракт без новых execution/tooling полей
-сохраняет прежний baseline. Дополнительные MCP подключаются явно выбранным
-профилем. Harness использует штатный MCP client Codex и сохраняет существующий
-`exec --json`/`exec resume SESSION_ID`; отдельный универсальный MCP proxy не нужен.
+сохраняет прежний baseline `exec --json`/`exec resume SESSION_ID`.
+Дополнительные MCP подключаются явно выбранным профилем. Строгий managed
+tooling использует отдельный owned stdio app-server transport; он не переносит
+диагностическое доказательство ephemeral thread на будущий legacy `exec`.
+Model/provider остаются внутри штатного Codex, общий MCP proxy не добавляется.
 
 ## Фактический интерфейс
 
@@ -104,9 +106,71 @@ canonical root, config digest, catalog digest, имена tools/schema digests,
 обнаруженный запрещённый tool также блокируют probe.
 
 `qualified_for_exec:false` и `reviewer_isolation_qualified:false` сохраняются
-даже при `status:READY`. Один эпизод успешного app-server audit не связывает
-новый `exec` с тем же connection и не доказывает соблюдение всех прав reviewer.
-Обязательная readiness должна подтверждаться и на execution boundary.
+в результате этого **диагностического audit** даже при `status:READY`. Один
+эпизод app-server audit не связывает новый `exec` с тем же connection.
+Обязательная readiness должна подтверждаться на execution boundary.
+
+## Строгий managed transport: отдельная граница
+
+Текущий статус на 2026-11-17: **EXPERIMENTAL API,
+`BLOCKED_NOT_QUALIFIED` для текущей live qualification**. Проверка настоящего
+установленного клиента с сохранённым Lite protocol завершилась закрытым
+отказом `Native privileged builtin escaped its policy ceiling`. Успешного
+доказательства production RPC/resume пока нет. Эта причина — вывод verifier;
+она сама не определяет, находится корень в native catalog, parser или policy.
+Нельзя включить capability вручную или заменить этот результат прежним
+успешным namespace probe.
+
+Новый `StrictCodexAdapter` выбирается явной фабрикой
+`CodexAdapter.with_managed_tools(root=...)` после per-run tool configuration.
+Он использует тот же owned app-server process и конкретный thread во время
+всего invocation: `thread/start` либо точный `thread/resume`, native MCP census
+до запроса, `turn/start` с output schema и повторный census после запроса.
+Это не постоянно установленный daemon и не альтернативный inference API.
+Legacy adapter остаётся самостоятельным совместимым путём.
+
+`qualify(root=..., role=..., evidence_dir=..., timeout=...)`,
+`verify_qualification(...)`, `effective_tool_catalog()` и сохранённая
+qualification reference связывают root, client identity, role, selected model,
+profile/config и каталог. Model/provider/effort/context window не меняются
+ради прохождения probes. Разрешённый read context reviewer ограничен exact
+обычными файлами; принадлежность файла к manifest не разрешает соседние paths.
+
+Per-run metadata ceiling отключает shell, native children, apps/plugins,
+browser/computer tools, Code Mode и прочие недопущенные wrappers. Reviewer
+получает native read-only sandbox; worker — подтверждённый workspace-write
+sandbox только своего root. Write-capable MCP reviewer не допускается.
+Core dynamic `harness_read_file` и `harness_list_files` дают ограниченное
+обычное чтение: без commands, произвольных внешних directories или symlinks.
+Worker может использовать разрешённый native patch tool; reviewer его не
+получает. Compilers/tests выполняет supervisor через independent checks.
+
+Квалификация включает native positive read и forced negative calls через
+локальный scripted provider. Наблюдения должны показать отказ shell/spawn,
+MCP write/execute и patch для read-only роли, неизменные sentinels и завершённые
+process trees. Эти тесты проверяют фактический dispatcher выбранной версии,
+а не обещание в prompt. Установленная более строгая write policy не обходится:
+несовместимая worker boundary требует отказа.
+
+Selected model metadata сохраняет native `use_responses_lite`, если он уже
+включён. Qualification probe обязан наблюдать соответствующий Lite protocol
+и его `additional_tools`; отключать его ради прохождения теста нельзя.
+Это проверка tool dispatch выбранного provider protocol, не смена модели,
+reasoning/context settings или авторизации.
+
+`tools qualify --backend codex` вызывает именно этот core verifier. Если
+фабрика/runtime qualification отсутствует или required restriction не
+подтверждено, результат остаётся `BLOCKED_NOT_QUALIFIED`. `tools catalog
+--backend codex` продолжает отдельную безмодельную диагностику и не вызывает
+production qualification вместо оператора незаметно.
+
+На 2026-11-17 отдельный native `codex exec` experiment подтвердил разрешённое
+MCP чтение и отказ write/command namespace. Это важное наблюдение native
+клиента, но оно само не доказывает новый managed RPC transport, его exact
+resume, per-turn enforcement или final gate. Production readiness нового
+пути объявляется только после успешной собственной native qualification и
+runtime receipts конкретного invocation. Наличие класса или CLI bridge не
+означает квалифицированное выполнение.
 
 Без inference не означает отсутствие любой сетевой активности: startup Codex
 может предварительно открывать Responses WebSocket, а remote MCP сам требует
@@ -148,7 +212,7 @@ Managed workers запускаются в worktrees, которыми владе
 Native Codex mode сохраняется отдельно от managed scheduler. Receipt подавления
 native agents не заменяет проверку MCP и наоборот.
 
-Продолжение использует конкретный сохранённый ID:
+Legacy continuation использует конкретный сохранённый ID:
 
 ```text
 codex exec --json PROMPT
@@ -160,6 +224,9 @@ codex exec resume CONCRETE_SESSION_ID --json PROMPT
 backend, session, profile, mandatory dependencies, worktree и source/index
 provenance; проверяет завершение прежнего процесса и сохраняет event history.
 `--last`, новая сессия с пересказом и silent profile drift не являются exact resume.
+Строгий managed transport продолжает app-server thread внутри своей
+qualification boundary, не переключается на legacy `exec resume` и не
+создаёт новый thread с пересказом при отказе `thread/resume`.
 
 ## Диагностика и rollback
 

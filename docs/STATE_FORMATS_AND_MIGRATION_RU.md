@@ -264,6 +264,7 @@ tooling path. У plan его также включает execution selection о�
 | Plan с tooling | [agent-plan.tooling.v1](../schemas/agent-plan.tooling.v1.schema.json) | Сохраняет plan 1/2, допускает backend/profile на узле |
 | Work-state tooling | [work-state.v4](../schemas/work-state.v4.schema.json) | `schema_version: 4`, `base_schema_version: 2/3`, provenance и source checkpoint |
 | Completion с tool artifacts | [execution-receipt.tooling.v1](../schemas/execution-receipt.tooling.v1.schema.json), [tooling.v2](../schemas/execution-receipt.tooling.v2.schema.json) | Версия receipt 1/2 сохраняется; только typed completion допускает extension |
+| Codex completion с runtime catalog | [execution-receipt.codex-tooling.v1](../schemas/execution-receipt.codex-tooling.v1.schema.json), [codex-tooling.v2](../schemas/execution-receipt.codex-tooling.v2.schema.json) | Отдельный закрытый `codex_catalog` variant; historical OpenCode tooling schema bytes сохраняются |
 | Agent projection | [agent-state.v3](../schemas/agent-state.v3.schema.json) | Backend/profile/session и tool binding внутри существующего store |
 
 [`tooling_state.ensure`](../src/agent_harness/tooling_state.py) выполняет явный
@@ -294,6 +295,14 @@ artifact hashes в `input_refs`. Reader повторно сверяет bytes; p
 duplicate path, traversal, чужой каталог или подменённый hash не принимаются.
 Runtime proof дополнительно связывает session, role, worktree и native JSONL.
 Диагностический catalog не подменяет completion artifact.
+
+Native Codex catalog использует kind `codex_catalog` и собственные versioned
+schema files. Existing OpenCode kind `opencode_catalog` и ранее записанные
+tooling schemas не расширяются до произвольных backend artifacts. Reader
+выбирает новый typed variant по completion artifacts, проверяет backend/receipt
+binding и immutable runtime bytes. Journal digest не переписывается ради смены
+schema. Номер receipt остаётся 1/2; это отдельная типизированная ветвь, а не
+автоматическое повышение trust старого receipt.
 
 Это варианты внутри существующей journal/checkpoint модели. Новая database,
 parallel history или переписывание старых v1/v2 receipts не нужны. Отсутствие

@@ -148,6 +148,39 @@ tool_output_token_limit = 4096
 сравнения. Установщик сам default effort не добавляет. Ни пример, ни роль
 не должны переносить чужие credentials и абсолютные пути другой машины.
 
+## Optional tool config и выбранная модель
+
+Tool Profiles задают MCP/CLI dependencies и role permissions отдельно от
+model/provider. Native renderers и `tools apply` создают per-run fragment;
+они не записывают global config и не устанавливают default model. Исходный
+profile digest сохраняется отдельно от разрешённого runtime execution profile,
+в котором уже раскрыты worktree/cache paths и dynamic browser dependency.
+Проверяйте оба binding при resume.
+
+JSON Schema `maxLength` внутри tool arguments ограничивает конкретное значение
+этого tool; оно не задаёт context window модели. В `compile_packet` порог
+**24000 UTF-8 bytes** выбирает inline передачу либо immutable parts manifest
+с чтением частей через file tools. Required payload при этом не обрезается;
+это граница способа передачи, отдельно от native model context/token capacity.
+Direct OpenCode adapter пока ограничивает совокупный schema+prompt payload;
+его проверка не доказывает adaptive provider budget или автоматическое
+расширение этого интерфейса. Не меняйте `model_context_window` ради обхода
+transport validation. Значения provider metadata не раскрывают account quota
+по API key, а отсутствие ограничения в prompt не подтверждает снятие schema
+`maxLength` у конкретного tool.
+
+Для наблюдённого OpenCode Hydrogen/Flex сценария model/route/reasoning заданы
+явно на уровне run; это не новая рекомендация default модели. OpenCode не
+поддерживает общий CLI flag reasoning effort: переданный unsupported effort
+должен дать отказ вместо незаметной замены модели. Подробнее —
+[OpenCode: модель и metadata](OPENCODE_RU.md#проверенный-hydrogenflex-сценарий-и-opaque-reasoning-metadata).
+
+Browser profile требует явных `allowed_origins`, `mcp_package`,
+`browser_executable`, `browser_cache`. Default `browser-testing` до их задания
+даёт `CONFIG_REQUIRED`. Context7 добавляется только явным выбором
+`coding-context7`/`architecture-context7`; обычные coding/architecture не
+получают новую network dependency. Docling исключён из обычной установки.
+
 ## Как читать `doctor`
 
 Запустите из package root с теми же каталогами, что при install:

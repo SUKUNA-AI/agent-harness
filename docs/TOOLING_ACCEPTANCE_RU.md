@@ -20,13 +20,15 @@ app-server без model turn. Его результат относится к е
 не является последующим managed `codex exec`.
 
 Для профиля с MCP execution adapter должен иметь реализованную и проверенную
-capability `effective_tool_catalog`. Реальный CodexAdapter пока не объявляет её.
+capability `effective_tool_catalog`. Legacy CodexAdapter не объявляет её;
+отдельный StrictCodexAdapter получает её только после успешной core-issued
+native qualification. Наличие CLI bridge не подменяет эту проверку.
 Для нового tooling DAG также требуется квалифицированная изоляция final
 reviewer **до запуска workers**, включая случай отсутствующего
 `review_execution`. Нативный каталог MCP не доказывает отсутствие shell,
 plugins, Code Mode или внешних write-capable операций reviewer.
 
-Поэтому новый строгий managed MCP/reviewer workflow сейчас может завершиться
+Поэтому строгий managed MCP/reviewer workflow без свежего proof завершается
 `BLOCKED_NOT_QUALIFIED`. Это намеренный отказ. Флага, YAML boolean или
 операторского self-report для обхода квалификации нет. Старый контракт без
 новых полей сохраняет прежнюю модель исполнения и прежние гарантии.
@@ -44,29 +46,75 @@ log закрепляются в completion receipt. Сохранённый diagn
 | Codex baseline без новых полей | SUPPORTED | Сохраняется существующий flow |
 | Strict профили, render/dry-run, dependency probes | SUPPORTED | Отсутствующая dependency видна отдельно |
 | Native Codex MCP catalog/deny RPC | QUALIFIED для изолированного probe | Не квалификация последующего exec |
-| MCP profile в managed exec | SUPPORTED для qualified OpenCode | Native connection/catalog и runtime guard; Codex exec пока BLOCKED |
+| Strict Codex owned app-server API | EXPERIMENTAL; текущий live допуск BLOCKED_NOT_QUALIFIED | Preserved Lite native probe отверг builtin policy ceiling; production RPC/resume не квалифицированы |
+| MCP profile в managed execution | Отдельные qualified backend boundaries | OpenCode guard; Strict Codex owned app-server transport требует собственного native proof, legacy exec его не наследует |
 | Строгий reviewer с MCP | QUALIFIED для OpenCode 2.2.5 с fixture MCP | Реальный клиент и malicious provider negatives; реализация конкретного MCP требует аудита |
-| Serena на каждый worktree | EXPERIMENTAL | Требуются установленный CLI и live isolation test |
-| Graph index provenance/invalidation | SUPPORTED | Конкретная команда Graphify квалифицируется отдельно |
-| ast-grep migration helper | SUPPORTED | Нужен установленный ast-grep/sg с подходящей версией |
+| Serena на каждый worktree | QUALIFIED для launcher 2.1.0 и OpenCode 2.2.5 | Две concurrent native stdio sessions, затем два native OpenCode workers с реальными symbol calls; local scripted provider, scope/cleanup |
+| Optional Context7 public read | QUALIFIED для 4.6.0 | Реальные public resolve/query; authenticated/private documents не квалифицированы |
+| Graph index provenance/invalidation | QUALIFIED для local-code-only Graphify 0.9.111 | Реальный AST index; source/package/parser/interpreter drift отрицательные проверки |
+| ast-grep migration helper | QUALIFIED для 0.51.3 | Native before/rewrite/after и независимая Python `-B` regression; scope guard |
 | OpenCode V2 managed leaf transport | QUALIFIED для 2.2.5 | Native pre-turn/client policy и runtime catalog enforcement |
-| OpenCode exact session resume | QUALIFIED для native rehearsal | Реальный restart, конкретный ID, прежняя история; cloud workload проверяется отдельно |
+| OpenCode exact session resume | QUALIFIED для rehearsal и наблюдённого cloud сценария | Реальный restart и два Hydrogen/Flex turns с тем же ID; не произвольный workload |
 | OpenCode native multi-agent mode | NOT_IMPLEMENTED | Не эквивалент managed workers |
-| Browser/document managed profile | BLOCKED | Требуется полный qualified runner/client policy |
+| Configured browser runner/profile | QUALIFIED для native MCP/Chromium scenario | Official MCP 0.0.85, finite actions, independent regression/artifacts; model admission отдельно |
+| Documents/Docling | EXCLUDED по выбору оператора | Не устанавливался; обычная разработка и baseline от него не зависят |
 | HTTP MCP diagnostic transport | NOT_IMPLEMENTED | HTTP renderer не означает живую готовность |
 
 `SUPPORTED` описывает интерфейс реализации; `QUALIFIED` относится только к
 указанной проверенной границе. `SKIP`, `NOT_AVAILABLE`, `BLOCKED`, unsupported
 version и `UNKNOWN_OUTCOME` не являются успешной приёмкой.
 
+### Наблюдения live-квалификации 2026-11-17
+
+Наблюдения этого раздела выполнены на Linux. Они не квалифицируют новые
+optional tool boundaries на Windows/macOS; прежняя baseline поддержка пакета
+и её release evidence имеют собственные границы.
+
+Новый Strict Codex API реализован отдельно от baseline. Текущий live verifier
+вернул `Native privileged builtin escaped its policy ceiling` и не выдал
+production admission. Это закрытый отказ с ещё не установленной корневой
+причиной; успешный diagnostic/exec namespace experiment не заменяет требуемый
+proof нового transport. До repair и свежей native проверки статус остаётся
+`BLOCKED_NOT_QUALIFIED`, включая strict reviewer и exact RPC resume.
+
+Serena, Context7, Graphify и ast-grep проверены установленными native packages,
+а не renamed fixtures. Полные receipts остаются в private run evidence;
+версии и границы приведены выше. Новая машина, executable bytes, package/parser
+или interpreter drift требуют fresh checks. Тесты
+`test_local_tool_integrations.py` различают deterministic regression и opt-in
+native package tests (`HARNESS_LIVE_LOCAL_TOOLS=1`). Наличие исходника теста не
+означает, что native scenario выполнен на другом host.
+
+Отдельный OpenCode+Serena proof запустил двух настоящих OpenCode workers
+в разных Git worktrees с разными session IDs и реальными `serena_find_symbol`
+calls. Native guard/каталог и разные реализации symbol наблюдались в ходе
+исполнения; source/cleanup checks прошли. Provider был локальным scripted
+endpoint, поэтому ни платный inference, ни полный supervisor final gate не
+заявляются. Новый final source/helper snapshot требует новый Graphify index:
+previous qualification не разрешает reuse historical receipt после code drift.
+
+Browser suite выполнил семь настоящих official MCP/Chromium сценариев:
+isolated lifecycle/cleanup, finite catalog и запреты code/upload/path/origin/
+redirect, воспроизведение regression и проверка исправления. Дополнительные
+wiring tests проверяют profile schema, lazy render, CLI и dynamic dependencies.
+Чистый browser qualification не доказывает final source gate или permissions
+выбранного model client. Базовый browser profile без absolute policy остаётся
+`CONFIG_REQUIRED`; он не получает localhost/origin/executable по догадке.
+
+Cloud OpenCode доказал два native Hydrogen/Flex turns с точным session
+continuation. Наличие opaque encrypted reasoning metadata и source-backed
+сохранение известного формата подтверждены отдельно; outgoing-wire byte proof
+не выполнялся. Global default model не менялась. Подробности —
+[OpenCode](OPENCODE_RU.md#проверенный-hydrogenflex-сценарий-и-opaque-reasoning-metadata).
+
 ## Семь обязательных сценариев
 
 | ID | Автоматизированное доказательство | Что остаётся live |
 | --- | --- | --- |
-| A1 | `test_tooling_acceptance`: два managed CLI workers, реальные Git worktrees, отдельные MCP subprocesses, одинаковый symbol name с разным содержимым, cwd/project roots, scoped integration, event receipts, review/gate | Настоящая Serena; fixture сервер не выдаётся за неё |
-| A2 | `test_tool_profiles`: frozen source copy, tool/settings/source/index digests, independent Python AST check, dirty-source invalidation, historical-only режим | Конкретная установленная Graphify команда |
-| A3 | Native OpenCode 2.2.5: forced shell/edit/subagent/MCP write/execute, external read, forged plugin ID, удаление guard; нет записи/RPC. Native Codex diagnostic allowlist/deny RPC | Codex exec reviewer не квалифицирован; конкретные read-only MCP требуют аудита |
-| A4 | Worker process останавливается после session event; supervisor restart и explicit retry сохраняют session/worktree/backend/profile, journal history; profile/dependency/source-checkpoint drift блокирует запуск | Точное продолжение реальной model session OpenCode |
+| A1 | `test_tooling_acceptance`: fixture managed CLI workers/worktrees/MCP, scoped integration, review/gate. Отдельно native Serena 2.1.0: две stdio sessions и разные результаты symbol поиска | Native launcher test не заменяет полный managed model/gate run с реальной Serena |
+| A2 | `test_tool_profiles`: frozen source и invalidation. Отдельно Graphify 0.9.111: настоящий local AST extraction и source/package/parser/interpreter drift | Другие версии/семантический LLM graph не квалифицированы |
+| A3 | Native OpenCode 2.2.5: forced shell/edit/subagent/MCP write/execute, external read, forged plugin ID, удаление guard; нет записи/RPC. Native Codex: diagnostic allowlist/deny RPC и отдельный exec read/denied namespace proof | Строгий Codex RPC/resume boundary требует собственной qualification; конкретные read-only MCP требуют аудита |
+| A4 | Worker process interruption, supervisor restart и explicit retry сохраняют binding; drift блокирует запуск. Отдельно OpenCode: два настоящих Hydrogen/Flex turns, прежний session ID | Full workload gate и wire bytes opaque reasoning payload не проверены этим сценарием |
 | A5 | Startup/handshake/missing tool/timeouts/disconnect; model slot отсутствует при preflight failure; native OpenCode теряет fake MCP после provider dispatch и не сообщает completed, даже без MCP tool calls | Реальные отказы установленных сторонних сервисов |
 | A6 | Старый контракт без execution/profile; Codex flow проходит без создания OpenCode, без новых MCP; прежние schemas/checkpoints и scheduler покрыты regression suite | Windows/native qualification выполняется отдельно |
 | A7 | Успешные MCP calls и worker integration не спасают проваленный independent check; положительный A1 проходит freeze/check/review/gate; удаление tool receipt делает сохранённый ACCEPTED устаревшим | Live model workload отдельно от harness fixtures |

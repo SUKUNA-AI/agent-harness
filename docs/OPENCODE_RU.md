@@ -23,6 +23,7 @@ sessions и 3 reviewers, freeze, независимыми checks и final gate. 
 | Interrupt и exact session resume | QUALIFIED для fixtures | Новый экземпляр adapter, прежний session ID, прежний cwd и отдельный журнал |
 | Native managed leaf qualification | SUPPORTED | Свежие native permission probes и обязательный guard в реальном процессе исполнения |
 | Native pre-turn catalog и session restart | QUALIFIED для 2.2.5 | Реальный клиент; qualification намеренно останавливается до provider dispatch |
+| Native cloud session с точным продолжением | QUALIFIED для наблюдённого двухходового сценария | OpenCode 2.2.5, Hydrogen/Flex, прежний session ID и native history; не общий workload benchmark |
 | Reviewer с read-only tools | SUPPORTED при успешной квалификации | Реальный catalog, отрицательные native probes, guard и проверка runtime receipts |
 | OpenCode-native multi-agent | NOT_IMPLEMENTED | Нет контроля children, quotas, ownership и recovery |
 
@@ -203,6 +204,24 @@ variant и не игнорирует требование незаметно. У
 `--output-schema`: schema final answer проверяет supervisor. Переданный файл
 schema валидируется как доступный input; это не обещание provider-level
 structured output.
+
+### Проверенный Hydrogen/Flex сценарий и opaque reasoning metadata
+
+2026-11-17 выполнены два настоящих cloud turns через OpenCode 2.2.5:
+первый создал session, второй продолжил **тот же** конкретный session ID.
+Выбраны `google/gemini-4-hydrogen`, route restriction
+`google-ai-studio/flex`, `allow_fallbacks:false`, reasoning enabled.
+Это отдельная per-run настройка; установленная default model/provider и
+параметры основного Codex не менялись.
+
+В native session history наблюдалась opaque encrypted reasoning metadata.
+Разбор исходников клиента подтверждает сохранение и повторную передачу
+поддержанного native metadata формата при продолжении. Harness не извлекает
+из него скрытое рассуждение и не конвертирует format самостоятельно.
+Проверка подтверждает наличие metadata и точное native session continuation;
+она **не содержит outgoing-wire byte proof** и не удостоверяет байтовую
+идентичность opaque payload на удалённом provider endpoint. Не объявляйте
+наличие поля доказательством для другой модели, route или версии клиента.
 
 ## Permissions и отрицательные проверки
 
