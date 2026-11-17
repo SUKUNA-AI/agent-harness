@@ -61,6 +61,8 @@ def probe(adapter,metadata,role,folder,*,timeout=60):
                         'path':'sentinel.txt','content':'FORBIDDEN','name':'shared_symbol'})}
                 if name.startswith('mcp__fixture__'):
                     message.update(namespace='mcp__fixture',name=name[len('mcp__fixture__'):])
+                elif metadata.get('use_responses_lite'):
+                    message['namespace']='functions'
             response={'id':'resp_fixture','status':'completed','output':[message],
                 'usage':{'input_tokens':10,'output_tokens':3,'total_tokens':13}}
             events=[{'type':'response.created','response':dict(response,status='in_progress',output=[])},
@@ -119,7 +121,21 @@ def probe(adapter,metadata,role,folder,*,timeout=60):
                     raise HarnessError('Native MCP model-visible allowlist failed')
                 allowed={'list_mcp_resources','list_mcp_resource_templates','read_mcp_resource'}
                 if role=='worker' and metadata.get('apply_patch_tool_type') is not None:allowed.add('apply_patch')
-                actual_builtin=[tool for tool in tools if tool.get('name')!='mcp__fixture']
+                actual_builtin=[]
+                for tool in tools:
+                    if tool.get('name')=='mcp__fixture':continue
+                    if tool.get('type')=='namespace':
+                        if tool.get('name')!='functions' or not isinstance(tool.get('tools'),list):
+                            raise HarnessError('Unqualified native tool namespace')
+                        for leaf in tool['tools']:
+                            if leaf.get('type') not in {'function','custom'}:
+                                raise HarnessError('Unqualified nested native tool type')
+                            actual_builtin.append({**leaf,'namespace':'functions',
+                                'namespace_description':tool.get('description','')})
+                    else:
+                        if tool.get('type') not in {'function','custom'}:
+                            raise HarnessError('Unqualified native tool type')
+                        actual_builtin.append(tool)
                 if any(tool.get('name') not in allowed for tool in actual_builtin):
                     raise HarnessError('Native privileged builtin escaped its policy ceiling')
                 if builtin is None:builtin=actual_builtin
