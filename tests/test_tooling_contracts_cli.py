@@ -100,13 +100,15 @@ class ToolingContractCLITests(unittest.TestCase):
             codex.mkdir()
             with patch.dict(os.environ, {"CODEX_HOME": str(codex)}), \
                     patch("agent_harness.tooling_cli._opencode_catalog", side_effect=AssertionError("must not start client")), \
+                    patch("agent_harness.tooling_cli._codex_catalog", return_value={"status": "READY", "client_catalog_verified": True}) as codex_catalog, \
                     redirect_stdout(io.StringIO()):
                 for target in (source, codex, base / "absent", private / ".." / "source"):
                     with self.subTest(path=target):
                         self.assertEqual(dispatch(["qualify", "--backend", "opencode", "--root", str(source),
                             "--evidence-dir", str(target)]), 2)
                 self.assertEqual(dispatch(["qualify", "--backend", "codex", "--root", str(source),
-                    "--evidence-dir", str(private)]), 2)
+                    "--evidence-dir", str(private)]), 0)
+                codex_catalog.assert_called_once()
             self.assertEqual(list(source.iterdir()), [])
             self.assertEqual(list(private.iterdir()), [])
 

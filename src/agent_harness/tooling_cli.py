@@ -34,6 +34,24 @@ def _opencode_catalog(config, root, role, evidence_dir, profile):
         "scope": "native rehearsal; supervisor requalifies and guards each real invocation"}
 
 
+def _codex_catalog(config, root, role, evidence_dir, profile):
+    from .codex_execution import CodexAdapter
+    from .execution import require_native_dependencies
+    adapter = CodexAdapter().with_tool_config(config, root=root)
+    managed = getattr(adapter, "with_managed_tools", None)
+    if not callable(managed):
+        raise HarnessError("BLOCKED_NOT_QUALIFIED: installed Codex adapter has no managed native factory")
+    adapter = managed(root=root).qualify(root=root, role=role, evidence_dir=evidence_dir, timeout=60)
+    adapter.verify_qualification(root=root, role=role)
+    capabilities = adapter.capabilities()
+    require_native_dependencies(profile, adapter, capabilities)
+    return {"status": "READY", "client_catalog_verified": True,
+        "catalog": adapter.effective_tool_catalog(), "capabilities": capabilities,
+        "qualification_ref": adapter.qualification_receipt(), "model_calls": 0,
+        "qualified_for_exec": False, "reusable_as_authorization": False,
+        "scope": "native rehearsal; supervisor requalifies and guards each real invocation"}
+
+
 def dispatch(argv):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -73,7 +91,7 @@ def dispatch(argv):
             command.add_argument("--output", required=True, help="New private per-run config file; never a user/project config")
             command.add_argument("--apply", action="store_true", required=True)
     args = parser.parse_args(argv)
-    from .tool_profiles import builtin_profiles, load_profile, profile_digest, preflight_profile, render_codex, render_opencode
+    from .tool_profiles import builtin_profiles, execution_profile, load_profile, profile_digest, preflight_profile, render_codex, render_opencode
     try:
         if args.command == "browser-job":
             from dataclasses import fields
@@ -148,18 +166,22 @@ def dispatch(argv):
                 from .strict_yaml import load
                 graph = load(args.graph_index) if args.graph_index else None
                 result["readiness"] = preflight_profile(profile, args.backend, root, role, graph_index=graph)
-                if args.backend == "opencode" and result["readiness"]["status"] == "READY":
+                runtime_profile = profile
+                if result["readiness"]["status"] == "READY":
                     from .execution import available_profile
-                    native = render_opencode(available_profile(profile, result["readiness"]), root, role=role)
+                    runtime_profile = available_profile(execution_profile(profile, root), result["readiness"])
+                    native = (render_codex if args.backend == "codex" else render_opencode)(runtime_profile, root, role=role)
                     result.update(native_config=native, effective_config_digest=digest(native))
             if args.command == "catalog" and args.backend == "codex":
-                from .codex_execution import CodexAdapter
-                from .codex_tool_catalog import audit_catalog
-                result["client_catalog"] = audit_catalog(CodexAdapter(), native, root)
+                if result["readiness"]["status"] != "READY":
+                    result["client_catalog"] = {"status": "BLOCKED", "client_catalog_verified": False,
+                        "reason": "Tool dependencies are not ready for native catalog diagnostics"}
+                else:
+                    from .codex_execution import CodexAdapter
+                    from .codex_tool_catalog import audit_catalog
+                    result["client_catalog"] = audit_catalog(CodexAdapter(), native, root)
                 result["client_catalog_verified"] = result["client_catalog"]["client_catalog_verified"]
             elif args.command in {"catalog", "qualify"}:
-                if args.backend != "opencode":
-                    raise HarnessError("Codex execution qualification is unavailable; use tools catalog for its diagnostic audit")
                 if result["readiness"]["status"] != "READY":
                     result["client_catalog"] = {"status": "BLOCKED", "client_catalog_verified": False,
                         "reason": "Tool dependencies are not ready for native qualification"}
@@ -170,11 +192,12 @@ def dispatch(argv):
                     if (not evidence.is_dir() or evidence.is_symlink()
                             or any(evidence == p or p in evidence.parents for p in (root, codex, opencode))):
                         raise HarnessError("Qualification requires an existing private directory outside source/user config")
-                    result["client_catalog"] = _opencode_catalog(native, root, role, evidence, profile)
+                    qualifier = _codex_catalog if args.backend == "codex" else _opencode_catalog
+                    result["client_catalog"] = qualifier(native, root, role, evidence, runtime_profile)
                 else:
                     import tempfile
                     with tempfile.TemporaryDirectory(prefix="harness-opencode-catalog-") as directory:
-                        result["client_catalog"] = _opencode_catalog(native, root, role, Path(directory), profile)
+                        result["client_catalog"] = _opencode_catalog(native, root, role, Path(directory), runtime_profile)
                     result["client_catalog"]["artifact_lifetime"] = "temporary_diagnostic_only"
                 result["client_catalog_verified"] = result["client_catalog"]["client_catalog_verified"]
             if args.command == "smoke":

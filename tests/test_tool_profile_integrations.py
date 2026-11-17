@@ -87,6 +87,10 @@ class ToolProfileIntegrationTests(unittest.TestCase):
             render_opencode(source, self.source, cache_root=self.private))
         self.assertEqual(profile_digest(source), identity)
         self.assertEqual(source, self.profile())
+        forged = deepcopy(runtime)
+        forged["servers"][0]["command"] = [sys.executable, "-c", "print('forged')"]
+        with self.assertRaisesRegex(HarnessError, "Reserved browser"):
+            resolved_servers(forged, self.source, cache_root=self.private)
 
     def test_required_results_is_closed_subset_without_new_legacy_default(self):
         old = builtin_profiles()["coding"]
@@ -110,6 +114,10 @@ class ToolProfileIntegrationTests(unittest.TestCase):
             self.assertIn(str(self.source), first["command"])
             self.assertNotIn("help_argv", first)
             self.assertTrue(selected.called)
+        malformed = builtin_profiles()["coding"]
+        malformed["servers"][0]["command"] = [sys.executable, str(Path(local.__file__).resolve()), "serena-stdio", "--executable"]
+        with self.assertRaisesRegex(HarnessError, "executable binding"):
+            resolved_servers(malformed, self.source, cache_root=self.private)
 
     def test_context7_requires_explicit_named_profile_and_uses_clean_launcher(self):
         builtins = builtin_profiles()
@@ -147,6 +155,57 @@ class ToolProfileIntegrationTests(unittest.TestCase):
                 "--executable", "/fixture/graphify", "--timeout", "42"]), 0)
         self.assertEqual(build.call_args.args, (self.source, self.private))
         self.assertEqual(build.call_args.kwargs, {"executable": "/fixture/graphify", "frozen": None, "timeout": 42})
+
+    def test_native_qualify_cli_retains_dynamic_browser_dependencies_for_both_backends(self):
+        profile = self.private / "browser.yaml"
+        profile.write_text(dumps(self.profile()))
+        def qualify(config, root, role, evidence, runtime):
+            self.assertNotIn("browser", runtime)
+            self.assertEqual(len(runtime["servers"]), 1)
+            self.assertEqual(runtime["servers"][0]["id"], "playwright-managed")
+            self.assertEqual(set(runtime["servers"][0]["required_tools"]), set(TOOLS))
+            self.assertEqual(runtime["servers"][0]["required_results"], ["browser_snapshot"])
+            return {"status": "READY", "client_catalog_verified": True}
+        with patch("agent_harness.browser_integration.qualify_browser", return_value={"status": "QUALIFIED"}), \
+                patch("agent_harness.tooling_probe.probe_server", side_effect=self.ready), \
+                patch("agent_harness.tooling_cli._codex_catalog", side_effect=qualify) as codex, \
+                patch("agent_harness.tooling_cli._opencode_catalog", side_effect=qualify) as opencode, \
+                redirect_stdout(io.StringIO()):
+            for backend in ("codex", "opencode"):
+                self.assertEqual(dispatch(["qualify", "--profile", str(profile), "--root", str(self.source),
+                    "--backend", backend, "--evidence-dir", str(self.private)]), 0)
+        codex.assert_called_once()
+        opencode.assert_called_once()
+
+    def test_codex_qualification_factory_is_required_and_strong_api_is_used(self):
+        from agent_harness.tooling_cli import _codex_catalog
+        class Legacy:
+            def with_tool_config(self, *args, **kwargs):
+                return self
+        with patch("agent_harness.codex_execution.CodexAdapter", return_value=Legacy()):
+            with self.assertRaisesRegex(HarnessError, "no managed native factory"):
+                _codex_catalog({"mcp_servers": {}}, self.source, "worker", self.private, load_profile("baseline"))
+        calls = []
+        class Managed(Legacy):
+            def with_managed_tools(self, **kwargs):
+                calls.append(("factory", kwargs));return self
+            def qualify(self, **kwargs):
+                calls.append(("qualify", kwargs));return self
+            def verify_qualification(self, **kwargs):
+                calls.append(("verify", kwargs))
+            def capabilities(self):
+                return {"status": "qualified", "effective_tool_catalog": True}
+            def effective_tool_catalog(self):
+                return []
+            def qualification_receipt(self):
+                return {"path": "/fixture/core-receipt.json", "sha256": "1" * 64}
+        with patch("agent_harness.codex_execution.CodexAdapter", return_value=Managed()):
+            receipt = _codex_catalog({"mcp_servers": {}}, self.source, "worker", self.private, load_profile("baseline"))
+        self.assertEqual(receipt["status"], "READY")
+        self.assertFalse(receipt["qualified_for_exec"])
+        self.assertFalse(receipt["reusable_as_authorization"])
+        self.assertEqual([name for name, _ in calls], ["factory", "qualify", "verify"])
+        self.assertEqual(calls[1][1]["evidence_dir"], self.private)
 
 
 if __name__ == "__main__":

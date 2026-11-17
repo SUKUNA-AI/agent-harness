@@ -204,6 +204,10 @@ def resolved_servers(profile, root, *, cache_root=None):
     for spec in profile["servers"]:
         server = _expand(spec, root, cache)
         server["cwd"] = root
+        if server["id"] == "playwright-managed":
+            if profile.get("browser"):
+                raise HarnessError("Managed browser server ID is reserved for the browser policy")
+            _managed_browser_policy(server, root, cache)
         if server["id"] in {"serena", "context7"}:
             from . import local_tool_integrations as local
             if server["transport"] != "stdio":
@@ -213,7 +217,7 @@ def resolved_servers(profile, root, *, cache_root=None):
             prepared = len(command) > 2 and command[1] == helper
             if server["id"] == "serena":
                 if prepared:
-                    if "--executable" not in command:
+                    if "--executable" not in command or command[-1] == "--executable":
                         raise HarnessError("Managed Serena launcher has no executable binding")
                     executable = command[command.index("--executable") + 1]
                 elif len(command) == 4 and command[1:] == ["start-mcp-server", "--project", root]:
@@ -224,7 +228,7 @@ def resolved_servers(profile, root, *, cache_root=None):
                 server["environment"]["SERENA_HOME"] = str(Path(cache) / "serena" / "serena-home")
             else:
                 if prepared:
-                    if "--executable" not in command:
+                    if "--executable" not in command or command[-1] == "--executable":
                         raise HarnessError("Managed Context7 launcher has no executable binding")
                     executable = command[command.index("--executable") + 1]
                 elif len(command) == 3 and command[1:] == ["--transport", "stdio"]:
@@ -254,6 +258,23 @@ def _browser_policy(profile):
         raise HarnessError("CONFIG_REQUIRED: browser-testing requires explicit " + ", ".join(missing))
     from .browser_integration import validate_browser_policy
     return validate_browser_policy(policy)
+
+
+def _managed_browser_policy(server, root, cache):
+    """Runtime logical specs retain the exact core launcher and closed grants."""
+    import base64
+    from .browser_integration import browser_server
+    command = server.get("command", [])
+    if len(command) != 8:
+        raise HarnessError("Reserved browser server requires the core managed launcher")
+    try:
+        policy = json.loads(base64.b64decode(command[5], altchars=b"-_", validate=True))
+        expected = browser_server(policy, root=Path(root), private_root=Path(cache).parent)
+    except (ValueError, TypeError) as error:
+        raise HarnessError("Invalid managed browser policy binding") from error
+    if any(server.get(key) != value for key, value in expected.items() if key != "cwd"):
+        raise HarnessError("Reserved browser server launcher or grants drifted")
+    return policy
 
 
 def execution_profile(profile, root, *, cache_root=None):
@@ -384,10 +405,13 @@ def preflight_profile(profile, backend, root, role="worker", *, cache_root=None,
         _role(profile, backend, role)
         servers = resolved_servers(profile, root, cache_root=cache_root)
         receipt["required_dependencies"] = [s["id"] for s in servers if s["required"]]
-        if profile.get("browser"):
+        browser_policy = (_browser_policy(profile) if profile.get("browser") else
+            next((_managed_browser_policy(server, str(Path(root).resolve()), _roots(root, cache_root)[1])
+                for server in servers if server["id"] == "playwright-managed"), None))
+        if browser_policy is not None:
             from .browser_integration import qualify_browser
             _, cache = _roots(root, cache_root)
-            receipt["browser"] = qualify_browser(_browser_policy(profile), root=Path(root), private_root=Path(cache).parent,
+            receipt["browser"] = qualify_browser(browser_policy, root=Path(root), private_root=Path(cache).parent,
                 timeout=min(profile["timeouts"]["startup"], 30))
             if receipt["browser"]["status"] != "QUALIFIED":
                 receipt["status"] = "BLOCKED"
