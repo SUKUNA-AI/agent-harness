@@ -125,7 +125,20 @@ def thread(client,root,role,*,config=None,session_id=None,ephemeral=False):
     return response
 
 
+class _McpStarting(HarnessError):
+    pass
+
+
 def census(client,thread_id,config):
+    while True:
+        try:return _census_once(client,thread_id,config)
+        except _McpStarting:
+            if time.monotonic()>=client.deadline:
+                raise HarnessError('Native live MCP readiness deadline exhausted')
+            time.sleep(max(0,min(.05,client.deadline-time.monotonic())))
+
+
+def _census_once(client,thread_id,config):
     rows={};cursor=None;seen=set()
     while True:
         params={'threadId':thread_id,'limit':100,'detail':'toolsAndAuthOnly'}
@@ -135,6 +148,11 @@ def census(client,thread_id,config):
         for row in page['data']:
             if not isinstance(row,dict) or not isinstance(row.get('name'),str) or row['name'] in rows:
                 raise HarnessError('Native MCP census identity conflict')
+            disabled=config.get('mcp_servers',{}).get(row['name'],{}).get('enabled') is False
+            if disabled:
+                if row.get('runtimeStatus') in {'connected','starting','pending','reconnecting'}:
+                    raise HarnessError('Explicitly disabled native MCP server is active: '+row['name'])
+                continue
             if row.get('runtimeStatus')=='disabled':continue
             rows[row['name']]=row
         if len(rows)>MAX_SERVERS:raise HarnessError('Native MCP server bound exceeded')
@@ -145,10 +163,14 @@ def census(client,thread_id,config):
         seen.add(cursor)
     expected=config.get('mcp_servers',{})
     expected={name:value for name,value in expected.items() if value.get('enabled',True)}
-    if set(rows)!=set(expected):raise HarnessError('Native undeclared/missing MCP server')
+    if set(rows)-set(expected):
+        raise HarnessError('Native undeclared MCP server: '+','.join(sorted(set(rows)-set(expected))))
+    if set(expected)-set(rows):raise _McpStarting('Native MCP registration pending')
     catalog=[];connected=[]
     for name,spec in sorted(expected.items()):
         actual=rows[name]
+        if actual.get('runtimeStatus') in {'starting','pending','initializing','reconnecting'}:
+            raise _McpStarting('Native MCP connection pending: '+name)
         if actual.get('runtimeStatus')!='connected' or actual.get('toolsError') is not None:
             raise HarnessError('Native live MCP connection unverified: '+name)
         tools=actual.get('tools')
@@ -309,7 +331,14 @@ def qualify(adapter,*,root,role,evidence_dir,timeout=60,session_id=None):
     clone.tool_config={**copy.deepcopy(adapter._tool_config),'model_catalog_json':str(metadata_path),
         'agents':{'enabled':False},'features':{name:False for name in DISABLED},'web_search':'disabled',
         'tools':{'update_plan':{'enabled':False},'experimental_request_user_input':{'enabled':False}}}
-    if role=='worker':clone.tool_config['sandbox_workspace_write']={'writable_roots':[]}
+    import tomllib
+    declared=set(clone.tool_config.get('mcp_servers',{}))
+    for installed in sources(clone,root):
+        document=tomllib.loads(read_regular_file(installed['path']).decode('utf-8-sig'))
+        for name in document.get('mcp_servers',{}):
+            if name not in declared:clone.tool_config.setdefault('mcp_servers',{})[name]={'enabled':False}
+    if role=='worker':clone.tool_config['sandbox_workspace_write']={'writable_roots':[],
+        'exclude_slash_tmp':True,'exclude_tmpdir_env_var':True}
     folder=evidence/('qualification-'+__import__('secrets').token_hex(12));folder.mkdir(mode=0o700)
     runtime=folder/'runtime';runtime.mkdir(mode=0o700)
     from .codex_policy_probe import probe

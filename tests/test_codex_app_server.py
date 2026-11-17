@@ -51,4 +51,14 @@ class NativeCodexEventTests(unittest.TestCase):
         value=self.start()
         with self.assertRaises(HarnessError):
             value.feed('thread/tokenUsage/updated',{'threadId':'thread-original','turnId':'turn-original','tokenUsage':{'last':{}}})
+    def test_resume_historical_usage_is_validated_but_never_current_coverage(self):
+        value=NativeCodexEvents('thread-original',historical_turn_ids=['old-turn'])
+        counters={'inputTokens':9,'outputTokens':3,'cachedInputTokens':4,'reasoningOutputTokens':2,'totalTokens':12}
+        old={'threadId':'thread-original','turnId':'old-turn','tokenUsage':{'last':counters}}
+        self.assertEqual(value.feed('thread/tokenUsage/updated',old),[])
+        self.assertIsNone(value.usage)
+        with self.assertRaises(HarnessError):
+            value.feed('thread/tokenUsage/updated',dict(old,turnId='unobserved-turn'))
+        value.feed('turn/started',{'threadId':'thread-original','turn':{'id':'turn-current'}})
+        with self.assertRaises(HarnessError):value.feed('thread/tokenUsage/updated',old)
 if __name__=='__main__':unittest.main()

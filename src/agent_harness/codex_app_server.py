@@ -9,7 +9,7 @@ from .core import HarnessError
 
 
 class NativeCodexEvents:
-    def __init__(self, thread_id):
+    def __init__(self, thread_id, *, historical_turn_ids=()):
         if not isinstance(thread_id, str) or not thread_id:
             raise HarnessError('Exact native thread identity is required')
         self.thread_id = thread_id
@@ -18,6 +18,9 @@ class NativeCodexEvents:
         self.usage = None
         self.items = set()
         self.expected_turn_id = None
+        if any(not isinstance(value,str) or not value for value in historical_turn_ids):
+            raise HarnessError('Invalid resumed historical turn identity')
+        self.historical_turn_ids=frozenset(historical_turn_ids)
 
     def bind_turn_response(self,turn):
         if (not isinstance(turn,dict) or not isinstance(turn.get('id'),str) or not turn['id']
@@ -52,12 +55,18 @@ class NativeCodexEvents:
                 raise HarnessError('Native turn response/event identity changed')
             return [{'type': 'turn.started'}]
         if method == 'thread/tokenUsage/updated':
-            self._subject(params, active_turn=True)
+            self._subject(params)
             usage = params.get('tokenUsage', {}).get('last')
             required = {'inputTokens', 'outputTokens', 'cachedInputTokens', 'reasoningOutputTokens', 'totalTokens'}
             if (not isinstance(usage, dict) or not required <= set(usage)
                     or any(type(usage[key]) is not int or usage[key] < 0 for key in required)):
                 raise HarnessError('Malformed native usage event')
+            if (self.turn_id is None and self.expected_turn_id is None
+                    and params.get('turnId') in self.historical_turn_ids):
+                # Resume hydration may publish a known prior turn's counters
+                # after its response. They never cover this new invocation.
+                return []
+            self._subject(params, active_turn=True)
             values = {}
             for native, normalized in [('inputTokens', 'input_tokens'), ('outputTokens', 'output_tokens'),
                     ('cachedInputTokens', 'cached_input_tokens'), ('reasoningOutputTokens', 'reasoning_output_tokens')]:
@@ -235,6 +244,7 @@ class StrictCodexAdapter(CodexAdapter):
             timeout=min(timeout,(datetime.fromisoformat(deadline.replace('Z','+00:00'))-datetime.now(timezone.utc)).total_seconds())
         try:
             if timeout<=0:raise HarnessError('Native Codex task deadline expired')
+            if cancel_file and Path(cancel_file).exists():raise HarnessError('Cancelled before native process start')
             cwd=canonical_directory(cwd)
             if str(cwd)!=self.tool_root:raise HarnessError('Native Codex worktree drift')
             self.preflight(prompt,session_id=session_id,output_schema=output_schema,native_children=native_children,
@@ -305,7 +315,10 @@ class StrictCodexAdapter(CodexAdapter):
                 response=thread(client,cwd,proof.role,config=self.tool_config,session_id=session_id)
                 if response.get('model')!=document['model'] or response.get('modelProvider')!=document['model_provider']:
                     raise HarnessError('Native model/provider drift')
-                normalizer=NativeCodexEvents(response['thread']['id'])
+                history=response['thread'].get('turns',[]) if session_id is not None else []
+                if not isinstance(history,list) or any(not isinstance(item,dict) or not isinstance(item.get('id'),str) for item in history):
+                    raise HarnessError('Malformed native resume history identities')
+                normalizer=NativeCodexEvents(response['thread']['id'],historical_turn_ids=[item['id']for item in history])
                 publish({'type':'thread.started','thread_id':normalizer.thread_id})
                 catalog('before_dispatch')
                 params={'threadId':normalizer.thread_id,'input':[{'type':'text','text':prompt}],
