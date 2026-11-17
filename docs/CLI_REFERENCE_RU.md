@@ -1,9 +1,12 @@
-# Справочник CLI — 1.7.0
+# Справочник CLI — текущие исходники после 1.7.0
 
 Этот справочник описывает текущие аргументы парсера и значения по умолчанию.
 Практический полный сценарий — [эксплуатация](OPERATIONS.md#полный-локальный-пример),
 критерии доказательств — [приёмка](ACCEPTANCE.md), подробности навигации —
 [LSP](LSP_RU.md), контекст и Rust — [контекст и native](CONTEXT_AND_NATIVE_RU.md).
+
+Отличия от опубликованного ZIP 1.7.0 — [Unreleased notes](RELEASE_NOTES_NEXT.md).
+Новый релиз этим справочником не объявляется.
 
 ## Точки входа и формат
 
@@ -11,6 +14,11 @@
 укажите полный путь к `tools/harness.py`. После установки Python-пакета доступны
 `agent-harness <команда>` и `python -m agent_harness <команда>`. Это один dispatcher;
 `work` по умолчанию запускает установленный Codex как отдельный процесс; optional execution selection выбирает дополнительный backend только после qualification; остальные namespaces сохраняют прежнюю семантику. Native API клиента не эмулируется.
+
+`codex-harness` и `opencode-harness` не являются точками входа пакета: это
+private operator helpers конкретной машины, отсутствующие в переносимом ZIP.
+Публичный путь настройки tooling — `tools show/check/catalog/qualify/apply`,
+исполнения — `work start/resume` с полным contract.
 
 `--help` доступен у команд и вложенных подкоманд. `--version` печатает версию
 пакета. Аргументы `--run-dir`, `--contract`, `--record` и output paths не имеют

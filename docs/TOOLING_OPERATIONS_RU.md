@@ -5,7 +5,8 @@
 [Форматы](STATE_FORMATS_AND_MIGRATION_RU.md) · [Приёмка](TOOLING_ACCEPTANCE_RU.md)
 
 Руководство предназначено оператору локального CLI и владельцу managed run.
-Оно описывает optional tooling выпуска 1.7.0. Установка core, настройка внешнего инструмента, допуск execution
+Оно описывает optional tooling текущих исходников после 1.7.0;
+отличия от опубликованного ZIP закреплены в [Unreleased notes](RELEASE_NOTES_NEXT.md). Установка core, настройка внешнего инструмента, допуск execution
 backend и приёмка задачи имеют отдельные критерии. Ни один из этих шагов
 не публикует релиз.
 
@@ -14,6 +15,34 @@ backend и приёмка задачи имеют отдельные крите�
 ![Tool Profile: от политики до gate](diagrams/tool-profile-pipeline.svg)
 
 [Открыть редактируемую схему](diagrams/tool-profile-pipeline.drawio).
+
+<details>
+<summary>Та же схема в Mermaid</summary>
+
+```mermaid
+flowchart TD
+    profiles["8 встроенных профилей, version 1<br/>baseline · coding · architecture · reviewer-readonly<br/>browser-testing · documents · coding-context7 · architecture-context7<br/>Docling для documents исключён и не установлен; baseline от него не зависит"]
+    policy["Strict YAML policy → profile/config digest<br/>Backend · role · allow/deny · required dependencies · canonical worktree/cache binding<br/>Render сохраняет выбранные model/provider и native auth; missing required dependency → BLOCKED"]
+    probe["Dependency preflight / диагностический catalog<br/>Executable + version → contained process → initialize → tools/list → ping → stopped tree<br/>READY подтверждает конкретный probe; не доказывает enforcement будущего model turn"]
+    codex["Codex native renderer<br/>mcp_servers · enabled/disabled tools<br/>Disposable app-server catalog без model turn<br/>Диагностика: qualified_for_exec = false"]
+    oc["OpenCode V2 native renderer<br/>harness-leaf · permissions · deny policies<br/>Code Mode off · pool off<br/>Fresh native permission / catalog / exact-session probes"]
+    cxdeny["Strict Codex — EXPERIMENTAL transport<br/>Тот же owned app-server thread: census → turn → census<br/>0.167.0: проверен scripted provider; paid workload UNQUALIFIED<br/>Fresh runtime qualification перед каждым новым run<br/>Без доказательства → BLOCKED_NOT_QUALIFIED"]
+    ocguard["Реальный OpenCode invocation + private guard<br/>Role / wire catalog audit → before_dispatch<br/>after_response: actual EOF или confirmed consumer cancel<br/>Read error / failed cancel / disconnect не дают receipt<br/>Native clean stop и полный JSONL обязательны отдельно"]
+    pin["Durable completion receipt — совместное доказательство<br/>Exact session · client/profile/config/source digests · usage · pinned JSONL/catalog<br/>Native finish + exit 0 + process tree stopped; неполный JSONL / finish → UNKNOWN<br/>Для OpenCode обязательны оба runtime audit stages: before_dispatch + after_response"]
+    gate["Freeze → independent checks / requirements → fresh independent review → final gate<br/>Тот же candidate и актуальные source/tool/index provenance<br/>Только gate подтверждает результат задачи; успешный MCP call не означает ACCEPTED"]
+    bounds["Общая граница<br/>MCP server работает на пользовательском host; OpenRouter — provider модели native OpenCode.<br/>Baseline не требует новых MCP. Нет auto-install tools, новой БД, обязательного daemon или нового model API.<br/>Наблюдённый Hydrogen + Serena + Context7 smoke не является общей квалификацией всех моделей и проектов."]
+    profiles --> policy
+    policy --> probe
+    probe -->|"Codex"| codex
+    probe -->|"OpenCode"| oc
+    codex -->|"execution boundary"| cxdeny
+    oc -->|"execution boundary"| ocguard
+    cxdeny -->|"required fresh proof"| pin
+    ocguard -->|"required fresh proof"| pin
+    pin -->|"completion ≠ acceptance"| gate
+```
+
+</details>
 
 Strict YAML профиль задаёт backend, роли, MCP servers, CLI dependencies,
 allowlists и ограничения индекса. `tools dry-run` проецирует его в конфигурацию
@@ -86,6 +115,11 @@ Core устанавливается по [SETUP_RU](../SETUP_RU.md): doctor → 
 постоянный package root. Уже открытая сессия не получает hot reload от
 изменения файлов. Model/provider/effort и permissions сохраняются.
 
+Portable команды ниже входят в пакет. Локальные operator helpers
+`codex-harness` и `opencode-harness` — private machine overlay, не часть CLI/ZIP.
+Их наличие, auth/config и host paths нельзя считать prerequisite другой машины.
+Не копируйте эти helpers вместо documented execution contract.
+
 Для команд ниже cwd — package root, `HARNESS_PROJECT` — существующий исходный
 checkout, `HARNESS_PRIVATE` — отдельный существующий private каталог вне него
 и вне пользовательских Codex/OpenCode configs. Например, в POSIX shell:
@@ -121,10 +155,13 @@ Baseline не содержит внешних MCP/CLI dependencies. Его `chec
 | Конвертация документов | Optional `documents` | Только по отдельной потребности и квалификации; Docling не нужен обычной разработке |
 
 На 2026-11-17 отдельно проверены native Serena 2.1.0 (две concurrent stdio
-sessions), Context7 4.6.0 (public reads), Graphify 0.9.111 (actual index и
+sessions), Context7 4.6.0 (public reads), Graphify-Labs/graphify, distribution `graphifyy` 0.9.111 (actual index и
 toolchain drift), ast-grep 0.51.3 (native migration и independent regression),
 official Playwright MCP 0.0.85 (семь реальных browser scenarios). Это scoped
-qualification, не разрешение пропустить checks нового проекта. Подробности и
+qualification, не разрешение пропустить checks нового проекта.
+После SSE EOF/cancel исправления отдельно наблюдён реальный Hydrogen/Flex turn
+с Serena + Context7, post-response audit и process cleanup. Это не full workload
+acceptance; optional tools на Windows этим Linux proof не квалифицированы. Подробности и
 границы — [матрица приёмки](TOOLING_ACCEPTANCE_RU.md).
 
 Если оператор исключил Docling, оставьте `documents` невыбранным и запишите
@@ -133,6 +170,12 @@ baseline. Отсутствующая required dependency выбранного п
 В текущей поставке работ Docling явно исключён по выбору оператора и не
 устанавливался. Browser profile до задания exact origins и absolute runtime
 paths остаётся `CONFIG_REQUIRED`.
+
+Native OpenRouter model entries настраиваются отдельно: [пошаговый пример
+трёх вариантов](OPENCODE_RU.md#пошагово-выбрать-один-из-трёх-openrouter-вариантов).
+Он сохраняет global defaults и не добавляет model/provider в Tool Profile.
+MCP процессы и их private state находятся на машине клиента; OpenRouter
+предоставляет модель, а не среду запуска локальных tools.
 
 ## 4. Настроить и проверить профиль
 
@@ -230,6 +273,36 @@ dispatch. Exit 0 `work start/resume` означает ACCEPTED, exit 1 — на�
 ![Изоляция backend, продолжение и acceptance](diagrams/tooling-isolation-resume.svg)
 
 [Открыть редактируемую схему](diagrams/tooling-isolation-resume.drawio).
+
+<details>
+<summary>Та же схема в Mermaid</summary>
+
+```mermaid
+flowchart TD
+    sup["Supervisor: Strict YAML contract / plan + private JSONL journal<br/>DAG · scopes · до 12 managed sessions, включая до 3 reviewers · checkpoints · bounded retry<br/>Codex по умолчанию; OpenCode — optional managed leaf; OpenCode-native subagents NOT_IMPLEMENTED"]
+    a["Leaf A: harness-owned worktree A<br/>Canonical cwd A · scope A · own native client<br/>Serena: отдельный server / project / private cache<br/>Context7: public docs / native connection<br/>Finite browser context A + private artifacts A"]
+    b["Leaf B: harness-owned worktree B<br/>Canonical cwd B · scope B · own native client<br/>Serena: другой server / project / private cache<br/>Нет shared mutable project instance<br/>Finite browser context B + private artifacts B"]
+    receipts["Invocation → durable completion receipts<br/>Exact session · client/profile/config digests · usage · pinned JSONL / catalog / runtime audits<br/>Native finish + exit 0 + stopped process tree; неполные доказательства → UNKNOWN<br/>Graphify index: frozen source + commit/dirty snapshot + config/tool/index digests; drift инвалидирует index"]
+    interrupt["Interruption / unknown outcome<br/>Сначала определить фактический исход<br/>Не повторять invocation вслепую"]
+    resume["Exact resume reconciliation<br/>Process + session + physical worktree identity<br/>Client / profile / dependencies / source / index provenance"]
+    deny["Drift или неполное evidence<br/>BLOCKED / recovery required<br/>--last и пересказ не являются exact resume"]
+    cont["Продолжение в том же run<br/>Прежние session / backend / worktree<br/>Прежние attempts, tokens и deadline<br/>Checkpoint → bounded retry без новой квоты"]
+    integrate["Integration и source-bound acceptance<br/>Local checks → scoped integration → integrated checks → freeze<br/>Requirement coverage + independent checks / fresh review → final gate<br/>Completion leaf или успешный MCP call не означает ACCEPTED"]
+    verify["Свежесть сохранённого ACCEPTED<br/>status --verify-evidence сверяет candidate, inputs и artifacts<br/>Изменение bytes / потеря receipt → STALE; история не переписывается"]
+    sup -->|"isolated worker"| a
+    sup -->|"isolated worker"| b
+    a --> receipts
+    b --> receipts
+    receipts -->|"interrupted / unknown"| interrupt
+    interrupt -->|"reconcile"| resume
+    resume -->|"drift / unknown"| deny
+    resume -->|"proof valid"| cont
+    cont -->|"same budgets"| integrate
+    receipts -->|"completion verified"| integrate
+    integrate -->|"saved result"| verify
+```
+
+</details>
 
 Каждый managed writer получает harness-owned Git worktree, свой cwd и scope.
 Внешний stdio MCP запускается в этом worktree; private cache не разделяется

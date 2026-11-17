@@ -1,4 +1,4 @@
-# Native Agent Harness 1.7.0
+# Native Agent Harness
 
 Локальный комплект для Codex: общие инструкции, память, работа с большими
 репозиториями, делегация и проверяемое продолжение задач. Модели запускает
@@ -6,8 +6,16 @@
 исходниками. Дополнительный LLM API, ключ, сервер, daemon и база данных не нужны.
 
 [Скачать полный ZIP 1.7.0](https://github.com/SUKUNA-AI/agent-harness/releases/download/v1.7.0/agent-harness-1.7.0.zip) ·
-[Изменения выпуска](docs/RELEASE_NOTES_1.7.0.md) ·
+[Выпуск 1.7.0](docs/RELEASE_NOTES_1.7.0.md) ·
+[Изменения после 1.7.0](docs/RELEASE_NOTES_NEXT.md) ·
 [Подробная установка](SETUP_RU.md) · [Документация](docs/INDEX.md)
+
+**Публичный релиз — 1.7.0; эта ветка содержит изменения после него.**
+Опубликованный ZIP закреплён своим manifest и не меняется. Исправление
+OpenCode terminal SSE EOF/cancel audit есть в текущих исходниках, но отсутствует
+в ZIP 1.7.0. Следующий релиз готовится; нового тега или ZIP пока нет.
+Для установки опубликованного пакета используйте его release notes; границы
+нового кода и проверок — в [Unreleased notes](docs/RELEASE_NOTES_NEXT.md).
 
 В 1.7.0 добавлены типизированные Tool Profiles, изолированные MCP-подключения,
 source-bound Graphify index и optional OpenCode V2 managed leaf backend.
@@ -32,14 +40,15 @@ checkout; независимые изменения Git выполняются �
 
 ## Optional Tool Profiles и OpenCode
 
-В выпуск включены [Tool Profiles](docs/TOOL_PROFILES_RU.md): per-worktree
+В исходниках доступны восемь [Tool Profiles](docs/TOOL_PROFILES_RU.md): per-worktree
 MCP, live dependency diagnostics, native client renderers, Graphify provenance и
 проверяемые ast-grep migrations. Baseline не требует новых инструментов и
 сохраняет прежние контракты. [Codex MCP](docs/CODEX_MCP_RU.md) использует локальные
 overrides без перезаписи auth/config; [OpenCode V2](docs/OPENCODE_RU.md) —
 дополнительный optional adapter для managed leaf worker.
 
-Coding/architecture используют private native Serena launchers. Публичная
+Coding/architecture используют включённые в core Serena launchers с private
+состоянием на каждый worktree. Публичная
 Context7 документация добавляется явным выбором `coding-context7` или
 `architecture-context7`. `tools graphify-build` строит проверяемый local AST
 index, `tools browser-job` запускает finite Playwright actions и независимую
@@ -56,15 +65,30 @@ OpenCode V2 проходит native preflight без inference, затем пр�
 Лимиты 12 managed sessions и 3 reviewers,
 worktree ownership, независимые checks и final gate общие. Матрица сценариев и
 границы проверки — [Tooling acceptance](docs/TOOLING_ACCEPTANCE_RU.md).
-Ранее опубликованный ZIP 1.6.1 сохранён отдельно и не изменяется.
+Проверенный Linux-сценарий с OpenCode 2.2.5 выполнил реальный model turn через
+OpenRouter с вызовами Serena и Context7, post-response audit и cleanup. Это
+ограниченный smoke нового кода; полный model workload/gate и optional tooling
+на Windows им не квалифицированы. Strict Codex transport — **EXPERIMENTAL**;
+платный Codex workload не квалифицирован. Явный per-run выбор Hydrogen/Flex,
+DeepSeek/DeepInfra FP8 или Opus через native OpenRouter provider —
+[пошаговая настройка](docs/OPENCODE_RU.md#пошагово-выбрать-один-из-трёх-openrouter-вариантов);
+portable defaults при этом не переключаются.
 Внешние MCP/CLI включаются по потребности. Docling не является зависимостью
-обычной инженерной работы; невыбранный documents profile можно явно пропустить.
+обычной инженерной работы; он исключён из проверенного окружения и не
+устанавливался. Шаблон `documents` остаётся доступен для отдельной квалификации.
 
 ```text
 python tools/harness.py tools list
 python tools/harness.py tools dry-run --profile baseline --backend codex --root /absolute/project
-python tools/harness.py tools check --profile coding --backend codex --root /absolute/project
+python tools/harness.py tools check --profile baseline --backend codex --root /absolute/project
 ```
+
+Команды выполняются из package root; `/absolute/project` — существующий checkout.
+Core не устанавливает optional dependencies. Пошаговый portable путь —
+`tools show/check/catalog/qualify`, затем новый private fragment через
+`tools apply` и полный contract для `work start/resume`. `tools apply` не меняет
+глобальные configs. Локальные `codex-harness`/`opencode-harness` operator helpers
+не входят в пакет, CLI или ZIP и не нужны для этих команд.
 
 ## Требования и поставка
 

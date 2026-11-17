@@ -112,6 +112,33 @@ continuation. Наличие opaque encrypted reasoning metadata и source-backe
 не выполнялся. Global default model не менялась. Подробности —
 [OpenCode](OPENCODE_RU.md#проверенный-hydrogenflex-сценарий-и-opaque-reasoning-metadata).
 
+### SSE regression и actual model + MCP после исправления
+
+Исходный реальный Hydrogen/Flex + Serena + Context7 turn выполнил tool calls,
+но не имел обязательного `after_response` и остался `UNKNOWN_OUTCOME`.
+Исправление guard в source revision `277519e3494e5878670f57e36aba357ac990547e`
+покрывает network EOF и подтверждённый consumer cancel terminal SSE.
+Опубликованный ZIP 1.7.0 этого исправления не содержит.
+
+Новый отдельный Linux smoke наблюдал один реальный OpenRouter
+`openrouter/google/gemini-4-hydrogen` turn, только route
+`google-ai-studio/flex`, `allow_fallbacks:false`, с двумя завершёнными MCP calls:
+`serena_find_symbol` и `context7_resolve-library-id`. Проверены post-response
+audit, неизменность source и остановка owned process tree.
+Статус — `OBSERVED_REAL_OPENROUTER_MCP`, acceptance — `not_performed`.
+Это не полный supervisor workload benchmark или final gate и не квалификация
+платного Codex, других моделей, других routes либо optional tools на Windows.
+Private receipts, session IDs, auth и host paths не входят в Git.
+
+Отдельный targeted regression запуск для SSE/native OpenCode/tool profiles
+дал **77 tests: 76 PASS, 1 SKIP**, exit 0. Он включает семь новых lifecycle
+tests настоящего guard с Node Web Streams; реальные native negative/permissions/
+resume сценарии используют isolated local scripted provider без платных calls.
+Это уже выполненные scoped evidence, а не результат запуска команд ниже
+читателем. Старый full baseline **1370 PASS, 75 SKIP** относится к другому
+исходному snapshot и не является полной проверкой source revision с SSE fix.
+Текущая граница поставки — [Unreleased notes](RELEASE_NOTES_NEXT.md).
+
 ## Семь обязательных сценариев
 
 | ID | Автоматизированное доказательство | Что остаётся live |
@@ -140,6 +167,7 @@ python -m unittest discover -s tests -p test_tool_profiles.py -v
 python -m unittest discover -s tests -p test_tooling_contracts_cli.py -v
 python -m unittest discover -s tests -p test_codex_execution.py -v
 python -m unittest discover -s tests -p test_opencode_execution.py -v
+python -m unittest discover -s tests -p test_opencode_response_lifecycle.py -v
 python -m unittest discover -s tests -p test_tooling_acceptance.py -v
 python -m unittest discover -s tests -p test_codex_tool_catalog.py -v
 ```

@@ -95,6 +95,28 @@ cached catalog. Необязательный недоступный server мо�
 квалификацией по fallback policy. Потеря уже подключённого optional server
 внутри исполнения пока блокирует результат консервативно.
 
+## Завершение SSE и проверка MCP после ответа
+
+Изменение исходников после опубликованного 1.7.0: guard проверяет живые MCP
+connections и пишет `after_response` при сетевом EOF либо после успешной
+отмены чтения response body клиентом. Native provider SDK может получить
+terminal SSE и отменить оставшееся чтение до EOF; прежний `TransformStream.flush`
+не вызывался на этом пути. Поэтому настоящий model/tool turn мог завершиться,
+но без обязательного receipt оставался `unknown_outcome`.
+
+Проверка выполняется один раз и ожидается до завершения response path.
+Ошибка stream, отклонённый upstream cancel, потеря MCP или source drift не дают
+успешного post-response receipt. Сам `after_response` также не доказывает
+завершение: normalizer отдельно требует native stop/finish и clean JSONL EOF,
+а contained runner — завершение process tree. Требование completion не ослаблено.
+
+Семь regression tests в
+[`test_opencode_response_lifecycle.py`](../tests/test_opencode_response_lifecycle.py)
+используют настоящий guard и Node Web Streams: EOF, terminal cancel, потерю MCP,
+ожидание отложенной проверки, отказ cancel, stream error и незавершённый
+native step. Исправление отсутствует в опубликованном ZIP 1.7.0;
+[граница поставки](RELEASE_NOTES_NEXT.md).
+
 ## Проверенные команды и isolated standalone
 
 Эти справочные команды доступны в 2.2.5 и не запускают model call:
@@ -222,6 +244,129 @@ structured output.
 она **не содержит outgoing-wire byte proof** и не удостоверяет байтовую
 идентичность opaque payload на удалённом provider endpoint. Не объявляйте
 наличие поля доказательством для другой модели, route или версии клиента.
+
+### OpenRouter: настройки выбранного run и локальные MCP
+
+OpenRouter — native provider OpenCode. Harness не добавляет собственного
+model API и не переносит MCP execution на OpenRouter: локальный OpenCode
+запускает локальные MCP процессы, обращается к ним и передаёт модели
+разрешённые schemas/результаты. Context7 может обращаться к публичной сети;
+это отдельный путь внешнего сервера, а не размещение MCP у model provider.
+
+Зафиксированные оператором варианты перечислены для воспроизводимости
+конфигурации; таблица не означает квалификацию всех моделей:
+
+| Model ID в OpenRouter | Per-run ограничение | Граница проверки |
+| --- | --- | --- |
+| `google/gemini-4-hydrogen` | Reasoning enabled; только `google-ai-studio/flex`, без fallback | Наблюдён реальный model + MCP smoke и отдельный exact-session continuation |
+| `deepseek/deepseek-v4.1-flash-1017` | Reasoning enabled; только `deepinfra/fp8`, без fallback | Зафиксированный вариант конфигурации; real MCP workload здесь не квалифицирован |
+| `anthropic/claude-opus-5.5` | Reasoning enabled; существующая provider route | Здесь не заявлены exclusive provider pin или real MCP workload qualification |
+
+CLI model selector OpenCode для первого варианта имеет вид
+`openrouter/google/gemini-4-hydrogen`. Provider options задаются штатной
+конфигурацией OpenCode отдельно от Tool Profile: profile renderer запрещает
+подмену `model/providers`. Таблица не является JSON fragment для вставки.
+Ни глобальная default model/provider, ни настройки основного Codex не менялись.
+Auth и machine-specific конфигурация остаются вне переносимого пакета.
+
+### Пошагово: выбрать один из трёх OpenRouter вариантов
+
+Это native OpenCode V2 конфигурация, **не** Tool Profile и не полный harness
+contract. Cwd — отдельный проект; private JSON храните вне source и Git.
+Нужны установленный OpenCode 2.2.5, доступ к OpenRouter и обычная native auth
+либо уже настроенный `OPENROUTER_API_KEY` в защищённом окружении. Не вставляйте
+значение ключа в JSON, команду, receipt или отчёт. Облачные turns могут тарифицироваться.
+
+1. Проверьте `opencode --version`, `opencode run --help` и `opencode auth --help`.
+   Если auth ещё не настроен, используйте штатный `opencode auth login`.
+2. Сохраните JSON ниже в новый private файл, например
+   `/absolute/private/openrouter-models.json`. Он перечисляет модели и routes,
+   но не задаёт top-level `model`, не меняет global default и не содержит auth.
+   Если в вашем native config уже есть этот provider, сохраняйте его остальные
+   поля и добавляйте только необходимые model entries после сравнения.
+
+```json
+{
+  "providers": {
+    "openrouter": {
+      "env": ["OPENROUTER_API_KEY"],
+      "package": "@opencode/ai/providers/openrouter",
+      "settings": {"baseURL": "https://openrouter.ai/api/v1"},
+      "models": {
+        "google/gemini-4-hydrogen": {
+          "name": "Gemini 4 Hydrogen (Google AI Studio Flex)",
+          "modelID": "google/gemini-4-hydrogen",
+          "body": {
+            "reasoning": {"enabled": true},
+            "provider": {"only": ["google-ai-studio/flex"], "allow_fallbacks": false}
+          }
+        },
+        "deepseek/deepseek-v4.1-flash-1017": {
+          "name": "DeepSeek V4.1 Flash 1017 (DeepInfra FP8)",
+          "body": {
+            "reasoning": {"enabled": true},
+            "provider": {"only": ["deepinfra/fp8"], "allow_fallbacks": false}
+          }
+        },
+        "anthropic/claude-opus-5.5": {
+          "name": "Claude Opus 5.5",
+          "body": {"reasoning": {"enabled": true}}
+        }
+      }
+    }
+  }
+}
+```
+
+В V2 используется именно `providers`, `package`, `settings` и `env` как массив
+имён переменных; `npm` и строковый `env` не являются заменой этого примера.
+У Opus здесь не задан `provider.only`: сохраняется существующий route,
+exclusive pin не заявляется. Не переносите machine-specific context/output
+limits по аналогии: они зависят от фактической модели и provider contract.
+
+3. Проверьте effective config без model turn, подключив файл **к одному
+   процессу**. Команда требует local listen и может запускать подключённые MCP.
+   Читайте результат локально; merged user config не публикуйте:
+
+```bash
+OPENCODE_CONFIG=/absolute/private/openrouter-models.json opencode --standalone debug config
+```
+
+PowerShell: задайте `$env:OPENCODE_CONFIG` с native абсолютным путём в отдельном
+терминале, затем выполните `opencode --standalone debug config`. Не записывайте
+эту переменную в глобальный профиль ОС. Проверяйте project/system config layers:
+добавочный файл не отменяет остальные native precedence rules.
+
+4. Для отдельно разрешённой **реальной model-проверки** выберите ровно один
+   selector из таблицы. Следующий пример создаёт новую native session и делает
+   model call; это не diagnostic preflight:
+
+```bash
+OPENCODE_CONFIG=/absolute/private/openrouter-models.json opencode run --standalone --format json --model openrouter/google/gemini-4-hydrogen --title "Explicit model selection" "Ответь одним словом: READY."
+```
+
+Для DeepSeek замените только selector на
+`openrouter/deepseek/deepseek-v4.1-flash-1017`; для Opus — на
+`openrouter/anthropic/claude-opus-5.5`. Не выполняйте все три команды ради
+настройки. Явный title исключает дополнительный автоматический title call.
+На Windows используйте тот же `--model` после установки process-local
+`$env:OPENCODE_CONFIG` в отдельном терминале. Новая native session нужна,
+чтобы не менять model binding существующего exact-resume run.
+
+Самостоятельный `opencode run` не получает harness guard, managed quotas,
+reviewer isolation или final gate автоматически. Для защищённого исполнения
+с MCP вернитесь к [полному work contract](TOOLING_OPERATIONS_RU.md#5-включить-профиль-в-существующий-contract):
+профиль и role/worktree получают свежую qualification, а runtime evidence
+проверяется внутри каждого dispatch. У `work start` нет флага `--model`;
+не добавляйте model/providers в закрытую schema `execution` или Tool Profile.
+Наличие модели в списке native provider не означает её live-квалификацию.
+
+После исправления SSE выполнен отдельный реальный Hydrogen/Flex turn с
+`serena_find_symbol` и `context7_resolve-library-id`: оба вызова завершены,
+runtime proof включает post-response audit, source остался неизменным, owned
+process trees остановлены. Исходный smoke без `after_response` сохраняет статус
+`UNKNOWN_OUTCOME`; новый receipt его не переписывает. Новый smoke подтверждает
+один наблюдённый сценарий, а не весь supervisor plan/check/review/gate.
 
 ## Permissions и отрицательные проверки
 

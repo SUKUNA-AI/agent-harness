@@ -10,6 +10,13 @@ tooling использует отдельный owned stdio app-server transport
 диагностическое доказательство ephemeral thread на будущий legacy `exec`.
 Model/provider остаются внутри штатного Codex, общий MCP proxy не добавляется.
 
+Переносимый интерфейс — `python tools/harness.py tools ...` из package root
+и execution selection в полном work contract. Машинный helper `codex-harness`
+не входит в CLI, пакет или release ZIP. Он не требуется для `tools show`,
+`check`, `catalog`, `qualify`, сохранения нового fragment через `tools apply`
+или стандартного `work start/resume`. Успех локального helper не квалифицирует
+другую машину; global config/auth не переносится.
+
 ## Фактический интерфейс
 
 Интерфейс сверялся с `codex-cli 0.167.0`, help, генерируемой app-server schema

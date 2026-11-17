@@ -1,6 +1,8 @@
 # Конфигурация Codex и контракт установщика
 
-Справочник релиза **1.7.0**, актуальность core reference **2026-11-09**, tooling — **2026-11-17**. Изменения harness
+Справочник текущих исходников после **1.7.0**, актуальность core reference
+**2026-11-09**, tooling — **2026-11-17**. Опубликованный ZIP 1.7.0 закреплён
+собственным manifest; [Unreleased notes](RELEASE_NOTES_NEXT.md) описывают отличия. Изменения harness
 определяет [installation.py](../src/agent_harness/installation.py), инвентаризацию
 источников — [diagnostics.py](../src/agent_harness/diagnostics.py).
 Синтаксис и runtime-приоритеты клиента сверяются с
@@ -180,6 +182,15 @@ Browser profile требует явных `allowed_origins`, `mcp_package`,
 даёт `CONFIG_REQUIRED`. Context7 добавляется только явным выбором
 `coding-context7`/`architecture-context7`; обычные coding/architecture не
 получают новую network dependency. Docling исключён из обычной установки.
+
+Для OpenRouter используется native provider OpenCode; model options задаются
+отдельно от Tool Profile. Локальные MCP остаются процессами на машине клиента.
+Проверенные настройки Hydrogen/Flex, другие зафиксированные варианты и границы
+их evidence — [OpenRouter и MCP](OPENCODE_RU.md#openrouter-настройки-выбранного-run-и-локальные-mcp).
+Машинные operator helpers не входят в переносимую конфигурацию. Переносимый
+`tools apply` пишет только новый private fragment и не включает его в global
+config автоматически. Для его использования в execution нужен полный contract
+с разрешённым scope и acceptance checks. Открытая сессия не получает hot reload.
 
 ## Как читать `doctor`
 

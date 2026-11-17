@@ -28,6 +28,18 @@ review и gate.
 профиля остаётся `BLOCKED`; явная `availability: optional` даёт `NOT_AVAILABLE`.
 Optional server сохраняет конкретный отказ; отсутствие server не становится PASS.
 
+В проверенном окружении `documents` исключён по выбору оператора: Docling не
+устанавливался. Builtin template не означает установленную зависимость.
+Сопоставление пакетов: Serena — `serena-agent` 2.1.0, Context7 —
+`@upstash/context7-mcp` 4.6.0, Graphify-Labs/graphify — distribution `graphifyy`
+0.9.111, ast-grep — `@ast-grep/cli` 0.51.3, official Playwright MCP —
+`@playwright/mcp` 0.0.85. Это версии ограниченной Linux-квалификации, а не
+автоматическая установка внешних packages или квалификация Windows.
+
+Core launchers в `local_tool_integrations.py` входят в исходный пакет и создают
+private state для native MCP. Их не следует путать с машинными operator helpers
+`codex-harness`/`opencode-harness`, которые в CLI и release ZIP не входят.
+
 ## Формат
 
 Схема [tool-profile.schema.json](../schemas/tool-profile.schema.json) закрывает
