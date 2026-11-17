@@ -46,7 +46,7 @@ log закрепляются в completion receipt. Сохранённый diagn
 | Codex baseline без новых полей | SUPPORTED | Сохраняется существующий flow |
 | Strict профили, render/dry-run, dependency probes | SUPPORTED | Отсутствующая dependency видна отдельно |
 | Native Codex MCP catalog/deny RPC | QUALIFIED для изолированного probe | Не квалификация последующего exec |
-| Strict Codex owned app-server API | EXPERIMENTAL; текущий live допуск BLOCKED_NOT_QUALIFIED | Preserved Lite native probe отверг builtin policy ceiling; production RPC/resume не квалифицированы |
+| Strict Codex owned app-server API | EXPERIMENTAL; текущий live допуск BLOCKED_NOT_QUALIFIED | Нужны актуальная per-project core qualification и exact resume proof; отдельный успешный RPC read не подтверждает весь путь |
 | MCP profile в managed execution | Отдельные qualified backend boundaries | OpenCode guard; Strict Codex owned app-server transport требует собственного native proof, legacy exec его не наследует |
 | Строгий reviewer с MCP | QUALIFIED для OpenCode 2.2.5 с fixture MCP | Реальный клиент и malicious provider negatives; реализация конкретного MCP требует аудита |
 | Serena на каждый worktree | QUALIFIED для launcher 2.1.0 и OpenCode 2.2.5 | Две concurrent native stdio sessions, затем два native OpenCode workers с реальными symbol calls; local scripted provider, scope/cleanup |
@@ -70,12 +70,11 @@ version и `UNKNOWN_OUTCOME` не являются успешной приёмк
 optional tool boundaries на Windows/macOS; прежняя baseline поддержка пакета
 и её release evidence имеют собственные границы.
 
-Новый Strict Codex API реализован отдельно от baseline. Текущий live verifier
-вернул `Native privileged builtin escaped its policy ceiling` и не выдал
-production admission. Это закрытый отказ с ещё не установленной корневой
-причиной; успешный diagnostic/exec namespace experiment не заменяет требуемый
-proof нового transport. До repair и свежей native проверки статус остаётся
-`BLOCKED_NOT_QUALIFIED`, включая strict reviewer и exact RPC resume.
+Новый Strict Codex API реализован отдельно от baseline. До завершения
+актуальной per-project core qualification и exact resume proof статус остаётся
+`EXPERIMENTAL / BLOCKED_NOT_QUALIFIED`, включая strict reviewer.
+Отдельный успешный native RPC read или diagnostic/exec namespace experiment
+не заменяет обязательное доказательство всего нового transport.
 
 Serena, Context7, Graphify и ast-grep проверены установленными native packages,
 а не renamed fixtures. Полные receipts остаются в private run evidence;

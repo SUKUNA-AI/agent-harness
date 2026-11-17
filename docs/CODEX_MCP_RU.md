@@ -113,13 +113,10 @@ canonical root, config digest, catalog digest, имена tools/schema digests,
 ## Строгий managed transport: отдельная граница
 
 Текущий статус на 2026-11-17: **EXPERIMENTAL API,
-`BLOCKED_NOT_QUALIFIED` для текущей live qualification**. Проверка настоящего
-установленного клиента с сохранённым Lite protocol завершилась закрытым
-отказом `Native privileged builtin escaped its policy ceiling`. Успешного
-доказательства production RPC/resume пока нет. Эта причина — вывод verifier;
-она сама не определяет, находится корень в native catalog, parser или policy.
-Нельзя включить capability вручную или заменить этот результат прежним
-успешным namespace probe.
+`BLOCKED_NOT_QUALIFIED` до завершения актуальной per-project core qualification
+и exact resume proof**. Успешный отдельный native RPC read не подтверждает
+весь qualification/resume цикл. Нельзя включить capability вручную или
+заменить обязательный proof прежним успешным namespace probe.
 
 Новый `StrictCodexAdapter` выбирается явной фабрикой
 `CodexAdapter.with_managed_tools(root=...)` после per-run tool configuration.

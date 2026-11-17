@@ -65,8 +65,9 @@ Fixture tests проверяют механизм harness; native tests пров
 клиент. Ни те, ни другие не доказывают доступ к выбранной платной модели.
 
 На 2026-11-17 новый strict Codex transport имеет EXPERIMENTAL API; текущая
-live qualification закрыта `BLOCKED_NOT_QUALIFIED` после отказа builtin policy
-ceiling. Его production RPC/reviewer/resume не объявлены квалифицированными.
+live qualification остаётся `BLOCKED_NOT_QUALIFIED` до завершения актуальной
+per-project core qualification и exact resume proof. Отдельный успешный RPC
+read не квалифицирует весь путь и strict reviewer.
 Подробнее — [Codex](CODEX_MCP_RU.md#строгий-managed-transport-отдельная-граница).
 
 Лимит 12 — верхняя граница supervisor, а не требование запускать 12 процессов.
