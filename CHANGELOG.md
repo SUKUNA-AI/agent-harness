@@ -1,5 +1,23 @@
 # История изменений
 
+## Unreleased — после 1.7.0
+
+- OpenCode guard проверяет живые MCP и при штатной отмене чтения после terminal
+  SSE, а не только при сетевом EOF. Ошибка потока, отказ отмены или disconnect
+  не создают успешную response-квитанцию. Требования matching catalog audits,
+  native stop, exit 0 и остановки дерева процессов сохранены.
+- Добавлены семь регрессионных Web Streams сценариев. Связанный набор с
+  настоящим OpenCode и локальным scripted provider: 76 PASS, 1 SKIP.
+- Реальная связка OpenRouter Hydrogen/Flex → Serena + Context7 прошла после
+  исправления: tool results, финальный каталог и cleanup проверены. Это scoped
+  live qualification, а не приёмка произвольной инженерной задачи.
+- README, operator runbooks и редактируемые draw.io/SVG схемы разделяют
+  переносимые команды, локальные helpers, источник модели и host-side tools.
+
+Эти изменения находятся в исходниках после тега `v1.7.0`. Опубликованный ZIP
+1.7.0 не заменяется. Следующая поставка описана в
+[подготовленных заметках](docs/RELEASE_NOTES_NEXT.md); новый тег не опубликован.
+
 ## 1.7.0 — 2026-11-17
 
 - Optional Strict YAML Tool Profiles: role/tool allowlists, mandatory readiness,

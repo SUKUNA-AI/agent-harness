@@ -8,19 +8,25 @@ Harness сочетает штатное исполнение Codex с локал
 Файловое состояние находится в явно выбранном private store; общая служба
 и БД отсутствуют.
 
+Документ описывает исходники после 1.7.0. Опубликованный
+[ZIP 1.7.0](RELEASE_NOTES_1.7.0.md) закреплён своим тегом и manifest;
+подготовленные изменения перечислены в [следующей поставке](RELEASE_NOTES_NEXT.md).
+
 ## 1. Кто исполняет работу
 
-В 1.6.1 foreground control plane включает `supervisor.py`, транспорт
-`codex_execution.py`, durable `supervisor_store.py` и `strict_yaml.py`.
+Foreground control plane включает `supervisor.py`, adapters в
+`codex_execution.py`/`opencode_execution.py`, durable `supervisor_store.py`
+и `strict_yaml.py`.
 Native SessionStart работает отдельно через `native_session.py` и не
 запускает supervisor. Для managed contract v2 `plan_quality.py` проверяет
 план до worker dispatch; node и final acceptance связываются с одним candidate.
 Существующие `core.Run` и `runner` остаются механизмом snapshot/evidence/gate.
-Модельный inference остаётся в Codex. Полный FSM и diagram:
+Модельный inference выполняет выбранный штатный клиент: Codex по умолчанию,
+опционально OpenCode V2 в managed leaf mode. Полный FSM и diagram:
 [Execution Supervisor](EXECUTION_SUPERVISOR_RU.md). Ledger/memory/context:
 [Memory](MEMORY_AND_CONTEXT_RU.md); DAG/worktrees: [Dynamic](DYNAMIC_AGENTS_RU.md).
 
-![Слои исполнения 1.6.1](diagrams/runtime-architecture.svg)
+![Клиенты, supervisor, локальные инструменты и граница model provider](diagrams/runtime-architecture.svg)
 
 [Редактировать в draw.io](diagrams/runtime-architecture.drawio) · [Все схемы](diagrams/README.md)
 
@@ -29,23 +35,32 @@ Native SessionStart работает отдельно через `native_session
 
 ```mermaid
 flowchart TD
-    User["Пользователь: цель и действующие разрешения"] --> Codex["Codex: модель и основной агент"]
-    Bootstrap["Bootstrap + SessionStart hook и выбранные skills"] --> Codex
-    Codex --> NativeTools["Native tools: spawn, follow-up, browser, shell"]
-    NativeTools --> Owners["Исполнители: отдельные scopes и worktrees"]
-    Owners --> Candidate["Общий candidate и проверяемые результаты"]
-    Codex --> CLI["Python CLI: contracts, checks, gate, installer"]
-    CLI --> Work["work: plan quality / DAG и исходные budgets"]
-    Work --> Exec["Штатный Codex exec / exact-session repair"]
-    Exec --> Managed["Owned worktrees → node gates → staging candidate"]
-    Managed --> Candidate
-    CLI --> State["Private state: journal, typed receipts, checkpoints и backups"]
-    CLI --> Rust["Rust: scanner, snapshot, RepoMap и LSP transport"]
-    CLI --> LSP["Локальный language server на время команды"]
-    Rust --> Source["Выбранные файлы проекта"]
-    LSP --> Source
-    Candidate --> CLI
-    State --> Codex
+    User["Пользователь<br/>Цель · scope · действующие разрешения"]
+    Codex["Codex — backend по умолчанию<br/>Исходный native-режим сохранён<br/>Native tools / shell / delegation<br/>Managed exec / exact-session resume<br/>Strict transport — отдельный opt-in<br/>Tool Profiles выбираются отдельно"]
+    Work["Supervisor managed flow<br/>DAG · scopes · отдельные worktrees<br/>До 12 sessions, включая до 3 reviewers<br/>Checkpoints · retry · общие budgets"]
+    Exec["OpenCode 2.2.5 — optional managed leaf<br/>Native permissions + runtime guard<br/>--standalone: private owned server<br/>OpenCode-native subagents: NOT_IMPLEMENTED"]
+    Profiles["Tool Profiles — optional policy<br/>Baseline без внешних dependencies<br/>Выбранный профиль → native config<br/>Role permissions + catalog audit"]
+    State["Private локальное состояние<br/>Journal · typed receipts · checkpoints<br/>Memory recall + Ledger inform + reducer<br/>Без новой БД или обязательного daemon"]
+    Provider["OpenRouter — provider модели OpenCode<br/>Hydrogen/Flex, DeepSeek FP8: no fallback<br/>Opus 5.5: без route pin<br/>Auth хранится в штатном клиенте"]
+    MCP["MCP на пользовательском host<br/>Serena 2.1.0: сервер/cache на worktree<br/>Context7 4.6.0: public docs reads<br/>Playwright MCP 0.0.85: конечный запуск<br/>Exact loopback origins · private artifacts"]
+    CLI["Локальные CLI и source tools<br/>Graphify graphifyy 0.9.111: frozen index<br/>Commit + dirty bytes + config/tool digests<br/>ast-grep 0.51.3: before/rewrite/diff/after/tests<br/>RepoMap · LSP · source packets"]
+    Managed["Isolated managed workers<br/>Один writer на worktree<br/>Client/profile/source/index binding<br/>Собственные MCP connections/cache<br/>Checks запускает supervisor"]
+    Candidate["Общий candidate и source-bound acceptance<br/>Integration → freeze → independent checks / requirement coverage<br/>Fresh independent review → final gate; MCP success не означает ACCEPTED"]
+    Limits["Границы квалификации<br/>Strict Codex transport EXPERIMENTAL: 0.167.0 + scripted provider; paid workload UNQUALIFIED.<br/>OpenCode: подтверждён конкретный Hydrogen + Serena + Context7 smoke; новый run требует fresh proof.<br/>Docling исключён и не установлен. Схема не подтверждает приёмку новой задачи или публикацию релиза."]
+    User -->|"native"| Codex
+    User -->|"managed"| Work
+    Work --> Codex
+    Work --> Exec
+    Codex -->|"profile selected"| Profiles
+    Work -->|"profile selection"| Profiles
+    Work -->|"receipts"| State
+    Exec -->|"native model request"| Provider
+    Profiles -->|"native client connects"| MCP
+    Profiles -->|"local commands"| CLI
+    Work --> Managed
+    CLI -->|"checks / provenance"| Candidate
+    Managed -->|"scoped integration"| Candidate
+    Codex --> Candidate
 ```
 
 </details>
@@ -64,6 +79,18 @@ nodes для native orchestration; `work` запускает штатные clie
 владеет global slots и отдельными worktrees. Codex exec/resume остаётся default.
 Optional OpenCode V2 adapter использует тот же supervisor и contained runner;
 модельный transport остаётся внутри выбранного клиента.
+
+OpenRouter является provider модели для OpenCode. Его native SDK и auth store
+обрабатывают model requests и выбранный route; harness не получает новый LLM
+API client. Serena, Context7 и Playwright подключаются к локальному CLI как MCP.
+Graphify и ast-grep выполняются как локальные CLI; они не становятся MCP от
+наличия Tool Profile. Инструменты не устанавливаются на OpenRouter.
+
+Переносимый пакет предоставляет `tools` и `work` в существующем CLI. Имена
+machine-specific wrappers и пользовательские shortcuts не являются новыми
+командами пакета и не гарантируют наличие MCP в обычном интерактивном клиенте.
+Настройка файлов действует при поддержанном новом запуске; hot reload
+текущей беседы и OpenCode-native orchestration не заявляются.
 
 Tooling pipeline отделяет Strict YAML policy → native configuration → dependency
 probe → actual client catalog → execution qualification → completion → gate.
@@ -363,6 +390,15 @@ session persistence до model admission. Private native plugin проверяе
 catalogs и JSONL привязаны к completion receipts; утрата evidence закрывает gate.
 При провале квалификации managed вызов блокируется. Смешанный DAG использует
 прежние глобальные slots.
+
+В guard сохраняются связанные `context`, `before_dispatch` и `after_response`
+для каждого model request. Последняя квитанция требует прежние guard bytes и
+живое соединение с обязательными MCP. Некоторые provider SDK заканчивают чтение
+после terminal SSE и отменяют остаток HTTP body до сетевого EOF. Source после
+1.7.0 проверяет EOF и подтверждённую consumer cancellation; потоковая ошибка
+или отказ отмены не создают response-квитанцию. Отмена сама по себе не означает
+успех: отдельно требуются полный native step/turn, exit 0 и подтверждённый
+cleanup. Незавершённый поток остаётся `UNKNOWN_OUTCOME`.
 
 Новые tooling receipts лежат в том же private run и доступны gate freshness
 проверкам; отдельного state store нет. Graphify index — производный immutable
