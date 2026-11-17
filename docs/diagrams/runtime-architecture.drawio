@@ -1,152 +1,127 @@
 <?xml version='1.0' encoding='utf-8'?>
-<mxfile host="app.diagrams.net" agent="Native Agent Harness documentation" version="32.6.1" modified="2026-11-09T09:01:17Z">
-  <diagram id="runtime-architecture" name="Слои исполнения 1.6.1">
-    <mxGraphModel dx="1400" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1445" pageHeight="1664" math="0" shadow="0" background="#FFFFFF">
+<mxfile host="app.diagrams.net" version="32.6.10" type="device">
+  <diagram id="runtime-architecture" name="Слои исполнения: native Codex и optional tooling">
+    <mxGraphModel dx="1680" dy="1630" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1680" pageHeight="1630" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="title" value="Слои исполнения 1.6.1" style="text;html=0;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=24;fontStyle=1;fontColor=#18324F;whiteSpace=nowrap;" parent="1" vertex="1">
-          <mxGeometry x="30" y="12" width="1385" height="50" as="geometry" />
+        <mxCell id="title" value="Слои исполнения: native Codex и optional tooling" style="text;html=0;whiteSpace=wrap;align=left;verticalAlign=middle;overflow=hidden;fontFamily=Arial;fontSize=32;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="60" y="35" width="1560" height="52" as="geometry" />
         </mxCell>
-        <mxCell id="User" value="Пользователь: цель и действующие&#10;разрешения" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
-          <mxGeometry x="502.33" y="110" width="280" height="86" as="geometry" />
+        <mxCell id="desc" value="Supervisor управляет задачей; штатный клиент связывает выбранную модель и инструменты на пользовательском host." style="text;html=0;whiteSpace=wrap;align=left;verticalAlign=middle;overflow=hidden;fontFamily=Arial;fontSize=19;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="60" y="92" width="1560" height="40" as="geometry" />
         </mxCell>
-        <mxCell id="Codex" value="Codex: модель и основной агент" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
-          <mxGeometry x="214" y="281" width="280" height="86" as="geometry" />
+        <mxCell id="User" value="Пользователь&#10;Цель · scope · действующие разрешения" style="rounded=1;arcSize=10;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=20;fontColor=#18324F;fillColor=#EAF2FB;strokeColor=#53779D;strokeWidth=2;spacing=16;" parent="1" vertex="1">
+          <mxGeometry x="540" y="150" width="600" height="90" as="geometry" />
         </mxCell>
-        <mxCell id="Bootstrap" value="Bootstrap + SessionStart hook&#10;и выбранные skills" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
-          <mxGeometry x="167.33" y="110" width="280" height="86" as="geometry" />
+        <mxCell id="Codex" value="Codex — backend по умолчанию&#10;Исходный native-режим сохранён&#10;Native tools / shell / delegation&#10;Managed exec / exact-session resume&#10;Strict transport — отдельный opt-in&#10;Tool Profiles выбираются отдельно" style="rounded=1;arcSize=10;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=20;fontColor=#18324F;fillColor=#EAF2FB;strokeColor=#53779D;strokeWidth=2;spacing=16;" parent="1" vertex="1">
+          <mxGeometry x="60" y="325" width="460" height="195" as="geometry" />
         </mxCell>
-        <mxCell id="NativeTools" value="Native tools: spawn, follow-up,&#10;browser, shell" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
-          <mxGeometry x="167.33" y="452" width="280" height="86" as="geometry" />
+        <mxCell id="Work" value="Supervisor managed flow&#10;DAG · scopes · отдельные worktrees&#10;До 12 sessions, включая до 3 reviewers&#10;Checkpoints · retry · общие budgets" style="rounded=1;arcSize=10;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=20;fontColor=#18324F;fillColor=#EAF2FB;strokeColor=#53779D;strokeWidth=2;spacing=16;" parent="1" vertex="1">
+          <mxGeometry x="570" y="325" width="540" height="195" as="geometry" />
         </mxCell>
-        <mxCell id="Owners" value="Исполнители: отдельные scopes и&#10;worktrees" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
-          <mxGeometry x="167.33" y="623" width="280" height="86" as="geometry" />
+        <mxCell id="Exec" value="OpenCode 2.2.5 — optional managed leaf&#10;Native permissions + runtime guard&#10;--standalone: private owned server&#10;OpenCode-native subagents: NOT_IMPLEMENTED" style="rounded=1;arcSize=10;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=20;fontColor=#18324F;fillColor=#EAF2FB;strokeColor=#53779D;strokeWidth=2;spacing=16;" parent="1" vertex="1">
+          <mxGeometry x="1160" y="325" width="460" height="195" as="geometry" />
         </mxCell>
-        <mxCell id="Candidate" value="Общий candidate и проверяемые&#10;результаты" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
-          <mxGeometry x="167.33" y="794" width="280" height="86" as="geometry" />
+        <mxCell id="Profiles" value="Tool Profiles — optional policy&#10;Baseline без внешних dependencies&#10;Выбранный профиль → native config&#10;Role permissions + catalog audit" style="rounded=1;arcSize=10;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=20;fontColor=#18324F;fillColor=#E8F6F2;strokeColor=#3D8173;strokeWidth=2;spacing=16;" parent="1" vertex="1">
+          <mxGeometry x="60" y="590" width="460" height="165" as="geometry" />
         </mxCell>
-        <mxCell id="CLI" value="Python CLI: contracts, checks,&#10;gate, installer" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
-          <mxGeometry x="214" y="965" width="280" height="86" as="geometry" />
+        <mxCell id="State" value="Private локальное состояние&#10;Journal · typed receipts · checkpoints&#10;Memory recall + Ledger inform + reducer&#10;Без новой БД или обязательного daemon" style="rounded=1;arcSize=10;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=20;fontColor=#18324F;fillColor=#F0F3F7;strokeColor=#718297;strokeWidth=2;spacing=16;" parent="1" vertex="1">
+          <mxGeometry x="570" y="590" width="540" height="165" as="geometry" />
         </mxCell>
-        <mxCell id="Work" value="work: plan quality / DAG&#10;и исходные budgets" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
-          <mxGeometry x="1135" y="1136" width="280" height="86" as="geometry" />
+        <mxCell id="Provider" value="OpenRouter — provider модели OpenCode&#10;Hydrogen/Flex, DeepSeek FP8: no fallback&#10;Opus 5.5: без route pin&#10;Auth хранится в штатном клиенте" style="rounded=1;arcSize=10;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=20;fontColor=#18324F;fillColor=#F2EDFA;strokeColor=#8367A6;strokeWidth=2;spacing=16;" parent="1" vertex="1">
+          <mxGeometry x="1160" y="590" width="460" height="165" as="geometry" />
         </mxCell>
-        <mxCell id="Exec" value="Штатный Codex exec /&#10;exact-session repair" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
-          <mxGeometry x="1135" y="1307" width="280" height="86" as="geometry" />
+        <mxCell id="MCP" value="MCP на пользовательском host&#10;Serena 2.1.0: сервер/cache на worktree&#10;Context7 4.6.0: public docs reads&#10;Playwright MCP 0.0.85: конечный запуск&#10;Exact loopback origins · private artifacts" style="rounded=1;arcSize=10;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=20;fontColor=#18324F;fillColor=#E8F6F2;strokeColor=#3D8173;strokeWidth=2;spacing=16;" parent="1" vertex="1">
+          <mxGeometry x="60" y="870" width="460" height="200" as="geometry" />
         </mxCell>
-        <mxCell id="Managed" value="Owned worktrees → node gates&#10;→ staging candidate" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
-          <mxGeometry x="1135" y="1478" width="280" height="86" as="geometry" />
+        <mxCell id="CLI" value="Локальные CLI и source tools&#10;Graphify graphifyy 0.9.111: frozen index&#10;Commit + dirty bytes + config/tool digests&#10;ast-grep 0.51.3: before/rewrite/diff/after/tests&#10;RepoMap · LSP · source packets" style="rounded=1;arcSize=10;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=20;fontColor=#18324F;fillColor=#E8F6F2;strokeColor=#3D8173;strokeWidth=2;spacing=16;" parent="1" vertex="1">
+          <mxGeometry x="570" y="870" width="540" height="200" as="geometry" />
         </mxCell>
-        <mxCell id="State" value="Private state: journal, typed&#10;receipts, checkpoints и backups" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
-          <mxGeometry x="130" y="1136" width="280" height="86" as="geometry" />
+        <mxCell id="Managed" value="Isolated managed workers&#10;Один writer на worktree&#10;Client/profile/source/index binding&#10;Собственные MCP connections/cache&#10;Checks запускает supervisor" style="rounded=1;arcSize=10;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=20;fontColor=#18324F;fillColor=#EAF2FB;strokeColor=#53779D;strokeWidth=2;spacing=16;" parent="1" vertex="1">
+          <mxGeometry x="1160" y="870" width="460" height="200" as="geometry" />
         </mxCell>
-        <mxCell id="Rust" value="Rust: scanner, snapshot,&#10;RepoMap и LSP transport" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
-          <mxGeometry x="800" y="1136" width="280" height="86" as="geometry" />
+        <mxCell id="Candidate" value="Общий candidate и source-bound acceptance&#10;Integration → freeze → independent checks / requirement coverage&#10;Fresh independent review → final gate; MCP success не означает ACCEPTED" style="rounded=1;arcSize=10;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=20;fontColor=#18324F;fillColor=#E8F1F6;strokeColor=#486B83;strokeWidth=2;spacing=16;" parent="1" vertex="1">
+          <mxGeometry x="570" y="1200" width="1050" height="135" as="geometry" />
         </mxCell>
-        <mxCell id="LSP" value="Локальный language server на время&#10;команды" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
-          <mxGeometry x="465" y="1136" width="280" height="86" as="geometry" />
+        <mxCell id="Limits" value="Границы квалификации&#10;Strict Codex transport EXPERIMENTAL: 0.167.0 + scripted provider; paid workload UNQUALIFIED.&#10;OpenCode: подтверждён конкретный Hydrogen + Serena + Context7 smoke; новый run требует fresh proof.&#10;Docling исключён и не установлен. Схема не подтверждает приёмку новой задачи или публикацию релиза." style="rounded=1;arcSize=10;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=20;fontColor=#18324F;fillColor=#FFF3E0;strokeColor=#B7802F;strokeWidth=2;spacing=16;" parent="1" vertex="1">
+          <mxGeometry x="60" y="1390" width="1560" height="155" as="geometry" />
         </mxCell>
-        <mxCell id="Source" value="Выбранные файлы проекта" style="rounded=1;arcSize=12;whiteSpace=nowrap;html=0;align=center;verticalAlign=middle;fontFamily=Arial;fontSize=15;spacing=12;strokeWidth=1.5;strokeColor=#54718E;fillColor=#EDF3FA;fontColor=#18324F;" parent="1" vertex="1">
-          <mxGeometry x="511.67" y="1307" width="280" height="86" as="geometry" />
-        </mxCell>
-        <mxCell id="e0" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.4999999999999998;exitY=1.0;entryX=0.6666666666666665;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="User" target="Codex">
+        <mxCell id="e1" value="native" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=2;fontFamily=Arial;fontSize=18;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.1;exitY=1;entryX=0.5;entryY=0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="User" target="Codex">
           <mxGeometry relative="1" as="geometry">
             <Array as="points">
-              <mxPoint x="642.33" y="206" />
-              <mxPoint x="400.67" y="206" />
+              <mxPoint x="600" y="285" />
+              <mxPoint x="290" y="285" />
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="e1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.33333333333333326;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Bootstrap" target="Codex">
+        <mxCell id="e2" value="managed" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=2;fontFamily=Arial;fontSize=18;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;entryX=0.5;entryY=0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="User" target="Work">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.33333333333333326;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Codex" target="NativeTools">
+        <mxCell id="e3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=2;fontFamily=Arial;fontSize=18;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0;exitY=0.5;entryX=1;entryY=0.5;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Work" target="Codex">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="NativeTools" target="Owners">
+        <mxCell id="e4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=2;fontFamily=Arial;fontSize=18;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.5;entryX=0;entryY=0.5;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Work" target="Exec">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Owners" target="Candidate">
+        <mxCell id="e5" value="profile selected" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=2;fontFamily=Arial;fontSize=18;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;entryX=0.5;entryY=0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Codex" target="Profiles">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.6666666666666665;exitY=1.0;entryX=0.6666666666666665;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Codex" target="CLI">
+        <mxCell id="e6" value="profile selection" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=2;fontFamily=Arial;fontSize=18;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.1;exitY=1;entryX=0.75;entryY=0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Work" target="Profiles">
           <mxGeometry relative="1" as="geometry">
             <Array as="points">
-              <mxPoint x="400.67" y="377" />
-              <mxPoint x="457.33" y="377" />
-              <mxPoint x="457.33" y="890" />
-              <mxPoint x="400.67" y="890" />
+              <mxPoint x="624" y="555" />
+              <mxPoint x="405" y="555" />
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="e6" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.8;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="CLI" target="Work">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="438" y="1061" />
-              <mxPoint x="1275" y="1061" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="e7" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Work" target="Exec">
+        <mxCell id="e7" value="receipts" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=2;fontFamily=Arial;fontSize=18;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;entryX=0.5;entryY=0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Work" target="State">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e8" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Exec" target="Managed">
+        <mxCell id="e8" value="native model request" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=2;fontFamily=Arial;fontSize=18;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;entryX=0.5;entryY=0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Exec" target="Provider">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e10" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.2;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="CLI" target="State">
+        <mxCell id="e9" value="native client connects" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=2;fontFamily=Arial;fontSize=18;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;entryX=0.5;entryY=0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Profiles" target="MCP">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e11" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.6;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="CLI" target="Rust">
+        <mxCell id="e10" value="local commands" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=2;fontFamily=Arial;fontSize=18;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.75;entryX=0.25;entryY=0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Profiles" target="CLI">
           <mxGeometry relative="1" as="geometry">
             <Array as="points">
-              <mxPoint x="382" y="1071" />
-              <mxPoint x="940" y="1071" />
+              <mxPoint x="545" y="714" />
+              <mxPoint x="545" y="820" />
+              <mxPoint x="705" y="820" />
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="e12" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.4;exitY=1.0;entryX=0.5;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="CLI" target="LSP">
+        <mxCell id="e11" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=2;fontFamily=Arial;fontSize=18;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.85;entryX=0;entryY=0.5;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Work" target="Managed">
           <mxGeometry relative="1" as="geometry">
             <Array as="points">
-              <mxPoint x="326" y="1081" />
-              <mxPoint x="605" y="1081" />
+              <mxPoint x="1135" y="491" />
+              <mxPoint x="1135" y="970" />
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="e13" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.6666666666666667;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Rust" target="Source">
+        <mxCell id="e12" value="checks / provenance" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=2;fontFamily=Arial;fontSize=18;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;entryX=0.25;entryY=0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="CLI" target="Candidate">
           <mxGeometry relative="1" as="geometry">
             <Array as="points">
-              <mxPoint x="940" y="1232" />
-              <mxPoint x="698.33" y="1232" />
+              <mxPoint x="840" y="1140" />
+              <mxPoint x="832" y="1140" />
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="e14" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.33333333333333326;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="LSP" target="Source">
+        <mxCell id="e13" value="scoped integration" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=2;fontFamily=Arial;fontSize=18;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;entryX=0.8;entryY=0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Managed" target="Candidate">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e15" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1.0;entryX=0.33333333333333326;entryY=0.0;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Candidate" target="CLI">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e9" value="" style="edgeStyle=orthogonalEdgeStyle;exitX=0.5;exitY=1;entryX=0;entryY=0.5;rounded=0;html=0;endArrow=block;strokeColor=#54718E;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;" parent="1" edge="1" source="Managed" target="Candidate">
+        <mxCell id="e14" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;endArrow=block;endFill=1;strokeColor=#526A82;strokeWidth=2;fontFamily=Arial;fontSize=18;fontColor=#18324F;labelBackgroundColor=#FFFFFF;exitX=0;exitY=0.75;entryX=0;entryY=0.5;exitPerimeter=0;entryPerimeter=0;" parent="1" edge="1" source="Codex" target="Candidate">
           <mxGeometry relative="1" as="geometry">
             <Array as="points">
-              <mxPoint x="1275.0" y="1589" />
-              <mxPoint x="25" y="1589" />
-              <mxPoint x="25" y="837.0" />
+              <mxPoint x="30" y="449" />
+              <mxPoint x="30" y="1268" />
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="e16" value="" style="edgeStyle=orthogonalEdgeStyle;exitX=0.5;exitY=1;entryX=0;entryY=0.5;rounded=0;html=0;endArrow=block;strokeColor=#54718E;strokeWidth=1.5;fontFamily=Arial;fontSize=13;fontColor=#18324F;labelBackgroundColor=#FFFFFF;" parent="1" edge="1" source="State" target="Codex">
-          <mxGeometry relative="1" as="geometry">
-            <Array as="points">
-              <mxPoint x="270.0" y="1262" />
-              <mxPoint x="50" y="1262" />
-              <mxPoint x="50" y="324.0" />
-            </Array>
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="footer" value="1.6.1 • обзор; точные переходы и ограничения — в руководстве" style="text;html=0;align=left;fontFamily=Arial;fontSize=13;fontColor=#526A82;" parent="1" vertex="1">
-          <mxGeometry x="30" y="1624" width="1385" height="30" as="geometry" />
+        <mxCell id="footer" value="Source main после 1.7.0 • OpenRouter не является MCP host • Нет глобального auto-MCP или hot reload открытой сессии." style="text;html=0;whiteSpace=wrap;align=left;verticalAlign=middle;overflow=hidden;fontFamily=Arial;fontSize=17;fontColor=#18324F;" parent="1" vertex="1">
+          <mxGeometry x="60" y="1565" width="1560" height="45" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>

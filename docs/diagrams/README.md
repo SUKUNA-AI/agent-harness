@@ -1,23 +1,25 @@
-# Редактируемые диаграммы 1.6.1
+# Редактируемые диаграммы
 
 [Индекс документации](../INDEX.md) · [Архитектура](../ARCHITECTURE_RU.md)
 
-Здесь находятся 16 схем действующих руководств. `.drawio` — незапакованный XML
+Здесь находятся 18 схем действующих руководств. `.drawio` — незапакованный XML
 с редактируемыми shapes/connectors; `.svg` — самостоятельная векторная версия
 с обычным текстом. Mermaid source сохранён в соответствующем Markdown под
 раскрываемым блоком. Во всех трёх представлениях должны совпадать узлы, связи,
 условия и подписи. Для просмотра SVG не нужны draw.io, JavaScript или сеть.
 
-В 1.6.0 добавлены отдельные схемы native-сессии, verified task flow и durable
-receipts. Обзорные схемы обновлены для SessionStart, plan-quality gate, node
-acceptance и восстановления в пределах исходных budgets. Схема показывает
-контракт поведения; она не является подтверждением прохождения runtime gates.
+Обзор слоёв исполнения и две tooling схемы обновлены по исходникам `main`
+после 1.7.0: optional Tool Profiles, host-side MCP, native OpenCode leaf,
+OpenRouter как provider модели и совместное runtime evidence. Публичный ZIP
+1.7.0 относится к опубликованному тегу; эта документация не объявляет новый
+релиз. Остальные схемы сохраняют свои предметные границы. Схема показывает
+контракт поведения; она не подтверждает прохождение runtime gates новой задачи.
 
 | Просмотреть SVG | Редактируемый source | Объяснение и Mermaid source | Реализация |
 | --- | --- | --- | --- |
 | [Задача, исполнители и приёмка](task-delivery.svg) | [.drawio](task-delivery.drawio) | [Задача, исполнители и приёмка](#task-delivery-mermaid), Mermaid #1 | [orchestration.py](../../src/agent_harness/orchestration.py), [runner.py](../../src/agent_harness/runner.py) |
 | [Установка, проверка и откат](installation-recovery.svg) | [.drawio](installation-recovery.drawio) | [SETUP_RU.md](../../SETUP_RU.md), Mermaid #1 | [installation.py](../../src/agent_harness/installation.py) |
-| [Слои исполнения 1.6.1](runtime-architecture.svg) | [.drawio](runtime-architecture.drawio) | [Архитектура](../ARCHITECTURE_RU.md), Mermaid #1 | [supervisor.py](../../src/agent_harness/supervisor.py), [native_session.py](../../src/agent_harness/native_session.py), [core.py](../../src/agent_harness/core.py) |
+| [Слои исполнения: native Codex и optional tooling](runtime-architecture.svg) | [.drawio](runtime-architecture.drawio) | [Архитектура](../ARCHITECTURE_RU.md), Mermaid #1 | [supervisor.py](../../src/agent_harness/supervisor.py), [native_session.py](../../src/agent_harness/native_session.py), [tool_profiles.py](../../src/agent_harness/tool_profiles.py), [opencode_execution.py](../../src/agent_harness/opencode_execution.py), [local_tool_integrations.py](../../src/agent_harness/local_tool_integrations.py) |
 | [Выбор источника контекста](context-routing.svg) | [.drawio](context-routing.drawio) | [Архитектура](../ARCHITECTURE_RU.md), Mermaid #2 | [context.py](../../src/agent_harness/context.py), [repo_map.py](../../src/agent_harness/repo_map.py), [lsp.py](../../src/agent_harness/lsp.py) |
 | [Выбор snapshot backend](snapshot-backends.svg) | [.drawio](snapshot-backends.drawio) | [Архитектура](../ARCHITECTURE_RU.md), Mermaid #3 | [native.py](../../src/agent_harness/native.py), [core.py](../../src/agent_harness/core.py) |
 | [Checkpoint, handoff и свежесть](context-recovery.svg) | [.drawio](context-recovery.drawio) | [Архитектура](../ARCHITECTURE_RU.md), Mermaid #4 | [core.py](../../src/agent_harness/core.py), [presentation.py](../../src/agent_harness/presentation.py) |
@@ -74,7 +76,7 @@ flowchart TD
 3. Обновите узлы/связи и соответствующий Mermaid block в руководстве.
 4. Экспортируйте SVG через draw.io. Для изменения только подписи допустима
    синхронная правка SVG text и editable XML без изменения геометрии; новую
-   схему можно подготовить как эквивалентные XML/SVG из одной модели графа.
+   геометрию экспортируйте заново из редактируемого XML.
 5. Проверьте структуру и фактически отрендерите SVG. Просмотрите весь изменённый
    граф и подписи; exit 0, XML validity и наличие файла не заменяют visual review.
    Сохраните source/export SHA-256, renderer/argv и просмотренный артефакт в
@@ -107,11 +109,11 @@ flatpak run com.jgraph.drawio.desktop --export --format png --theme light --bord
 Проверьте доступ sandbox приложения к input/output; при необходимости передайте
 полные разрешённые пути. Успешный export подтверждайте exit code и свежим файлом.
 Предупреждение DBus без system bus само по себе не означает отказ renderer.
-Обе tooling схемы имеют отдельные shapes/connectors, экспортированы draw.io
-Desktop, а соответствующие PNG предназначены для просмотра перед review.
+Обзор исполнения и обе tooling схемы имеют отдельные shapes/connectors,
+экспортированы draw.io Desktop и просмотрены в PNG перед review.
 Draw.io Desktop 32.6.10 добавляет `foreignObject` даже для plain text shapes,
 одновременно сохраняя эквивалентный SVG `<text>/<tspan>` fallback. Для переносимых
-tooling SVG HTML-блоки удалены, native text fallback сохранён без изменения
+SVG этих трёх схем HTML-блоки удалены, native text fallback сохранён без изменения
 геометрии. Итоговые SVG повторно отрендерены через librsvg; исходные app exports
 и hashes хранятся в private evidence. При повторном экспорте проверьте это
 условие заново: наличие plain text style не гарантирует отсутствие HTML.
@@ -139,5 +141,21 @@ DAG diagram не обещает ускорение. Cancellation, timeout и н�
 могут прервать несколько фаз; исходные budgets не сбрасываются на resume.
 LSP sequence сохраняет capture/requery, reviewed apply и допустимую компенсацию.
 
-Цвет дублируется подписями. Решение обозначено ромбом; стрелки содержат условия.
+Tooling схемы сохраняют исходный native Codex и optional managed backend.
+Strict Codex transport остаётся EXPERIMENTAL; scripted-provider проверка
+Codex 0.167.0 не квалифицирует paid workload. OpenCode-native subagents
+не реализованы. Наблюдённый Hydrogen + Serena + Context7 smoke подтверждает
+конкретный сценарий, а не любую модель или новый проект. `documents` остаётся
+шаблоном профиля; Docling исключён по выбору оператора и не установлен.
+
+В OpenCode runtime proof входят `before_dispatch`, `after_response`, native
+finish, exit 0 и остановка дерева процессов. SSE audit допустим после actual
+EOF либо подтверждённого consumer cancel; read error, failed cancel и disconnect
+не дают успешного audit receipt. Неполный JSONL / native finish остаётся UNKNOWN.
+Source/index drift инвалидирует evidence; зелёный MCP call не означает ACCEPTED.
+MCP запускается на пользовательском host. OpenRouter является provider модели,
+auth остаётся в штатном клиенте. Локальные operator profiles не являются частью
+переносимого пакета; нет глобального auto-MCP или hot reload открытого чата.
+
+Цвет дублируется подписями. Ветви решений и условия переходов подписаны.
 Редактируемые объекты являются самостоятельными shapes, а не скриншотом Mermaid.
