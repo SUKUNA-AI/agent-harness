@@ -410,6 +410,19 @@ def review_candidate(supervisor, run, candidate):
             native_children=False, output_schema=str(schema), reasoning_effort=effort)
         with GlobalSlots(supervisor.state_dir).acquire(supervisor.state["run_id"], "@review", "reviewer",
                 cancel_file=supervisor.path / "cancel.yaml", timeout=min(60, supervisor.remaining())) as slot:
+            if tool_ref:
+                # Qualification preceded the slot wait. Recheck its immutable
+                # inputs before publishing an invocation that could dispatch.
+                from .execution import revalidate, selection
+                from .task_packets import NotDispatched
+                try:
+                    preflight(review_adapter, prompt, read_only=True, write_authorized=False,
+                        native_children=False, output_schema=str(schema), reasoning_effort=effort)
+                    revalidate(review_adapter, review_adapter.binding,
+                        selection(supervisor.contract, review=True))
+                except (HarnessError, OSError, ValueError) as error:
+                    slot.complete()
+                    raise NotDispatched(str(error)) from error
             intent = receipts.intent("@review", "review-" + str(len(all_intents) + 1), checkout=supervisor.state["cwd"],
                 owner=slot.value["lease_id"], candidate_digest=candidate["digest"], review_binding=binding,
                 input_refs=[tool_ref["digest"]] if tool_ref else (), tool_provenance=tool_ref)
