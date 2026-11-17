@@ -48,13 +48,23 @@ def installed_tool_digest(executable):
     binary = binary.resolve(strict=True)
     prefix = binary.parent.parent if binary.parent.name in {"bin", "Scripts"} else binary.parent
     roots = [*prefix.glob("lib/python*/site-packages"), prefix / "Lib/site-packages"]
+    # A resolved npm entrypoint imports sibling packages; bind that isolated
+    # dependency tree as well as the actual Node runtime selected from PATH.
+    node_modules = next((parent for parent in binary.parents if parent.name == "node_modules"), None)
+    if node_modules is not None:
+        roots.append(node_modules)
     paths = [binary]
     first = read_regular_file(binary, max_bytes=128 * 1024 * 1024).split(b"\n", 1)[0]
     if first.startswith(b"#!/"):
         interpreter = Path(os.fsdecode(first[2:].split()[0]))
         if interpreter.is_file():
             paths.append(interpreter.resolve(strict=True))
-    suffixes = {".py", ".pyi", ".so", ".pyd", ".dll", ".dylib", ".js", ".mjs", ".cjs", ".json", ".scm", ".pth", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".wasm"}
+    if node_modules is not None:
+        node = shutil.which("node")
+        if node is None:
+            raise HarnessError("NODE_NOT_AVAILABLE")
+        paths.append(Path(node).resolve(strict=True))
+    suffixes = {".py", ".pyi", ".so", ".pyd", ".dll", ".dylib", ".node", ".js", ".mjs", ".cjs", ".json", ".scm", ".pth", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".wasm"}
     for root in roots:
         if root.is_dir():
             for path in root.rglob("*"):
@@ -211,6 +221,44 @@ def serena_stdio_argv(root, cache, *, executable="serena"):
     return command
 
 
+def prepare_context7(root, cache, *, executable="context7-mcp", timeout=15, expected_implementation=None):
+    """Original anonymous stdio server with no ambient Node hooks or auth."""
+    timeout = _timeout(timeout)
+    root, cache = _outside(root, cache)
+    native = shutil.which(executable)
+    if native is None:
+        raise HarnessError("CONTEXT7_NOT_AVAILABLE")
+    binary = Path(native).resolve(strict=True)
+    implementation = installed_tool_digest(str(binary))
+    if expected_implementation is not None and implementation != expected_implementation:
+        raise HarnessError("CONTEXT7_IMPLEMENTATION_DRIFT")
+    env = _private_env(cache)
+    command = [str(binary)]
+    if binary.suffix in {".js", ".mjs", ".cjs"}:
+        node = shutil.which("node")
+        if node is None:
+            raise HarnessError("NODE_NOT_AVAILABLE")
+        command = [str(Path(node).resolve(strict=True)), str(binary)]
+    version = _contained_capture([*command, "--version"], cwd=str(root), env=env, timeout=timeout)
+    text = version.stdout.decode("utf-8", errors="replace").strip()
+    if version.returncode or re.search(r"\b4\.6\.0\b", text) is None:
+        raise HarnessError("UNSUPPORTED_CONTEXT7_VERSION: requires pinned4.6.0")
+    help_result = _contained_capture([*command, "--help"], cwd=str(root), env=env, timeout=timeout)
+    if help_result.returncode or "--transport" not in help_result.stdout.decode("utf-8", errors="replace"):
+        raise HarnessError("UNSUPPORTED_CONTEXT7_CLI")
+    return {"argv": [*command, "--transport", "stdio"], "environment": env, "cwd": str(root),
+            "version": text, "implementation_digest": implementation, "mode": "public-anonymous"}
+
+
+def context7_stdio_argv(root, cache, *, executable="context7-mcp"):
+    native = shutil.which(executable)
+    command = [sys.executable, str(Path(__file__).resolve()), "context7-stdio", "--executable",
+               str(Path(native).resolve()) if native else executable, "--project", str(root), "--cache-root", str(cache)]
+    if native is not None:
+        command.extend(["--implementation-digest", installed_tool_digest(native)])
+    return command
+
+
 def context7_server(executable="context7-mcp", *, timeout=30):
     """Only public documentation reads; no setup command, credentials or plugins."""
     return {"id": "context7", "transport": "stdio", "required": False,
@@ -339,11 +387,12 @@ def build_local_graph_index(root, artifact_dir, *, executable="graphify", frozen
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="operation", required=True)
-    serena = commands.add_parser("serena-stdio")
-    serena.add_argument("--executable", default="serena")
-    serena.add_argument("--project", required=True)
-    serena.add_argument("--cache-root", required=True)
-    serena.add_argument("--implementation-digest")
+    for operation, executable in (("serena-stdio", "serena"), ("context7-stdio", "context7-mcp")):
+        command = commands.add_parser(operation)
+        command.add_argument("--executable", default=executable)
+        command.add_argument("--project", required=True)
+        command.add_argument("--cache-root", required=True)
+        command.add_argument("--implementation-digest")
     for name in ("graphify-build", "graphify-version"):
         command = commands.add_parser(name)
         command.add_argument("--executable", default="graphify")
@@ -353,9 +402,10 @@ def main(argv=None):
             command.add_argument("--timeout", type=float, default=120)
             command.add_argument("--failure-receipt")
     args = parser.parse_args(argv)
-    if args.operation == "serena-stdio":
-        invocation = prepare_serena(args.project, args.cache_root, executable=args.executable,
-                                    expected_implementation=args.implementation_digest)
+    if args.operation in {"serena-stdio", "context7-stdio"}:
+        prepare = prepare_serena if args.operation == "serena-stdio" else prepare_context7
+        invocation = prepare(args.project, args.cache_root, executable=args.executable,
+                             expected_implementation=args.implementation_digest)
         os.chdir(invocation["cwd"])
         os.execve(invocation["argv"][0], invocation["argv"], invocation["environment"])
     elif args.operation == "graphify-build":

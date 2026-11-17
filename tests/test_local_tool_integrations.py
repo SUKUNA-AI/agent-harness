@@ -15,7 +15,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from agent_harness.core import HarnessError, identity_alive
 from agent_harness.local_tool_integrations import (prepare_serena, serena_stdio_argv,
-    graphify_build, build_local_graph_index, context7_server, context7_smoke)
+    graphify_build, build_local_graph_index, context7_server, context7_smoke, prepare_context7, context7_stdio_argv)
 from agent_harness.tooling_probe import StdioProbe
 from agent_harness.tooling_provenance import source_snapshot, verify_graph_index, ast_grep_migrate
 
@@ -60,6 +60,20 @@ class LocalToolIntegrationTests(unittest.TestCase):
         exe = self.executable("print('Serena 9.9.9')\n")
         with self.assertRaisesRegex(HarnessError, "VERSION"):
             prepare_serena(self.source, self.root / "cache", executable=exe)
+
+    def test_context7_private_launcher_rejects_ambient_injection_and_code_drift(self):
+        exe = self.executable("import sys\nprint('4.6.0' if '--version' in sys.argv else '--transport')\n")
+        with patch.dict(os.environ, {"NODE_OPTIONS": "--require fixture-injection", "HTTP_PROXY": "fixture-proxy", "CONTEXT7_API_KEY": "fixture-secret"}):
+            invocation = prepare_context7(self.source, self.root / "context7", executable=exe)
+        self.assertEqual(invocation["mode"], "public-anonymous")
+        self.assertEqual(invocation["argv"][-2:], ["--transport", "stdio"])
+        self.assertEqual(invocation["cwd"], str(self.source))
+        self.assertFalse({"NODE_OPTIONS", "HTTP_PROXY", "CONTEXT7_API_KEY"} & set(invocation["environment"]))
+        self.assertNotEqual(invocation["environment"]["HOME"], os.environ.get("HOME"))
+        self.assertIn("--implementation-digest", context7_stdio_argv(self.source, self.root / "context7", executable=exe))
+        Path(exe).write_text(Path(exe).read_text()+"# changed implementation\n")
+        with self.assertRaisesRegex(HarnessError, "IMPLEMENTATION_DRIFT"):
+            prepare_context7(self.source, self.root / "context7", executable=exe, expected_implementation=invocation["implementation_digest"])
 
     def test_graphify_real_subprocess_fixture_honors_output_scope_and_provenance(self):
         exe = self.executable("""import sys,json,pathlib,os
