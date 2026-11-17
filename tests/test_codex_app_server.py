@@ -19,6 +19,7 @@ class NativeCodexEventTests(unittest.TestCase):
         self.assertEqual(events[0]['item']['type'],'mcp_tool_call')
         end=value.feed('turn/completed',{'threadId':'thread-original','turn':{'id':'turn-original','status':'completed'}})
         self.assertEqual(end[0]['usage']['input_tokens'],9)
+        self.assertEqual(end[0]['usage']['reasoning_tokens'],2)
         self.assertEqual(value.finish(),'completed')
     def test_wrong_thread_turn_or_missing_start_never_complete(self):
         for thread,turn in [('new-thread','turn-original'),('thread-original','new-turn')]:

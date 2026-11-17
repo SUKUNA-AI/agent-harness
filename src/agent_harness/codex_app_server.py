@@ -70,7 +70,7 @@ class NativeCodexEvents:
             self._subject(params, active_turn=True)
             values = {}
             for native, normalized in [('inputTokens', 'input_tokens'), ('outputTokens', 'output_tokens'),
-                    ('cachedInputTokens', 'cached_input_tokens'), ('reasoningOutputTokens', 'reasoning_output_tokens')]:
+                    ('cachedInputTokens', 'cached_input_tokens'), ('reasoningOutputTokens', 'reasoning_tokens')]:
                 value = usage.get(native)
                 if value is not None and (type(value) is not int or value < 0):
                     raise HarnessError('Malformed native usage counter')

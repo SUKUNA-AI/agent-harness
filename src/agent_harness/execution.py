@@ -113,7 +113,7 @@ class ProfileExecution:
         required = verify_parts(prompt) or []
         root = Path(self.binding["identity"]["root"])
         declared = {item["path"] for item in getattr(self.adapter, "read_context", ())}
-        if any(not Path(path).is_relative_to(root) and path not in declared for path in required):
+        if any(not Path(path).resolve(strict=True).is_relative_to(root) and path not in declared for path in required):
             raise NotDispatched("BLOCKED_NOT_QUALIFIED: required packet parts need exact external read grants before native dispatch")
         return self.adapter.preflight(prompt, **options)
 

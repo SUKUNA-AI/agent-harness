@@ -52,7 +52,9 @@ def main():
                     thread = 'thread-wrong'
             result = {'thread': {'id': thread, 'cwd': str(root)}, 'model': 'fixture',
                       'modelProvider': 'fixture',
-                      'sandbox': {'type': 'workspaceWrite', 'writableRoots': [str(root)]}}
+                      'sandbox': {'type': 'workspaceWrite', 'writableRoots': [str(root)],
+                                  'excludeSlashTmp': mode != 'unsafe_tmp',
+                                  'excludeTmpdirEnvVar': mode != 'unsafe_tmp'}}
         elif method == 'mcpServerStatus/list':
             send({'id': ident, 'result': {'data': [], 'nextCursor': None}})
             if done and mode == 'trailing_partial':

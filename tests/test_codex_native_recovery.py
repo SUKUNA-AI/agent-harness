@@ -151,10 +151,20 @@ class CodexNativeRecoveryTests(unittest.TestCase):
         self.assertNotIn('turn/start', methods)
 
     def test_turn_response_identity_must_match_notifications(self):
-        self.assert_unknown(self.run_mode('wrong_turn_response'))
+        result = self.run_mode('wrong_turn_response')
+        self.assert_unknown(result)
+        self.assertIn('turn', result['error'])
 
     def test_terminal_turn_identity_must_match_active_turn(self):
-        self.assert_unknown(self.run_mode('wrong_turn_terminal'))
+        result = self.run_mode('wrong_turn_terminal')
+        self.assert_unknown(result)
+        self.assertIn('terminal', result['error'])
+
+    def test_effective_temporary_write_grants_refuse_before_turn(self):
+        result = self.run_mode('unsafe_tmp')
+        self.assert_unknown(result)
+        self.assertIn('temporary write grants', result['error'])
+        self.assertNotIn('turn/start', [row['method'] for row in calls(self.root)])
 
     def test_partial_jsonl_after_terminal_makes_outcome_unknown(self):
         result = self.run_mode('trailing_partial')
