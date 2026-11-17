@@ -78,6 +78,31 @@ def _published_policy(path, policy):
         atomic_write(path, (json.dumps(policy, sort_keys=True) + "\n").encode(), exclusive=True)
 
 
+def _validate_serena_project(project):
+    # Native project.local.yml overrides project.yml. Validate both before
+    # invoking native code; a fixed MCP tool list does not suppress startup hooks.
+    from .strict_yaml import load
+    empty_keys = ("activation_command", "ls_specific_settings", "included_optional_tools",
+        "excluded_tools", "included_apis", "excluded_apis", "added_modes", "default_modes",
+        "ls_additional_workspace_folders", "fixed_tools")
+    for name in ("project.yml", "project.local.yml"):
+        path = project / name
+        if not path.exists() and not path.is_symlink():
+            continue
+        value = load(path)
+        if not isinstance(value, dict):
+            raise HarnessError("Invalid private Serena project policy")
+        for key in empty_keys:
+            item = value.get(key)
+            if item not in (None, "", [], {}):
+                raise HarnessError("SERENA_PROJECT_POLICY_FORBIDDEN: " + key)
+        for key, expected in (("agent_interface", "tools"), ("language_backend", "LSP")):
+            if value.get(key) not in (None, "", expected):
+                raise HarnessError("SERENA_PROJECT_POLICY_FORBIDDEN: " + key)
+        if value.get("ls_workspace_folders") not in (None, "", ["."]):
+            raise HarnessError("SERENA_PROJECT_POLICY_FORBIDDEN: workspace folders")
+
+
 def prepare_serena(root, cache, *, executable="serena", timeout=15):
     """Return original Serena argv/env with classic tools and private indexes.
 
@@ -91,11 +116,27 @@ def prepare_serena(root, cache, *, executable="serena", timeout=15):
         raise HarnessError("SERENA_NOT_AVAILABLE")
     env = _private_env(cache)
     env["SERENA_HOME"] = str(cache / "serena-home")
+    env["SERENA_USAGE_REPORTING"] = "false"
+    root_info = root.stat()
+    binding = {"schema_version": 1, "root": str(root), "device": root_info.st_dev, "inode": root_info.st_ino}
+    binding_path = cache / "harness-project.json"
+    if binding_path.exists() or binding_path.is_symlink():
+        if json.loads(read_regular_file(binding_path)) != binding:
+            raise HarnessError("SERENA_WORKTREE_DRIFT: private cache belongs to another worktree")
+    else:
+        atomic_write(binding_path, (json.dumps(binding, sort_keys=True) + "\n").encode(), exclusive=True)
     _mkdir(Path(env["SERENA_HOME"]))
     project = cache / "project-data"
     _mkdir(project)  # Existing private location wins over project-local fallback.
+    _validate_serena_project(project)
     policy = {"agent_interface": "tools", "fixed_tools": list(SERENA_READ_TOOLS),
-              "project_serena_folder_location": str(project), "projects": []}
+              "project_serena_folder_location": str(project), "projects": [],
+              "trusted_project_path_patterns": []}
+    # Use the installed pinned Python language server, rather than a per-worker
+    # uvx download. Other languages require their own separately qualified LSP.
+    python_lsp = Path(binary).parent / "pyright-langserver"
+    if python_lsp.is_file():
+        policy["ls_specific_settings"] = {"python": {"ls_base_cmd": [str(python_lsp)]}}
     raw = (json.dumps(policy, sort_keys=True) + "\n").encode()
     _published_policy(Path(env["SERENA_HOME"]) / "serena_config.yml", policy)
     version = _contained_capture([binary, "--version"], env=env, timeout=timeout)

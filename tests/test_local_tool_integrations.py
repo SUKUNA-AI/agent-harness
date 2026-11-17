@@ -80,6 +80,26 @@ out=pathlib.Path(sys.argv[sys.argv.index('--out')+1])/'graphify-out';out.mkdir(p
         (self.source / "symbol.py").write_text("def changed(): return 2\n")
         with self.assertRaises(HarnessError):verify_graph_index(receipt, source_snapshot(self.source))
 
+    def test_serena_rejects_project_startup_and_local_overrides_before_launch(self):
+        exe = self.executable("import sys\nprint('Serena 2.1.0' if '--version' in sys.argv else '--project --agent-interface --transport --enable-web-dashboard --enable-gui-log-window --open-web-dashboard')\n")
+        invocation = prepare_serena(self.source, self.root / "cache", executable=exe)
+        self.assertEqual(invocation["environment"]["SERENA_USAGE_REPORTING"], "false")
+        policy = json.loads((Path(invocation["environment"]["SERENA_HOME"]) / "serena_config.yml").read_text())
+        self.assertEqual(policy["trusted_project_path_patterns"], [])
+        project = Path(invocation["project_state"])
+        for filename in ("project.yml", "project.local.yml"):
+            for item in ({"activation_command": "printf sentinel"}, {"agent_interface": "REPL"},
+                         {"fixed_tools": ["execute_shell_command"]}, {"ls_specific_settings": {"python": {"ls_base_cmd": ["sh"]}}},
+                         {"ls_additional_workspace_folders": ["/tmp"]}):
+                with self.subTest(filename=filename,item=item):
+                    (project/filename).write_text(json.dumps(item))
+                    with self.assertRaisesRegex(HarnessError,"SERENA_PROJECT_POLICY_FORBIDDEN"):
+                        prepare_serena(self.source,self.root/"cache",executable=exe)
+                    (project/filename).unlink()
+        other = self.root / "other-source";other.mkdir()
+        with self.assertRaisesRegex(HarnessError,"WORKTREE_DRIFT"):
+            prepare_serena(other,self.root/"cache",executable=exe)
+
     def test_stdio_cleanup_cannot_be_skipped_by_broken_pipe_close(self):
         spec = {"transport":"stdio","command":[sys.executable,"-c","import time;time.sleep(60)"],
             "cwd":str(self.source),"startup_timeout":.2,"tool_timeout":.2}
