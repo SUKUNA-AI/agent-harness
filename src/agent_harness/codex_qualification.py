@@ -119,7 +119,10 @@ def thread(client,root,role,*,config=None,session_id=None,ephemeral=False):
         raise HarnessError('EXACT_RESUME_DRIFT: native thread identity/worktree mismatch')
     sandbox=response.get('sandbox',{})
     if sandbox.get('type')!=('workspaceWrite' if role=='worker' else 'readOnly'):
-        raise HarnessError('Native effective sandbox differs from its managed role')
+        safe={key:sandbox.get(key)for key in ('type','writableRoots','excludeSlashTmp','excludeTmpdirEnvVar')}
+        raise HarnessError('Native effective sandbox differs from its managed role: '+json.dumps(safe,sort_keys=True))
+    if role=='worker' and (sandbox.get('excludeSlashTmp') is not True or sandbox.get('excludeTmpdirEnvVar') is not True):
+        raise HarnessError('Native worker sandbox retains undeclared temporary write grants')
     if role=='worker' and any(str(canonical_directory(path))!=str(root) for path in sandbox.get('writableRoots',[])):
         raise HarnessError('Native worker sandbox grants an undeclared writable root')
     return response
@@ -150,6 +153,8 @@ def _census_once(client,thread_id,config):
                 raise HarnessError('Native MCP census identity conflict')
             disabled=config.get('mcp_servers',{}).get(row['name'],{}).get('enabled') is False
             if disabled:
+                if row.get('runtimeStatus') is None:
+                    raise HarnessError('Native disabled MCP state is unverified: '+row['name'])
                 if row.get('runtimeStatus') in {'connected','starting','pending','reconnecting'}:
                     raise HarnessError('Explicitly disabled native MCP server is active: '+row['name'])
                 continue
@@ -337,7 +342,7 @@ def qualify(adapter,*,root,role,evidence_dir,timeout=60,session_id=None):
         document=tomllib.loads(read_regular_file(installed['path']).decode('utf-8-sig'))
         for name in document.get('mcp_servers',{}):
             if name not in declared:clone.tool_config.setdefault('mcp_servers',{})[name]={'enabled':False}
-    if role=='worker':clone.tool_config['sandbox_workspace_write']={'writable_roots':[],
+    if role=='worker':clone.tool_config['sandbox_workspace_write']={'writable_roots':[str(root)],
         'exclude_slash_tmp':True,'exclude_tmpdir_env_var':True}
     folder=evidence/('qualification-'+__import__('secrets').token_hex(12));folder.mkdir(mode=0o700)
     runtime=folder/'runtime';runtime.mkdir(mode=0o700)

@@ -61,4 +61,6 @@ class NativeCodexEventTests(unittest.TestCase):
             value.feed('thread/tokenUsage/updated',dict(old,turnId='unobserved-turn'))
         value.feed('turn/started',{'threadId':'thread-original','turn':{'id':'turn-current'}})
         with self.assertRaises(HarnessError):value.feed('thread/tokenUsage/updated',old)
+        reused=NativeCodexEvents('thread-original',historical_turn_ids=['old-turn'])
+        with self.assertRaises(HarnessError):reused.bind_turn_response({'id':'old-turn'})
 if __name__=='__main__':unittest.main()

@@ -24,6 +24,7 @@ class NativeCodexEvents:
 
     def bind_turn_response(self,turn):
         if (not isinstance(turn,dict) or not isinstance(turn.get('id'),str) or not turn['id']
+                or turn.get('id') in self.historical_turn_ids
                 or turn.get('status') not in (None,'inProgress')
                 or self.turn_id is not None and self.turn_id!=turn['id']):
             raise HarnessError('Native turn response identity/status changed')
