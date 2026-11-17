@@ -387,6 +387,12 @@ class NativeServer:
         self.capture_error = None
         self.capture_bytes = 0
         self.capture_lock = threading.Lock()
+        self.requests = []
+        self.dropped_requests = 0
+        self.stderr_bytes = 0
+        self.stderr_lines = 0
+        self.stderr_digest = hashlib.sha256()
+        self.stderr_categories = {name: 0 for name in ("mcp", "permission", "timeout", "error")}
 
     def _read(self, stream, name):
         try:
@@ -399,6 +405,13 @@ class NativeServer:
                     if len(raw) > MAX_LINE or self.capture_bytes > MAX_RESPONSE:
                         self.capture_error = "Native private-server capture exceeds bounds"
                         break
+                    if name == "stderr":
+                        self.stderr_bytes += len(raw)
+                        self.stderr_lines += 1
+                        self.stderr_digest.update(raw)
+                        lowered = raw.lower()
+                        for category in self.stderr_categories:
+                            self.stderr_categories[category] += int(category.encode() in lowered)
                 if name == "stdout":
                     try:
                         self.inbox.put_nowait(raw)
@@ -439,7 +452,40 @@ class NativeServer:
             self.close()
             raise
 
+    def diagnostics(self):
+        """No stderr text, URLs, credentials, prompts, bodies or session IDs."""
+        with self.capture_lock:
+            return {"requests": [dict(item) for item in self.requests], "omitted_requests": self.dropped_requests,
+                "stderr": {"bytes": self.stderr_bytes, "lines": self.stderr_lines,
+                    "sha256": self.stderr_digest.hexdigest(), "categories": dict(self.stderr_categories)},
+                "process_exit_code": self.process.poll() if self.process is not None else None,
+                "capture_error": self.capture_error}
+
     def request(self, method, path, body=None, *, allowed=(200,)):
+        route = path.split("?", 1)[0]
+        if route not in {"/api/location", "/api/agent", "/api/plugin", "/api/mcp", "/api/session"}:
+            route = ("/api/session/{session}" + match[1] if
+                (match := re.fullmatch(r"/api/session/[^/]+((?:/permission|/prompt)?)", route)) else
+                "/api/experimental/session/{session}/export" if re.fullmatch(
+                    r"/api/experimental/session/[^/]+/export", route) else "/api/other")
+        entry = {"method": method if method in {"GET", "POST", "DELETE"} else "OTHER", "route": route}
+        with self.capture_lock:
+            if len(self.requests) >= 256:
+                self.requests.pop(0)
+                self.dropped_requests += 1
+            self.requests.append(entry)
+        started = time.monotonic()
+        try:
+            response = self._request(method, path, body, allowed=allowed)
+            entry["status"] = response[0]
+            return response
+        except BaseException as error:
+            entry["error_type"] = type(error).__name__
+            raise
+        finally:
+            entry["elapsed_seconds"] = round(time.monotonic() - started, 3)
+
+    def _request(self, method, path, body=None, *, allowed=(200,)):
         if not self.address or not path.startswith("/api/") or "\0" in path:
             raise HarnessError("Invalid native qualification API request")
         if self.capture_error or self.process.poll() is not None:
@@ -698,15 +744,24 @@ def qualify(adapter, *, root, role, evidence_dir, session_id=None, timeout=60):
     mcp_status = []
     probe_session = None
     first = None
+    native_servers = []
+    stage = "native_startup"
+    def native_server():
+        server = NativeServer(clone, root, deadline=deadline)
+        native_servers.append(server)
+        return server
     try:
-        with NativeServer(clone, root, deadline=deadline) as server:
+        with native_server() as server:
+            stage = "native_location"
             _, location = server.request("GET", "/api/location")
             if not isinstance(location, dict) or location.get("directory") != str(root):
                 raise HarnessError("EXACT_WORKTREE_MISMATCH: native location differs from process cwd")
             previous_session = check_session(server, session_id, root) if session_id is not None else None
+            stage = "agent_catalog"
             agents = server.data("GET", "/api/agent")
             if not isinstance(agents, list) or not any(a.get("id") == agent and a.get("mode") == "primary" for a in agents):
                 raise HarnessError("Native controlled primary agent is unavailable")
+            stage = "plugin_catalog"
             plugins = server.data("GET", "/api/plugin")
             if not isinstance(plugins, list) or not any(p.get("id") == GUARD_ID for p in plugins):
                 observed = [{"id": p.get("id"), "source": p.get("source"), "state": p.get("state")}
@@ -718,6 +773,7 @@ def qualify(adapter, *, root, role, evidence_dir, session_id=None, timeout=60):
                 raise HarnessError("Unqualified native plugin is active")
             declared_servers = set(config.get("mcp", {}).get("servers", {}))
             if declared_servers:
+                stage = "mcp_readiness"
                 while True:
                     observed = server.data("GET", "/api/mcp")
                     if not isinstance(observed, list):
@@ -737,6 +793,7 @@ def qualify(adapter, *, root, role, evidence_dir, session_id=None, timeout=60):
             session_options = {"title": "Harness native qualification", "agent": agent}
             if previous_session and previous_session["model"] is not None:
                 session_options["model"] = previous_session["model"]
+            stage = "create_probe_session"
             info = server.data("POST", "/api/session", session_options)
             probe_session = info["id"]
             checks = set(DENIED_LEAF) | {"shell", "skill"}
@@ -745,15 +802,19 @@ def qualify(adapter, *, root, role, evidence_dir, session_id=None, timeout=60):
                 for name in declared_servers:
                     prefix = re.sub(r"[^A-Za-z0-9_]", "_", name)
                     checks.update((prefix + "_write_file", prefix + "_execute_command"))
+            stage = "permission_checks"
             for action in sorted(checks):
                 decision = server.data("POST", "/api/session/" + probe_session + "/permission",
                     {"action": action, "resources": ["*"], "agent": agent})
                 if decision.get("effect") != "deny":
                     raise HarnessError("Native role does not deny " + action)
                 permissions.append({"action": action, "effect": "deny"})
+            stage = "queue_probe_prompt"
             server.data("POST", "/api/session/" + probe_session + "/prompt",
                 {"text": "Harness qualification marker " + spec["marker"], "delivery": "queue"})
+            stage = "wait_initial_catalog"
             first, count = _wait_probe(probe_path, probe_session, deadline)
+            stage = "initial_session_export"
             before = check_session(server, probe_session, root)
         # The next private server must wait for live MCP registration before it
         # assembles its snapshot. Connected sessions can precede tool refresh.
@@ -763,9 +824,11 @@ def qualify(adapter, *, root, role, evidence_dir, session_id=None, timeout=60):
         atomic_write(spec_path, (json.dumps(spec, sort_keys=True, separators=(",", ":")) + "\n").encode())
         # A new CLI/private-server process must reopen the existing session. Its
         # prompt deliberately omits the unpredictable first-turn marker.
+        stage = "cli_exact_resume"
         result = _capture_owned([*clone.executable, "run", "--standalone", "--format", "json",
             "--agent", agent, "--session", probe_session, "Continue the harness qualification without inference."],
             cwd=root, environment=environment, deadline=deadline)
+        stage = "wait_resumed_catalog"
         second, _ = _wait_probe(probe_path, probe_session, deadline, after=count)
         _write_owned(folder / "resume-observations.json", {"first": first, "second": second,
             "native_mcp_status": mcp_status, "before": before, "cli_exit_code": result.returncode,
@@ -773,14 +836,18 @@ def qualify(adapter, *, root, role, evidence_dir, session_id=None, timeout=60):
             "cli_stderr_sha256": hashlib.sha256(result.stderr).hexdigest()})
         if second.get("history_contains_probe_marker") is not True or second.get("catalog_digest") != first.get("catalog_digest"):
             raise HarnessError("EXACT_RESUME_UNQUALIFIED: CLI restart lost native session history/catalog")
-        with NativeServer(clone, root, deadline=deadline) as server:
+        stage = "resume_verification_startup"
+        with native_server() as server:
+            stage = "resume_session_export"
             after = check_session(server, probe_session, root)
             if before["project_id"] != after["project_id"] or after["message_count"] < before["message_count"]:
                 raise HarnessError("EXACT_RESUME_UNQUALIFIED: native session store identity changed")
             missing = "ses_harness_missing_" + secrets.token_hex(12)
+            stage = "missing_session_check"
             status, _ = server.request("GET", "/api/session/" + missing, allowed=(200, 404))
             if status != 404:
                 raise HarnessError("Native missing-session lookup did not fail closed")
+            stage = "delete_probe_session"
             server.request("DELETE", "/api/session/" + probe_session, allowed=(204,))
         catalog = first.get("catalog")
         if (not isinstance(catalog, list) or any(not isinstance(t, dict) or t.get("name") not in allowed for t in catalog)
@@ -812,7 +879,9 @@ def qualify(adapter, *, root, role, evidence_dir, session_id=None, timeout=60):
     except BaseException as error:
         _write_owned(folder / "failure.json", {"schema_version": 1,
             "status": "BLOCKED_NOT_QUALIFIED", "failure_type": type(error).__name__,
-            "root": str(root), "role": role, "probe_session": probe_session})
+            "root": str(root), "role": role, "probe_session": probe_session,
+            "stage": stage, "elapsed_seconds": round(timeout - max(0, deadline - time.monotonic()), 3),
+            "native_servers": [server.diagnostics() for server in native_servers]})
         raise
 
 
