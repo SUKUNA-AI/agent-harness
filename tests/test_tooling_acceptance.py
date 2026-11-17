@@ -220,7 +220,9 @@ class ToolingAcceptanceTests(unittest.TestCase):
         supervisor = self.create(profile=False)
         supervisor.load()
         supervisor.adapter = CodexAdapter((sys.executable, str(self.fake)))
-        with self.assertRaisesRegex(HarnessError, "reviewer.*isolation"):
+        # This synthetic exec peer cannot qualify the new native RPC policy;
+        # version/capability refusal must still precede a model invocation.
+        with self.assertRaisesRegex(HarnessError, "UNSUPPORTED_CAPABILITY|BLOCKED_NOT_QUALIFIED"):
             prepare(supervisor, {"tool_profile": {"id": "reviewer-readonly", "version": 1}},
                 root=self.source, role="reviewer", node_id="review", attempt_id="review-1")
         self.assertFalse(self.fake.with_suffix(".calls").exists())
