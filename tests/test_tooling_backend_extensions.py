@@ -3,12 +3,13 @@ from copy import deepcopy
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from agent_harness.core import HarnessError
 from agent_harness.execution import ProfileExecution, require_native_dependencies
-from agent_harness.tool_profiles import load_profile
+from agent_harness.tool_profiles import load_profile, render_opencode
 
 
 class EventClient:
@@ -61,6 +62,40 @@ class ToolingBackendExtensionTests(unittest.TestCase):
         with self.assertRaisesRegex(HarnessError, "absent"):
             require_native_dependencies(self.profile, EventClient(catalog=catalog),
                 {"connected_mcp_servers": ["fixture", "other"]})
+
+    def test_required_external_parts_fail_before_backend_without_read_grants(self):
+        from agent_harness.task_packets import compile_packet, NotDispatched
+        source = self.root / "source"
+        source.mkdir()
+        private = self.root / "private"
+        supervisor = SimpleNamespace(store=SimpleNamespace(path=lambda name: private / name),
+            state={"run_id": "packet-test", "contract_digest": "a" * 64})
+        prompt = compile_packet(supervisor, "Read every required part.", {"mission": "x" * 40000})
+        binding = {"identity": {"root": str(source), "cache_root": str(private / "cache")}}
+        client = EventClient()
+        with self.assertRaisesRegex(NotDispatched, "required packet parts"):
+            ProfileExecution(client, self.profile, binding).preflight(prompt)
+
+    def test_native_opencode_mcp_identifiers_preserve_hyphens(self):
+        profile = deepcopy(self.profile)
+        server = profile["servers"][0]
+        server.update(id="docs-api", allowed_tools=["read-file"], required_tools=["read-file"],
+            read_only_tools=["read-file"])
+        rendered = render_opencode(profile, self.root)
+        grants = rendered["agents"]["harness-leaf"]["permissions"]
+        self.assertIn({"action": "docs-api_read-file", "resource": "*", "effect": "allow"}, grants)
+        self.assertNotIn({"action": "docs_api_read_file", "resource": "*", "effect": "allow"}, grants)
+        require_native_dependencies(profile, EventClient(catalog=[{"name": "docs-api_read-file"}]),
+            {"connected_mcp_servers": ["docs-api"]})
+
+    def test_optional_server_error_does_not_invalidate_confirmed_mandatory_results(self):
+        self.profile["servers"].append({**deepcopy(self.profile["servers"][0]),
+            "id": "optional-docs", "required": False, "allowed_tools": ["query-docs"],
+            "required_tools": []})
+        optional = self.event("optional-docs_query-docs", error=True)
+        optional["item"].pop("server")  # Native OpenCode exposes its qualified tool ID.
+        client = EventClient([self.event("snapshot"), self.event("close"), optional])
+        self.assertEqual(ProfileExecution(client, self.profile, self.binding).run("test")["status"], "completed")
 
 
 if __name__ == "__main__":

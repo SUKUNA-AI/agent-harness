@@ -145,6 +145,7 @@ def verify_parts(prompt):
         if (len(raw) != full["bytes"] or len(raw) > PACKET_BYTES or hashlib.sha256(raw).hexdigest() != full["sha256"]
                 or read_regular_file(full["path"], max_bytes=PACKET_BYTES) != raw):
             raise ValueError("Full required packet identity changed")
+        return [part["path"] for part in manifest["parts"]]
     except (OSError, ValueError, TypeError, KeyError) as error:
         raise NotDispatched("Required referenced context unavailable or changed; no dispatch attempted") from error
 

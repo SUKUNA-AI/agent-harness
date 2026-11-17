@@ -462,3 +462,16 @@ model slot. У contract/node selection `execution.graph_index` хранит аб
 путь ordinary YAML receipt. Сам profile указывает `index.required: true`.
 После source edits нужен новый snapshot/build; `--historical` оставляет явный
 `HISTORICAL_ONLY` и не разрешает mandatory reuse.
+
+Строгий native reader должен иметь доступ ко всем required packet parts.
+Порог 24000 UTF-8 bytes переключает существующий transport на immutable файлы
+в private run store; он не сокращает mission и не задаёт context window модели.
+Если exact external read grants для этих файлов отсутствуют, tooling preflight
+возвращает `BLOCKED_NOT_QUALIFIED` до model dispatch. Проверка digest файла сама
+по себе не выдаёт разрешение читать private directory.
+
+Автоматическая выдача таких grants worker и их изменение при exact resume пока
+не квалифицированы. Для больших tooling packets это явная граница поддержки;
+нельзя считать этот workflow принятым по одному успешному MCP вызову. Существующий
+Codex exec transport обычных контрактов продолжает использовать свои правила
+доставки required parts.

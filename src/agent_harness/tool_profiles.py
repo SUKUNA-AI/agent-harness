@@ -352,9 +352,9 @@ def render_opencode(profile, root, *, cache_root=None, role="worker"):
         else:
             item["url"] = spec["url"]
         servers[spec["id"]] = item
-        prefix = re.sub(r"[^A-Za-z0-9_]", "_", spec["id"])
+        prefix = re.sub(r"[^A-Za-z0-9_-]", "_", spec["id"])
         rules.append({"action": prefix + "_*", "resource": "*", "effect": "deny"})
-        rules.extend({"action": prefix + "_" + re.sub(r"[^A-Za-z0-9_]", "_", tool),
+        rules.extend({"action": prefix + "_" + re.sub(r"[^A-Za-z0-9_-]", "_", tool),
             "resource": "*", "effect": "allow"} for tool in spec["allowed_tools"])
     rules.extend({"action": action, "resource": "*", "effect": "deny"}
         for action in ("subagent", "execute", "external_directory", "shell", "skill"))

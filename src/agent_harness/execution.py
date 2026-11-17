@@ -107,6 +107,14 @@ class ProfileExecution:
         return self.adapter.capabilities(**kwargs)
 
     def preflight(self, prompt, **options):
+        # A restricted reader must actually be able to consume every required
+        # part. A verified file reference is not itself an external read grant.
+        from .task_packets import verify_parts
+        required = verify_parts(prompt) or []
+        root = Path(self.binding["identity"]["root"])
+        declared = {item["path"] for item in getattr(self.adapter, "read_context", ())}
+        if any(not Path(path).is_relative_to(root) and path not in declared for path in required):
+            raise NotDispatched("BLOCKED_NOT_QUALIFIED: required packet parts need exact external read grants before native dispatch")
         return self.adapter.preflight(prompt, **options)
 
     def run(self, prompt, **options):
@@ -121,12 +129,17 @@ class ProfileExecution:
             if item.get("type") == "mcp_tool_call":
                 pairs = [(item.get("server"), item.get("tool"))]
                 if not item.get("server"):
-                    pairs = [(s, t) for s, t in required if item.get("tool") in {s + "_" + t, "mcp__" + s + "__" + t}]
+                    pairs = [(s["id"], tool) for s in self.servers for tool in s["allowed_tools"]
+                        if item.get("tool") in {s["id"] + "_" + tool,
+                            re.sub(r"[^A-Za-z0-9_-]", "_", s["id"]) + "_" + re.sub(r"[^A-Za-z0-9_-]", "_", tool),
+                            "mcp__" + s["id"] + "__" + tool}]
                 state = event.get("backend_event", {}).get("part", {}).get("state", {})
                 if len(pairs) == 1 and not item.get("error") and item.get("status") != "failed" and state.get("status") != "error":
                     if item.get("result") is not None or state.get("status") == "completed":
                         confirmed.add(pairs[0])
-            if mandatory and item.get("type") == "mcp_tool_call" and (item.get("server") in mandatory or not item.get("server")):
+            observed_server = pairs[0][0] if item.get("type") == "mcp_tool_call" and len(pairs) == 1 else None
+            if mandatory and item.get("type") == "mcp_tool_call" and (
+                    observed_server in mandatory or not item.get("server") and observed_server is None):
                 if (item.get("error") or item.get("status") == "failed"
                         or isinstance(item.get("result"), dict) and item["result"].get("isError")
                         or event.get("backend_event", {}).get("part", {}).get("state", {}).get("status") == "error"):
@@ -211,8 +224,8 @@ def require_native_dependencies(profile, adapter, capabilities):
     names = {tool["name"] for tool in catalog}
     native_pairs = {(tool.get("server"), tool["name"]) for tool in catalog}
     for server in required:
-        prefix = re.sub(r"[^A-Za-z0-9_]", "_", server["id"])
-        wanted = {prefix + "_" + re.sub(r"[^A-Za-z0-9_]", "_", name)
+        prefix = re.sub(r"[^A-Za-z0-9_-]", "_", server["id"])
+        wanted = {prefix + "_" + re.sub(r"[^A-Za-z0-9_-]", "_", name)
                   for name in server["required_tools"]}
         if not wanted <= names and not {(server["id"], name) for name in server["required_tools"]} <= native_pairs:
             raise HarnessError("Required MCP tools absent from native execution catalog: " + server["id"])
