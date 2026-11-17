@@ -46,7 +46,7 @@ log закрепляются в completion receipt. Сохранённый diagn
 | Codex baseline без новых полей | SUPPORTED | Сохраняется существующий flow |
 | Strict профили, render/dry-run, dependency probes | SUPPORTED | Отсутствующая dependency видна отдельно |
 | Native Codex MCP catalog/deny RPC | QUALIFIED для изолированного probe | Не квалификация последующего exec |
-| Strict Codex owned app-server API | EXPERIMENTAL; текущий live допуск BLOCKED_NOT_QUALIFIED | Нужны актуальная per-project core qualification и exact resume proof; отдельный успешный RPC read не подтверждает весь путь |
+| Strict Codex owned app-server API | EXPERIMENTAL; QUALIFIED для Linux/Codex 0.167.0 и local scripted provider | Source read, allow/deny, same-session restart/history; fresh per-project qualification обязательна, paid workload не квалифицирован |
 | MCP profile в managed execution | Отдельные qualified backend boundaries | OpenCode guard; Strict Codex owned app-server transport требует собственного native proof, legacy exec его не наследует |
 | Строгий reviewer с MCP | QUALIFIED для OpenCode 2.2.5 с fixture MCP | Реальный клиент и malicious provider negatives; реализация конкретного MCP требует аудита |
 | Serena на каждый worktree | QUALIFIED для launcher 2.1.0 и OpenCode 2.2.5 | Две concurrent native stdio sessions, затем два native OpenCode workers с реальными symbol calls; local scripted provider, scope/cleanup |
@@ -70,11 +70,17 @@ version и `UNKNOWN_OUTCOME` не являются успешной приёмк
 optional tool boundaries на Windows/macOS; прежняя baseline поддержка пакета
 и её release evidence имеют собственные границы.
 
-Новый Strict Codex API реализован отдельно от baseline. До завершения
-актуальной per-project core qualification и exact resume proof статус остаётся
-`EXPERIMENTAL / BLOCKED_NOT_QUALIFIED`, включая strict reviewer.
-Отдельный успешный native RPC read или diagnostic/exec namespace experiment
-не заменяет обязательное доказательство всего нового transport.
+Новый Strict Codex API остаётся experimental. На Linux/Codex 0.167.0
+реальный client прошёл source read и same-session restart с прежней историей
+через local scripted provider; установленная конфигурация прошла coding + Serena
+и read-only reviewer qualification. Квалификация требуется заново для каждого
+project/run; её отсутствие даёт `BLOCKED_NOT_QUALIFIED`. Платный Codex workload
+этими проверками не квалифицируется.
+
+OpenCode 2.2.5 подтвердил native effective catalog и exact resume для
+coding-context7 (Serena + Context7) и настроенного browser-testing (8 MCP tools).
+Native MCP IDs сохраняют дефисы: `context7_query-docs`,
+`playwright-managed_browser_snapshot`. Эти проверки не заменяют source/test gate.
 
 Serena, Context7, Graphify и ast-grep проверены установленными native packages,
 а не renamed fixtures. Полные receipts остаются в private run evidence;

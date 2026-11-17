@@ -64,10 +64,13 @@ runtime и сценарий, `READY` — результат определённ
 Fixture tests проверяют механизм harness; native tests проверяют указанный
 клиент. Ни те, ни другие не доказывают доступ к выбранной платной модели.
 
-На 2026-11-17 новый strict Codex transport имеет EXPERIMENTAL API; текущая
-live qualification остаётся `BLOCKED_NOT_QUALIFIED` до завершения актуальной
-per-project core qualification и exact resume proof. Отдельный успешный RPC
-read не квалифицирует весь путь и strict reviewer.
+Strict Codex transport остаётся EXPERIMENTAL API. На Linux/Codex 0.167.0
+проверены source read и exact session restart/history через local scripted
+provider; установленная конфигурация получила READY для coding + Serena и
+read-only reviewer. Каждый новый project/run обязан заново получить native
+proof, иначе действует `BLOCKED_NOT_QUALIFIED`. Платный Codex workload не
+квалифицирован. Большие tooling packets без exact external read grants также
+блокируются до dispatch.
 Подробнее — [Codex](CODEX_MCP_RU.md#строгий-managed-transport-отдельная-граница).
 
 Лимит 12 — верхняя граница supervisor, а не требование запускать 12 процессов.

@@ -112,11 +112,13 @@ canonical root, config digest, catalog digest, имена tools/schema digests,
 
 ## Строгий managed transport: отдельная граница
 
-Текущий статус на 2026-11-17: **EXPERIMENTAL API,
-`BLOCKED_NOT_QUALIFIED` до завершения актуальной per-project core qualification
-и exact resume proof**. Успешный отдельный native RPC read не подтверждает
-весь qualification/resume цикл. Нельзя включить capability вручную или
-заменить обязательный proof прежним успешным namespace probe.
+Транспорт остаётся **EXPERIMENTAL API**. На Linux с Codex 0.167.0
+квалифицированы native MCP allow/deny, source read, остановка процесса и exact
+resume с прежней историей через локальный scripted provider. В установленной
+конфигурации отдельно получены READY для coding + Serena и read-only reviewer.
+Это не проверка платного Codex workload. Каждый project/run проходит собственную
+core qualification; без неё остаётся `BLOCKED_NOT_QUALIFIED`. Capability нельзя
+включить вручную или заменить прежним diagnostic catalog.
 
 Новый `StrictCodexAdapter` выбирается явной фабрикой
 `CodexAdapter.with_managed_tools(root=...)` после per-run tool configuration.
