@@ -23,6 +23,7 @@ from .runner import WindowsJob, _contained_capture
 MAX_MESSAGE_BYTES = 1024 * 1024
 MAX_TOTAL_BYTES = 8 * 1024 * 1024
 MAX_REQUEST_BYTES = 4096
+SUPPORTED_PROTOCOLS = frozenset({"2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"})
 
 
 class ProbeFailure(HarnessError):
@@ -33,7 +34,8 @@ class ProbeFailure(HarnessError):
 
 class StdioProbe(AbstractContextManager):
     """One short-lived diagnostic connection, never shared between worktrees."""
-    def __init__(self, server, *, role="worker"):
+    def __init__(self, server, *, role="worker", environment=None):
+        self.environment = dict(environment) if environment is not None else None
         self.server = server
         self.role = role
         self.process = self.job = None
@@ -90,16 +92,16 @@ class StdioProbe(AbstractContextManager):
         self.executable = shutil.which(spec["command"][0])
         if self.executable is None:
             raise ProbeFailure("SERVER_MISSING")
+        env = dict(self.environment if self.environment is not None else os.environ)
+        env.update(spec.get("environment", {}))
         if spec.get("help_argv"):
             try:
-                result = _contained_capture(spec["help_argv"], cwd=spec["cwd"], timeout=spec["startup_timeout"])
+                result = _contained_capture(spec["help_argv"], cwd=spec["cwd"], env=env, timeout=spec["startup_timeout"])
                 text = result.stdout.decode("utf-8", errors="replace")
                 if result.returncode or len(text) > MAX_MESSAGE_BYTES or any(flag not in text for flag in spec.get("required_help", [])):
                     raise ProbeFailure("UNSUPPORTED_CLI")
             except subprocess.TimeoutExpired as error:
                 raise ProbeFailure("STARTUP_TIMEOUT") from error
-        env = dict(os.environ)
-        env.update(spec.get("environment", {}))
         flags = subprocess.CREATE_NEW_PROCESS_GROUP | 0x00000004 if os.name == "nt" else 0
         try:
             self.process = subprocess.Popen([self.executable, *spec["command"][1:]], cwd=spec["cwd"],
@@ -162,10 +164,10 @@ class StdioProbe(AbstractContextManager):
 
     def inventory(self):
         try:
-            initialized = self.request("initialize", {"protocolVersion": "2024-11-05", "capabilities": {},
+            initialized = self.request("initialize", {"protocolVersion": "2025-11-25", "capabilities": {},
                 "clientInfo": {"name": "agent-harness-diagnostic", "version": "1"}})
             if (not isinstance(initialized, dict) or initialized.get("protocolVersion") not in
-                    {"2024-11-05", "2025-03-26", "2025-06-18"} or not isinstance(initialized.get("serverInfo"), dict)
+                    SUPPORTED_PROTOCOLS or not isinstance(initialized.get("serverInfo"), dict)
                     or not isinstance(initialized.get("capabilities"), dict)):
                 raise ProbeFailure("HANDSHAKE_FAILED")
             self.server_info = sanitized(initialized["serverInfo"])
@@ -212,7 +214,8 @@ class StdioProbe(AbstractContextManager):
             raise ProbeFailure("TOOL_FORBIDDEN_BY_POLICY")
         self.catalog = [sanitized(tool) for tool in tools if tool["name"] in allowed]
         self.catalog.sort(key=lambda item: item["name"])
-        self.advertised_catalog_digest = digest(sorted((sanitized(tool) for tool in tools), key=lambda item: item["name"]))
+        self.advertised_catalog = sorted((sanitized(tool) for tool in tools), key=lambda item: item["name"])
+        self.advertised_catalog_digest = digest(self.advertised_catalog)
         # A post-catalog round trip rules out cached-only discovery and detects
         # a connection that is lost directly after tools/list.
         self.request("ping")
@@ -233,8 +236,6 @@ class StdioProbe(AbstractContextManager):
     def close(self):
         if self.process is None:
             return
-        if self.process.stdin:
-            self.process.stdin.close()
         try:
             if self.job is None and os.name == "nt":
                 # A job-construction failure leaves the child suspended.
@@ -246,8 +247,15 @@ class StdioProbe(AbstractContextManager):
         finally:
             if self.job:
                 self.job.close()
+            if self.process.stdin:
+                try:
+                    self.process.stdin.close()
+                except (BrokenPipeError, OSError, ValueError):
+                    pass
             for reader in self.readers:
                 reader.join(timeout=2)
+            if any(reader.is_alive() for reader in self.readers):
+                self.stopped = False
         self.events.append({"event": "process.stopped", "confirmed": self.stopped, "at": now()})
 
     def __exit__(self, kind, value, traceback):
