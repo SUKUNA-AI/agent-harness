@@ -1,4 +1,4 @@
-# Документация Native Agent Harness 1.6.1
+# Документация Native Agent Harness 1.7.0
 
 Этот индекс содержит актуальные руководства и короткие процедуры для агента. Начальная точка — [README](../README.md).
 
@@ -26,12 +26,13 @@
 | [Tooling acceptance](TOOLING_ACCEPTANCE_RU.md) | A1–A7, fault injection, negative security tests, fixture/live distinction |
 
 Наличие renderer или fixture PASS не квалифицирует реальный клиент.
-В исходной ветке OpenCode managed leaf допускается только после native
+В 1.7.0 OpenCode managed leaf допускается только после native
 qualification и проверки каталога внутри каждого реального исполнения.
 Диагностический Codex catalog не квалифицирует отдельный strict MCP exec или
-reviewer isolation. Baseline и опубликованный 1.6.1 ZIP сохраняют прежние границы.
-Отдельный Strict Codex API реализован экспериментально; текущая live
-qualification остаётся `BLOCKED_NOT_QUALIFIED`. [Точный статус](CODEX_MCP_RU.md#строгий-managed-transport-отдельная-граница).
+reviewer isolation. Baseline сохраняет прежние границы.
+Отдельный Strict Codex API имеет статус `EXPERIMENTAL`: native preflight,
+локальный scripted-provider flow и exact resume проверены; платный workload
+и автоматические внешние read grants для oversized packets не квалифицированы. [Точный статус](CODEX_MCP_RU.md#строгий-managed-transport-отдельная-граница).
 
 ## Понять и применять
 
@@ -81,10 +82,9 @@ qualification остаётся `BLOCKED_NOT_QUALIFIED`. [Точный стату
 
 ## Текущая версия и история
 
-Базовые руководства описывают 1.6.1; разделы Tool Profiles/OpenCode дополнительно
-описывают исходную ветку разработки и явно отмечают qualification boundaries.
-[Состав выпуска 1.6.1](RELEASE_NOTES_1.6.1.md) и его manifest связывают архив
-с исходниками. Предыдущий [1.6.0](RELEASE_NOTES_1.6.0.md) закреплён своим тегом;
+Руководства описывают 1.7.0 и явно отмечают qualification boundaries.
+[Состав выпуска 1.7.0](RELEASE_NOTES_1.7.0.md) и его manifest связывают архив
+с исходниками. Предыдущий [1.6.1](RELEASE_NOTES_1.6.1.md) закреплён своим тегом;
 новые изменения `main` не меняют его содержимое. История остаётся в
 [CHANGELOG](../CHANGELOG.md), Git и [GitHub Releases](https://github.com/SUKUNA-AI/agent-harness/releases).
 Устаревшие отдельные release/review Markdown удалены из рабочего дерева.

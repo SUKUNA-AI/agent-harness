@@ -1,6 +1,6 @@
 # Конфигурация Codex и контракт установщика
 
-Справочник релиза **1.6.1**, актуальность **2026-11-09**. Изменения harness
+Справочник релиза **1.7.0**, актуальность core reference **2026-11-09**, tooling — **2026-11-17**. Изменения harness
 определяет [installation.py](../src/agent_harness/installation.py), инвентаризацию
 источников — [diagnostics.py](../src/agent_harness/diagnostics.py).
 Синтаксис и runtime-приоритеты клиента сверяются с

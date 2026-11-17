@@ -1,17 +1,18 @@
-# Native Agent Harness 1.6.1
+# Native Agent Harness 1.7.0
 
 Локальный комплект для Codex: общие инструкции, память, работа с большими
 репозиториями, делегация и проверяемое продолжение задач. Модели запускает
 установленный Codex; он остаётся основным backend. Harness хранит состояние и связывает проверки с конкретными
 исходниками. Дополнительный LLM API, ключ, сервер, daemon и база данных не нужны.
 
-[Скачать полный ZIP 1.6.1](https://github.com/SUKUNA-AI/agent-harness/releases/download/v1.6.1/agent-harness-1.6.1.zip) ·
-[Изменения выпуска](docs/RELEASE_NOTES_1.6.1.md) ·
+[Скачать полный ZIP 1.7.0](https://github.com/SUKUNA-AI/agent-harness/releases/download/v1.7.0/agent-harness-1.7.0.zip) ·
+[Изменения выпуска](docs/RELEASE_NOTES_1.7.0.md) ·
 [Подробная установка](SETUP_RU.md) · [Документация](docs/INDEX.md)
 
-В 1.6.1 собраны исправления после 1.6.0: до **12 managed-сессий** и **3 reviewer**,
-effort по роли и риску, Rust LSP на Windows, ограниченный SessionStart bootstrap,
-проверка Python aliases и восстановление Windows slots/сессий.
+В 1.7.0 добавлены типизированные Tool Profiles, изолированные MCP-подключения,
+source-bound Graphify index и optional OpenCode V2 managed leaf backend.
+Codex остаётся основным исполнителем; до **12 managed-сессий** и **3 reviewer**
+учитываются общим supervisor независимо от backend.
 
 ## Что входит
 
@@ -31,7 +32,7 @@ checkout; независимые изменения Git выполняются �
 
 ## Optional Tool Profiles и OpenCode
 
-В исходной ветке добавлены [Tool Profiles](docs/TOOL_PROFILES_RU.md): per-worktree
+В выпуск включены [Tool Profiles](docs/TOOL_PROFILES_RU.md): per-worktree
 MCP, live dependency diagnostics, native client renderers, Graphify provenance и
 проверяемые ast-grep migrations. Baseline не требует новых инструментов и
 сохраняет прежние контракты. [Codex MCP](docs/CODEX_MCP_RU.md) использует локальные
@@ -55,7 +56,7 @@ OpenCode V2 проходит native preflight без inference, затем пр�
 Лимиты 12 managed sessions и 3 reviewers,
 worktree ownership, независимые checks и final gate общие. Матрица сценариев и
 границы проверки — [Tooling acceptance](docs/TOOLING_ACCEPTANCE_RU.md).
-Новые исходники не меняют ранее опубликованный ZIP 1.6.1.
+Ранее опубликованный ZIP 1.6.1 сохранён отдельно и не изменяется.
 Внешние MCP/CLI включаются по потребности. Docling не является зависимостью
 обычной инженерной работы; невыбранный documents profile можно явно пропустить.
 
@@ -81,10 +82,10 @@ Git clone и автоматический GitHub «Source code ZIP» содер�
 готовых бинарников. Для сборки helper из Git нужны Rust **1.90.0**, Cargo и
 C toolchain; при использовании готового bundle они не нужны.
 
-Скачайте ZIP и `SHA256SUMS` из [выпуска](https://github.com/SUKUNA-AI/agent-harness/releases/tag/v1.6.1).
+Скачайте ZIP и `SHA256SUMS` из [выпуска](https://github.com/SUKUNA-AI/agent-harness/releases/tag/v1.7.0).
 Сравните SHA-256 архива с `SHA256SUMS`: Linux —
-`sha256sum agent-harness-1.6.1.zip`, PowerShell —
-`Get-FileHash .\agent-harness-1.6.1.zip -Algorithm SHA256`.
+`sha256sum agent-harness-1.7.0.zip`, PowerShell —
+`Get-FileHash .\agent-harness-1.7.0.zip -Algorithm SHA256`.
 Распакуйте пакет **в постоянный каталог**: профиль будет ссылаться на его файлы.
 Состав, source revision и проверки указаны в `release-manifest.json` и
 `VERIFICATION.json`. Не подменяйте бинарник bundle файлом от другой версии.
@@ -104,7 +105,7 @@ C toolchain; при использовании готового bundle они н
 Выполняйте команды из распакованного package root. Замените путь в `cd`:
 
 ```bash
-cd "$HOME/tools/agent-harness-1.6.1"
+cd "$HOME/tools/agent-harness-1.7.0"
 HARNESS_HOME="${CODEX_HOME:-$HOME/.codex}"
 HARNESS_SKILLS="$HOME/.agents/skills"
 HARNESS_STATE="${XDG_STATE_HOME:-$HOME/.local/state}/agent-harness"
@@ -127,7 +128,7 @@ python3 tools/harness.py install --codex-home "$HARNESS_HOME" --skills-home "$HA
 Python executable. Команды выполняются из постоянного package root:
 
 ```powershell
-Set-Location (Join-Path $HOME "Tools\agent-harness-1.6.1")
+Set-Location (Join-Path $HOME "Tools\agent-harness-1.7.0")
 $HarnessHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME ".codex" }
 $HarnessSkills = Join-Path $HOME ".agents\skills"
 $HarnessState = Join-Path $HOME ".local\state\agent-harness"

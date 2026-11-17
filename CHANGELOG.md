@@ -1,5 +1,24 @@
 # История изменений
 
+## 1.7.0 — 2026-11-17
+
+- Optional Strict YAML Tool Profiles: role/tool allowlists, mandatory readiness,
+  runtime catalog/provenance и fail-closed drift checks без изменения baseline.
+- Отдельный OpenCode V2 managed leaf adapter, exact session resume и общие с
+  Codex лимиты supervisor: 12 sessions, 3 reviewers, scopes, checks и final gate.
+- Изолированные per-worktree Serena и Context7 launchers; frozen Graphify
+  source/index binding; проверяемый ast-grep rewrite; finite Playwright runner
+  с независимым regression test. Docling исключён из подключения.
+- Experimental strict Codex transport через owned stdio app-server, native
+  allow/deny и same-session recovery. Paid Codex workload не квалифицирован.
+- JSONL receipts и закрытые schema variants сохраняют tool identities и
+  readiness; прежние contract/checkpoint digests и default Codex/baseline сохранены.
+- Русские operator runbooks, техническая матрица capabilities и draw.io/SVG схемы.
+- Linux regression baseline: 1370 passed, 75 skipped, 0 failed на d58aac54;
+  release version delta проверяется отдельно. Skipped не объявляются PASS.
+
+[Заметки о выпуске 1.7.0](docs/RELEASE_NOTES_1.7.0.md).
+
 ## 1.6.1 — 2026-11-10
 
 - SessionStart/start/checkpoint/govern используют bounded instruction context без

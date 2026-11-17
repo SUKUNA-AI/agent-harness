@@ -1,4 +1,4 @@
-# Карта документации 1.6.1
+# Карта документации 1.7.0
 
 [Индекс](INDEX.md) · [Диаграммы draw.io](diagrams/README.md)
 
@@ -12,7 +12,7 @@ receipts конкретного commit, среды и candidate. Дата акт
 | --- | --- |
 | [README](../README.md) | Общие границы runtime, installer, CLI и release builder |
 | [SETUP](../SETUP_RU.md) | `installation.py`, `diagnostics.py`, templates установленных assets |
-| [CHANGELOG](../CHANGELOG.md), [Release notes](RELEASE_NOTES_1.6.1.md) | Состав 1.6.1, source tag, assets и ограничения проверок |
+| [CHANGELOG](../CHANGELOG.md), [Release notes](RELEASE_NOTES_1.7.0.md) | Состав 1.7.0, source tag, assets и ограничения проверок |
 | [Архитектура](ARCHITECTURE_RU.md) | Границы Codex, supervisor, core runner, Rust и LSP |
 | [CLI](CLI_REFERENCE_RU.md) | `cli.py`, `work_cli.py`, nested dispatchers и актуальный `--help` |
 | [Supervisor](EXECUTION_SUPERVISOR_RU.md) | `supervisor.py`, `work_contract.py`, `failure_policy.py` |
@@ -46,7 +46,7 @@ receipts конкретного commit, среды и candidate. Дата акт
 
 ## Версия и история
 
-Руководства описывают 1.6.1 в `main`; [release notes](RELEASE_NOTES_1.6.1.md)
+Руководства описывают 1.7.0 в `main`; [release notes](RELEASE_NOTES_1.7.0.md)
 описывают состав нового пакета. Предыдущий [релиз 1.6.0](RELEASE_NOTES_1.6.0.md)
 сохраняет прежний опубликованный архив. Старые отдельные release/review snapshots
 удалены; история изменений сохранена в [CHANGELOG](../CHANGELOG.md), Git

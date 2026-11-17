@@ -1,4 +1,4 @@
-# Метрики и эксперименты — 1.6.1
+# Метрики и эксперименты — 1.7.0
 
 [Источники](SOURCES_AND_EVALS.md) · [Memory/context](MEMORY_AND_CONTEXT_RU.md)
 

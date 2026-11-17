@@ -1,4 +1,4 @@
-# Архитектура Native Agent Harness 1.6.1
+# Архитектура Native Agent Harness 1.7.0
 
 [Индекс](INDEX.md) · [README](../README.md) · [CLI](CLI_REFERENCE_RU.md)
 
