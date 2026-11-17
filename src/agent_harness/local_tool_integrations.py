@@ -214,7 +214,7 @@ def prepare_serena(root, cache, *, executable="serena", timeout=15, expected_imp
 
 def serena_stdio_argv(root, cache, *, executable="serena"):
     binary = shutil.which(executable)
-    command = [sys.executable, str(Path(__file__).resolve()), "serena-stdio", "--executable", str(Path(binary).resolve()) if binary else executable,
+    command = [sys.executable, "-I", str(Path(__file__).resolve()), "serena-stdio", "--executable", str(Path(binary).resolve()) if binary else executable,
                "--project", str(root), "--cache-root", str(cache)]
     if binary is not None:
         command.extend(["--implementation-digest", installed_tool_digest(binary)])
@@ -252,7 +252,7 @@ def prepare_context7(root, cache, *, executable="context7-mcp", timeout=15, expe
 
 def context7_stdio_argv(root, cache, *, executable="context7-mcp"):
     native = shutil.which(executable)
-    command = [sys.executable, str(Path(__file__).resolve()), "context7-stdio", "--executable",
+    command = [sys.executable, "-I", str(Path(__file__).resolve()), "context7-stdio", "--executable",
                str(Path(native).resolve()) if native else executable, "--project", str(root), "--cache-root", str(cache)]
     if native is not None:
         command.extend(["--implementation-digest", installed_tool_digest(native)])
@@ -366,12 +366,12 @@ def build_local_graph_index(root, artifact_dir, *, executable="graphify", frozen
     implementation = str(Path(__file__).resolve())
     root, artifact_dir = _outside(root, artifact_dir)
     failure_path = artifact_dir / "failures" / ("graphify-" + uuid.uuid4().hex + ".json")
-    command = [sys.executable, implementation, "graphify-build", "--executable", binary,
+    command = [sys.executable, "-I", implementation, "graphify-build", "--executable", binary,
                "--source", "{source_root}", "--output", "{index_output}", "--timeout", str(timeout),
                "--failure-receipt", str(failure_path)]
     receipt = build_graph_index(root, frozen or source_snapshot(root), artifact_dir, command,
         tool_version=version, settings={"mode": "local-code-only", "semantic_inference": False},
-        timeout=timeout, version_argv=[sys.executable, implementation, "graphify-version", "--executable", binary])
+        timeout=timeout, version_argv=[sys.executable, "-I", implementation, "graphify-version", "--executable", binary])
     if _graphify_version(binary)[1] != version or installed_tool_digest(binary) != implementation_digest:
         raise HarnessError("GRAPHIFY_IMPLEMENTATION_DRIFT: installed tool changed during build")
     receipt["provider_toolchain"] = {"kind": "isolated-python-code-v1", "executable": binary,

@@ -50,7 +50,7 @@ class LocalToolIntegrationTests(unittest.TestCase):
         value["agent_interface"] = "REPL";config.write_text(json.dumps(value))
         with self.assertRaisesRegex(HarnessError, "policy changed"):
             prepare_serena(self.source, self.root / "cache-a", executable=exe)
-        self.assertTrue(Path(serena_stdio_argv(self.source, self.root / "other", executable=exe)[1]).is_absolute())
+        self.assertTrue(Path(serena_stdio_argv(self.source, self.root / "other", executable=exe)[2]).is_absolute())
 
     def test_serena_blocks_source_cache_unknown_cli_and_unbounded_timeout(self):
         for timeout in (True, 0, float('nan'), 301):
@@ -75,6 +75,22 @@ class LocalToolIntegrationTests(unittest.TestCase):
         with self.assertRaisesRegex(HarnessError, "IMPLEMENTATION_DRIFT"):
             prepare_context7(self.source, self.root / "context7", executable=exe, expected_implementation=invocation["implementation_digest"])
 
+    def test_outer_python_launchers_ignore_environment_before_importing_helper(self):
+        poison = self.root / "startup-modules";poison.mkdir()
+        marker = self.root / "startup-marker"
+        (poison / "sitecustomize.py").write_text("from pathlib import Path\nPath(" + repr(str(marker)) + ").write_text('unexpected startup')\n")
+        environment = dict(os.environ, PYTHONPATH=str(poison), PYTHONHOME=str(self.root / "not-a-python-home"))
+        for name, launcher, version, help_text in (
+                ("serena", serena_stdio_argv, "Serena 2.1.0", "--project --agent-interface --transport --enable-web-dashboard --enable-gui-log-window --open-web-dashboard"),
+                ("context7", context7_stdio_argv, "4.6.0", "--transport")):
+            exe = self.executable("import sys\nprint(" + repr(version) + " if '--version' in sys.argv else " + repr(help_text) + " if '--help' in sys.argv else 'native-clean')\n")
+            command = launcher(self.source, self.root / (name + "-cache"), executable=exe)
+            self.assertEqual(command[:2], [sys.executable, "-I"])
+            result = subprocess.run(command, cwd=self.source, env=environment, capture_output=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+            self.assertEqual(result.stdout.strip(), b"native-clean")
+            self.assertFalse(marker.exists(), "ambient Python startup module executed before isolation")
+
     def test_graphify_real_subprocess_fixture_honors_output_scope_and_provenance(self):
         exe = self.executable("""import sys,json,pathlib,os
 if '--version' in sys.argv: print('graphify 0.9.111');raise SystemExit
@@ -87,7 +103,8 @@ out=pathlib.Path(sys.argv[sys.argv.index('--out')+1])/'graphify-out';out.mkdir(p
         implementation.parent.mkdir(parents=True)
         implementation.write_text("MODE = 'initial'\n")
         frozen = source_snapshot(self.source)
-        with patch.dict(os.environ, {"OPENAI_API_KEY": "fixture-only-not-a-real-key"}):
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "fixture-only-not-a-real-key",
+                                   "PYTHONHOME": str(self.root / "not-a-python-home")}):
             receipt = build_local_graph_index(self.source, self.root / "indexes", executable=exe)
         self.assertEqual(receipt["source_snapshot_digest"], frozen["digest"])
         verify_graph_index(receipt, frozen)
