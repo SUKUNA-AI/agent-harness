@@ -8,6 +8,9 @@
   native stop, exit 0 и остановки дерева процессов сохранены.
 - Добавлены семь регрессионных Web Streams сценариев. Связанный набор с
   настоящим OpenCode и локальным scripted provider: 76 PASS, 1 SKIP.
+- Устранена гонка fake Codex RPC peer: barrier и trailing partial JSON теперь
+  попадают в pipe одной ограниченной записью. Recovery assertions и runtime
+  сохранены; исходный полный FAIL и результаты адресного повтора разделены в notes.
 - Реальная связка OpenRouter Hydrogen/Flex → Serena + Context7 прошла после
   исправления: tool results, финальный каталог и cleanup проверены. Это
   наблюдённый scoped smoke, а не приёмка произвольной инженерной задачи.

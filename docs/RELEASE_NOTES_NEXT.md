@@ -47,9 +47,23 @@ clean normalized JSONL EOF и process cleanup проверяются отдел�
   неизменность source и завершение owned processes проверены. Статус —
   `OBSERVED_REAL_OPENROUTER_MCP`, acceptance — `not_performed`.
 
-Старый full baseline **1370 PASS, 75 SKIP** относится к отдельному snapshot.
-Он не является full-suite доказательством SSE candidate. Реальный smoke не
-заменяет supervisor plan/check/review/gate или workload benchmark.
+Полный Python-прогон на frozen source `277519e` выполнил **1452 tests**:
+**1376 PASS, 1 FAIL, 75 SKIP**. Единственный сбой —
+`test_partial_jsonl_after_terminal_makes_outcome_unknown`. В fake RPC peer
+barrier-ответ и повреждённый JSON-фрагмент выводились двумя отдельными flush;
+supervisor мог остановить peer между ними, прежде чем fault попадал в pipe.
+Это реальная гонка producer тестовых данных; исходный FAIL сохранён.
+
+Fixture теперь передаёт ответ и fault одним `os.write` размером не более
+512 bytes и проверяет длину записи. Runtime и assertions не ослаблены.
+После исправления прошли **10/10** прямых pipe-probes с немедленной остановкой,
+**16/16** recovery/response lifecycle tests и **50/50** повторений исходного
+сценария. Эти проверки выполнены на Linux; отдельная live-квалификация Windows
+не заявляется. Полный набор после правки fixture повторно не выполнялся;
+целевые повторы не переименовывают первоначальный полный прогон в PASS.
+
+Старый full baseline **1370 PASS, 75 SKIP** относится к более раннему snapshot.
+Реальный smoke не заменяет supervisor plan/check/review/gate или workload benchmark.
 Полные receipts остаются private; в Git не переносятся host paths, auth,
 session transcripts или содержимое пользовательских configs.
 

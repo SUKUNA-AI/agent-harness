@@ -56,11 +56,18 @@ def main():
                                   'excludeSlashTmp': mode != 'unsafe_tmp',
                                   'excludeTmpdirEnvVar': mode != 'unsafe_tmp'}}
         elif method == 'mcpServerStatus/list':
-            send({'id': ident, 'result': {'data': [], 'nextCursor': None}})
+            response = {'id': ident, 'result': {'data': [], 'nextCursor': None}}
             if done and mode == 'trailing_partial':
-                sys.stdout.write('{"method":')
                 sys.stdout.flush()
+                # The owner may stop this peer as soon as it reads the barrier.
+                # Publish the fault in that same bounded pipe write, rather
+                # than racing a second flush against legitimate tree cleanup.
+                payload = (json.dumps(response) + '\n' + '{"method":').encode()
+                if len(payload) > 512 or os.write(sys.stdout.fileno(), payload) != len(payload):
+                    raise RuntimeError('Incomplete bounded fixture fault write')
                 time.sleep(8)
+            else:
+                send(response)
             continue
         elif method == 'turn/start':
             response_turn = 'turn-wrong' if mode == 'wrong_turn_response' else 'turn-fixture'
