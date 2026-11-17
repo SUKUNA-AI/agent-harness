@@ -9,6 +9,7 @@ This is browser request containment, not an OS sandbox for hostile Chromium.
 from __future__ import annotations
 
 from copy import deepcopy
+import base64
 import http.client
 import http.server
 import ipaddress
@@ -290,9 +291,9 @@ def browser_server(policy, *, root, private_root):
     private = Path(namespaced) / policy["artifacts"]
     return {"id": "playwright-managed", "transport": "stdio", "required": True,
         "command": [sys.executable, "-I", "-c", _BOOTSTRAP, str(Path(__file__).resolve().parents[1]),
-            json.dumps(policy, sort_keys=True, separators=(",", ":")), str(root), str(private)],
+            base64.urlsafe_b64encode(json.dumps(policy, sort_keys=True, separators=(",", ":")).encode()).decode(), str(root), str(private)],
         "cwd": str(root), "environment": {}, "env_vars": [], "allowed_tools": list(TOOLS),
-        "forbidden_tools": [], "required_tools": list(TOOLS), "read_only_tools": [],
+        "forbidden_tools": [], "required_tools": list(TOOLS), "required_results": ["browser_snapshot"], "read_only_tools": [],
         "binding": "worktree", "cache": "private", "startup_timeout": 30, "tool_timeout": 30}
 
 
@@ -607,7 +608,7 @@ def qualify_browser(policy, *, root, private_root, timeout=30):
 
 def main():
     """Closed stdio MCP facade. Unsupported methods/tools never reach upstream."""
-    policy, root, private = json.loads(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
+    policy, root, private = json.loads(base64.b64decode(sys.argv[1], altchars=b"-_", validate=True)), Path(sys.argv[2]), Path(sys.argv[3])
     private.mkdir(parents=True, exist_ok=True, mode=0o700)
     # Never inherit credentials, browser auth state, Node hooks or proxy env.
     safe = _environment(private)

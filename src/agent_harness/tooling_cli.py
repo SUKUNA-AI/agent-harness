@@ -38,6 +38,15 @@ def dispatch(argv):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("list", help="Built-in optional profile identifiers")
+    command = sub.add_parser("browser-job", help="Run finite managed Node browser actions and independent regression")
+    command.add_argument("--profile", default="browser-testing", help="Configured browser profile ID or absolute Strict YAML path")
+    command.add_argument("--job", required=True, help="BrowserJob JSON object or absolute ordinary JSON file")
+    command = sub.add_parser("graphify-build", help="Build a local-only Graphify index with pinned native implementation")
+    command.add_argument("--root", required=True)
+    command.add_argument("--artifact-dir", required=True)
+    command.add_argument("--executable", default="graphify")
+    command.add_argument("--snapshot", help="Optional absolute frozen source manifest")
+    command.add_argument("--timeout", type=float, default=120)
     command = sub.add_parser("snapshot", help="Freeze actual source manifest for a graph build")
     command.add_argument("--root", required=True)
     command.add_argument("--output", required=True)
@@ -64,8 +73,42 @@ def dispatch(argv):
             command.add_argument("--output", required=True, help="New private per-run config file; never a user/project config")
             command.add_argument("--apply", action="store_true", required=True)
     args = parser.parse_args(argv)
-    from .tool_profiles import load_profile, profile_digest, preflight_profile, render_codex, render_opencode
+    from .tool_profiles import builtin_profiles, load_profile, profile_digest, preflight_profile, render_codex, render_opencode
     try:
+        if args.command == "browser-job":
+            from dataclasses import fields
+            from .browser_integration import run_managed_browser_job
+            from .codex_execution import _duplicate_free
+            from .file_io import read_regular_file
+            from .optional_tool_jobs import BrowserJob
+            from .tool_profiles import _browser_policy
+            profile = load_profile(Path(args.profile) if Path(args.profile).is_absolute() else args.profile)
+            if not profile.get("browser"):
+                raise HarnessError("Configured browser policy is required for browser-job")
+            if args.job.lstrip().startswith("{"):
+                if len(args.job.encode()) > 65536:
+                    raise HarnessError("Browser job JSON exceeds byte bound")
+                raw = args.job
+            else:
+                raw = read_regular_file(_output_path(args.job), max_bytes=65536)
+            value = json.loads(raw, object_pairs_hook=_duplicate_free)
+            if not isinstance(value, dict) or set(value) - {field.name for field in fields(BrowserJob)}:
+                raise HarnessError("Browser job must be a closed BrowserJob JSON object")
+            try:
+                job = BrowserJob(**value)
+            except TypeError as error:
+                raise HarnessError("Browser job is missing required fields") from error
+            result = run_managed_browser_job(_browser_policy(profile), job)
+            print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+            return 0 if result["status"] in {"COMPLETED", "REPRODUCED"} else 2
+        if args.command == "graphify-build":
+            from .local_tool_integrations import build_local_graph_index
+            from .strict_yaml import load
+            result = build_local_graph_index(_output_path(args.root), _output_path(args.artifact_dir),
+                executable=args.executable, frozen=load(_output_path(args.snapshot)) if args.snapshot else None,
+                timeout=args.timeout)
+            print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+            return 0
         if args.command in {"snapshot", "index-build", "index-verify"}:
             from .tooling_provenance import source_snapshot, build_graph_index, verify_graph_index
             from .strict_yaml import load
@@ -88,7 +131,7 @@ def dispatch(argv):
             print(json.dumps(result, ensure_ascii=False, sort_keys=True))
             return 0
         if args.command == "list":
-            result = {"profiles": ["baseline", "coding", "architecture", "reviewer-readonly", "browser-testing", "documents"],
+            result = {"profiles": list(builtin_profiles()),
                       "default_backend": "codex", "default_profile": "baseline"}
         else:
             root = Path(args.root)

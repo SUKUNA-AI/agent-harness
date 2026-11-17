@@ -66,8 +66,11 @@ def builtin_profiles():
     # No unverified CLI command recipes: the operator supplies an installed
     # server's actual invocation after version/help verification.
     values["browser-testing"] = {**baseline, "id": "browser-testing", "roles": ["worker", "root"],
-        "cli": [{"id": "playwright", "commands": ["playwright"], "required": True}],
         "browser": {"isolated": True, "artifacts": "browser-artifacts", "allow_test_writes": False}}
+    from .local_tool_integrations import context7_server
+    for base in ("coding", "architecture"):
+        values[base + "-context7"] = {**deepcopy(values[base]), "id": base + "-context7",
+            "servers": [*deepcopy(values[base]["servers"]), context7_server()]}
     values["documents"] = {**baseline, "id": "documents", "roles": ["worker", "root"],
         "cli": [{"id": "docling", "commands": ["docling"], "required": True}],
         "documents": {"mode": "local-only", "max_input_bytes": 8388608, "timeout": 120,
@@ -120,6 +123,8 @@ def load_profile(reference=None):
             raise HarnessError("Required/allowed/forbidden MCP tools conflict")
         if not set(server["read_only_tools"]) <= allowed:
             raise HarnessError("Read-only tools must be explicitly allowed")
+        if not set(server.get("required_results", server["required_tools"])) <= set(server["required_tools"]):
+            raise HarnessError("Required execution results must be a subset of required catalog tools")
         if server["transport"] == "stdio":
             if not server.get("command") or "url" in server:
                 raise HarnessError("stdio MCP requires command and forbids URL")
@@ -199,10 +204,69 @@ def resolved_servers(profile, root, *, cache_root=None):
     for spec in profile["servers"]:
         server = _expand(spec, root, cache)
         server["cwd"] = root
-        if server["id"] == "serena" and (server["transport"] != "stdio" or root not in server["command"]):
-            raise HarnessError("Serena requires a distinct stdio process explicitly bound to this worktree")
+        if server["id"] in {"serena", "context7"}:
+            from . import local_tool_integrations as local
+            if server["transport"] != "stdio":
+                raise HarnessError("Managed local tool requires a worktree-bound stdio process")
+            command = server["command"]
+            helper = str(Path(local.__file__).resolve())
+            prepared = len(command) > 2 and command[1] == helper
+            if server["id"] == "serena":
+                if prepared:
+                    if "--executable" not in command:
+                        raise HarnessError("Managed Serena launcher has no executable binding")
+                    executable = command[command.index("--executable") + 1]
+                elif len(command) == 4 and command[1:] == ["start-mcp-server", "--project", root]:
+                    executable = command[0]
+                else:
+                    raise HarnessError("Serena requires the managed worktree-bound launcher")
+                expected = local.serena_stdio_argv(root, Path(cache) / "serena", executable=executable)
+                server["environment"]["SERENA_HOME"] = str(Path(cache) / "serena" / "serena-home")
+            else:
+                if prepared:
+                    if "--executable" not in command:
+                        raise HarnessError("Managed Context7 launcher has no executable binding")
+                    executable = command[command.index("--executable") + 1]
+                elif len(command) == 3 and command[1:] == ["--transport", "stdio"]:
+                    executable = command[0]
+                else:
+                    raise HarnessError("Context7 requires the managed public-read launcher")
+                expected = local.context7_stdio_argv(root, Path(cache) / "context7", executable=executable)
+            if prepared and command != expected:
+                raise HarnessError("Managed tool launcher binding drifted")
+            server["command"] = expected
+            server.pop("help_argv", None)
+            server.pop("required_help", None)
         result.append(server)
+    if profile.get("browser"):
+        from .browser_integration import browser_server
+        if any(server["id"] == "playwright-managed" for server in result):
+            raise HarnessError("Managed browser server ID is reserved for the browser policy")
+        result.append(browser_server(_browser_policy(profile), root=Path(root), private_root=Path(cache).parent))
     return result
+
+
+def _browser_policy(profile):
+    policy = profile["browser"]
+    required = ("allowed_origins", "mcp_package", "browser_executable", "browser_cache")
+    missing = [key for key in required if not policy.get(key)]
+    if missing:
+        raise HarnessError("CONFIG_REQUIRED: browser-testing requires explicit " + ", ".join(missing))
+    from .browser_integration import validate_browser_policy
+    return validate_browser_policy(policy)
+
+
+def execution_profile(profile, root, *, cache_root=None):
+    """Resolve dynamic dependencies into a closed runtime-only logical profile.
+
+    Callers retain the original profile for its source identity. Removing cwd
+    and the expanded browser policy keeps rendering idempotent and schema-valid.
+    """
+    result = load_profile(profile)
+    result["servers"] = [{key: value for key, value in spec.items() if key != "cwd"}
+        for spec in resolved_servers(result, root, cache_root=cache_root)]
+    result.pop("browser", None)
+    return load_profile(result)
 
 
 def _role(profile, backend, role):
@@ -314,10 +378,20 @@ def preflight_profile(profile, backend, root, role="worker", *, cache_root=None,
     receipt = {"schema_version": 1, "status": "READY", "profile_id": profile["id"],
         "profile_version": profile["version"], "profile_digest": profile_digest(profile),
         "backend": backend, "role": role, "root": str(Path(root).resolve()), "servers": [], "cli": [],
-        "required_dependencies": [s["id"] for s in profile["servers"] if s["required"]],
+        "required_dependencies": [],
         "client_catalog_verified": False, "acceptance": "not_performed"}
     try:
         _role(profile, backend, role)
+        servers = resolved_servers(profile, root, cache_root=cache_root)
+        receipt["required_dependencies"] = [s["id"] for s in servers if s["required"]]
+        if profile.get("browser"):
+            from .browser_integration import qualify_browser
+            _, cache = _roots(root, cache_root)
+            receipt["browser"] = qualify_browser(_browser_policy(profile), root=Path(root), private_root=Path(cache).parent,
+                timeout=min(profile["timeouts"]["startup"], 30))
+            if receipt["browser"]["status"] != "QUALIFIED":
+                receipt["status"] = "BLOCKED"
+                receipt["reason"] = "BLOCKED_NOT_QUALIFIED: " + receipt["browser"].get("reason", "actual browser lifecycle failed")
         index_policy = profile.get("index", {})
         if index_policy.get("required") and graph_index is None:
             raise HarnessError("REQUIRED_GRAPH_INDEX_MISSING: bind a verified frozen-source index receipt before dispatch")
@@ -335,7 +409,7 @@ def preflight_profile(profile, backend, root, role="worker", *, cache_root=None,
             receipt["cli"].append(observed)
             if observed["status"] != "READY" and dep["required"]:
                 receipt["status"] = "BLOCKED"
-        for server in resolved_servers(profile, root, cache_root=cache_root):
+        for server in servers:
             observed = probe_server(server, role=role)
             receipt["servers"].append(observed)
             if observed["status"] != "READY" and server["required"]:
@@ -345,9 +419,6 @@ def preflight_profile(profile, backend, root, role="worker", *, cache_root=None,
             receipt["requested_conversion_mode"] = profile["documents"]["mode"]
             receipt["actual_conversion_mode"] = "not_run"
             receipt["reason"] = "BLOCKED_NOT_QUALIFIED: controlled conversion runner required for " + profile["documents"]["mode"] + "; CLI presence does not enforce input/output/size/time/network policy"
-        if profile.get("browser"):
-            receipt["status"] = "BLOCKED"
-            receipt["reason"] = "BLOCKED_NOT_QUALIFIED: browser binary/context lifecycle requires live smoke; CLI presence is insufficient"
     except (HarnessError, OSError, ValueError) as error:
         receipt["status"], receipt["reason"] = "BLOCKED", str(error)
     receipt["catalog_digest"] = digest([{k: row[k] for k in ("id", "catalog") if k in row} for row in receipt["servers"]])
