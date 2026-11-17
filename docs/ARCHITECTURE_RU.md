@@ -391,9 +391,10 @@ catalogs и JSONL привязаны к completion receipts; утрата eviden
 При провале квалификации managed вызов блокируется. Смешанный DAG использует
 прежние глобальные slots.
 
-В guard сохраняются связанные `context`, `before_dispatch` и `after_response`
-для каждого model request. Последняя квитанция требует прежние guard bytes и
-живое соединение с обязательными MCP. Некоторые provider SDK заканчивают чтение
+В guard для каждого model request сохраняются связанные `context` и
+`before_dispatch`. При подключённых MCP дополнительно требуется `after_response`:
+эта квитанция подтверждает прежние guard bytes и живое соединение с MCP.
+Baseline без MCP законно завершается без неё. Некоторые provider SDK заканчивают чтение
 после terminal SSE и отменяют остаток HTTP body до сетевого EOF. Source после
 1.7.0 проверяет EOF и подтверждённую consumer cancellation; потоковая ошибка
 или отказ отмены не создают response-квитанцию. Отмена сама по себе не означает

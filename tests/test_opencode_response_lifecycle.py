@@ -24,7 +24,7 @@ class ResponseLifecycleTests(unittest.TestCase):
             root.mkdir()
             runtime = base / "runtime.jsonl"
             guard = base / "guard.mjs"
-            guard.write_text(GUARD_SOURCE, encoding="utf-8")
+            guard.write_bytes(GUARD_SOURCE.encode("utf-8"))
             spec = base / "spec.json"
             spec.write_text(json.dumps({
                 "root": str(root), "allowed_tools": [], "agent": "harness-leaf",

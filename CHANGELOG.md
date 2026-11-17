@@ -9,8 +9,8 @@
 - Добавлены семь регрессионных Web Streams сценариев. Связанный набор с
   настоящим OpenCode и локальным scripted provider: 76 PASS, 1 SKIP.
 - Реальная связка OpenRouter Hydrogen/Flex → Serena + Context7 прошла после
-  исправления: tool results, финальный каталог и cleanup проверены. Это scoped
-  live qualification, а не приёмка произвольной инженерной задачи.
+  исправления: tool results, финальный каталог и cleanup проверены. Это
+  наблюдённый scoped smoke, а не приёмка произвольной инженерной задачи.
 - README, operator runbooks и редактируемые draw.io/SVG схемы разделяют
   переносимые команды, локальные helpers, источник модели и host-side tools.
 
