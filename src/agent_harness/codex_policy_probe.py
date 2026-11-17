@@ -14,7 +14,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 
-from .codex_execution import CodexAdapter
+from .codex_execution import CodexAdapter,sanitized
 from .codex_tool_catalog import _toml
 from .core import HarnessError,digest
 from .file_io import read_regular_file
@@ -109,6 +109,9 @@ def probe(adapter,metadata,role,folder,*,timeout=60):
                 if not state['requests'] or not result.get('process_tree_stopped'):
                     raise HarnessError('Native policy probe did not reach/reap the installed client')
                 tools=state['requests'][0]
+                (folder/('catalog-'+str(index)+'.json')).write_text(json.dumps({'schema_version':1,'role':role,
+                    'scenario':mode,'catalog_transport':state['transports'][0],'tools':sanitized(tools)},
+                    ensure_ascii=False,sort_keys=True,indent=2)+'\n')
                 if metadata.get('use_responses_lite') and state['transports'][0]!='additional_tools':
                     raise HarnessError('Selected native Lite catalog path was not observed')
                 namespace=[tool for tool in tools if tool.get('type')=='namespace' and tool.get('name')=='mcp__fixture']
