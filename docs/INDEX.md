@@ -20,13 +20,16 @@
 | Документ | Содержание |
 | --- | --- |
 | [Tool Profiles](TOOL_PROFILES_RU.md) | Strict profiles, dependency readiness, Serena isolation, Graphify revision binding, ast-grep, browser/documents limits |
+| [Эксплуатация Tool Profiles](TOOLING_OPERATIONS_RU.md) | Подключение, native/managed matrix, per-run config, exact resume, troubleshooting и review handoff |
 | [Codex MCP](CODEX_MCP_RU.md) | Native configuration, tool allowlists, precedence, exact resume и безопасные overrides |
 | [OpenCode V2](OPENCODE_RU.md) | Optional managed leaf adapter, permissions, standalone, qualification boundary |
 | [Tooling acceptance](TOOLING_ACCEPTANCE_RU.md) | A1–A7, fault injection, negative security tests, fixture/live distinction |
 
 Наличие renderer или fixture PASS не квалифицирует реальный клиент.
-В исходной ветке OpenCode live managed execution остаётся blocked; baseline
-Codex и опубликованный 1.6.1 ZIP сохраняют свои прежние границы.
+В исходной ветке OpenCode managed leaf допускается только после native
+qualification и проверки каталога внутри каждого реального исполнения.
+Диагностический Codex catalog не квалифицирует отдельный strict MCP exec или
+reviewer isolation. Baseline и опубликованный 1.6.1 ZIP сохраняют прежние границы.
 
 ## Понять и применять
 
@@ -76,7 +79,8 @@ Codex и опубликованный 1.6.1 ZIP сохраняют свои пр
 
 ## Текущая версия и история
 
-Действующие руководства описывают 1.6.1 в `main`.
+Базовые руководства описывают 1.6.1; разделы Tool Profiles/OpenCode дополнительно
+описывают исходную ветку разработки и явно отмечают qualification boundaries.
 [Состав выпуска 1.6.1](RELEASE_NOTES_1.6.1.md) и его manifest связывают архив
 с исходниками. Предыдущий [1.6.0](RELEASE_NOTES_1.6.0.md) закреплён своим тегом;
 новые изменения `main` не меняют его содержимое. История остаётся в

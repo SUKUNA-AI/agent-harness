@@ -59,7 +59,19 @@ flowchart TD
 | Language server | Семантику проекта в пределах своей реализации и настроек | Полноту неиндексированного/неподдерживаемого кода |
 | Private files | Состояние run, checkpoints и recovery evidence | Автоматическое продолжение без активного клиента |
 
-CLI не содержит дополнительного LLM API client. `plan next` показывает ready nodes для native orchestration; `work` запускает штатные Codex exec/resume processes, владеет global slots и отдельными worktrees. Модельный runtime остаётся Codex.
+CLI не содержит дополнительного LLM API client. `plan next` показывает ready
+nodes для native orchestration; `work` запускает штатные client processes,
+владеет global slots и отдельными worktrees. Codex exec/resume остаётся default.
+Optional OpenCode V2 adapter использует тот же supervisor и contained runner;
+модельный transport остаётся внутри выбранного клиента.
+
+Tooling pipeline отделяет Strict YAML policy → native configuration → dependency
+probe → actual client catalog → execution qualification → completion → gate.
+[Подробный операторский flow](TOOLING_OPERATIONS_RU.md) содержит
+[схему конфигурации](diagrams/tool-profile-pipeline.svg) и
+[схему isolation/resume/acceptance](diagrams/tooling-isolation-resume.svg).
+Номер версии work-state v4 относится к tooling provenance; он не заменяет
+contract v2 plan-quality или frozen receipt schemas v1/v2.
 
 ### Связь с исходниками
 
@@ -73,6 +85,9 @@ CLI не содержит дополнительного LLM API client. `plan n
 | Подготовка root-вызова и восстановление | `root_preparation.py`, `execution_receipts.py`, `dependency_commit.py` |
 | SessionStart, checkpoint и native observations | `native_session.py`, `native_observability.py` |
 | Exact sessions и owned processes/worktrees | `codex_execution.py`, `agent_lifecycle.py` |
+| Optional native backend и роль/профиль | `execution.py`, `opencode_execution.py`, `tool_profiles.py` |
+| Dependency и native catalog qualification | `tooling_probe.py`, `codex_tool_catalog.py`, `opencode_qualification.py` |
+| Frozen graph, scoped migration и tooling formats | `tooling_provenance.py`, `tooling_state.py`, `execution_receipts.py` |
 | Strict YAML, journal и replay | `strict_yaml.py`, `supervisor_store.py` |
 | Provenance, память и reducer | `execution_ledger.py`, `memory.py`, `context_reducer.py` |
 | Optional conservative reuse | `input_closure.py`, `check_cache.py`, `python_runtime.py` |

@@ -12,6 +12,7 @@
 | Установленный Codex | Его `config.toml` | Адресный обратимый installer; model/provider/permissions сохраняются |
 | Work contract/state/checkpoints/agent/memory | Strict YAML, независимый `schema_version` | Закрытые schemas, bounded fields и UTC timestamps |
 | Codex process events | JSONL native protocol | Хранятся отдельно; model completion не равно acceptance |
+| OpenCode process events и runtime tool catalogs | Normalized JSONL и bounded JSON artifacts | Каталоги конкретной сессии закрепляются completion receipt по SHA-256 |
 | Recovery journal | Небольшие typed JSONL records v1/v2 с hash chain | Root preparation/reservation facts требуют v2; default events/checkpoints остаются v1 |
 | Existing core run, evidence, release/install manifests | Исторический JSON | Existing reader/rollback продолжают работать |
 | Architecture narrative и derived knowledge | Markdown | Authoritative structured provenance остаётся в YAML |
@@ -248,3 +249,53 @@ Default-маршрут `work migrate` по-прежнему выполняет �
 structured document ограничен 2 MiB. Превышение или конфликт прекращают переход,
 а не обрезают историю. Hash bindings проверяют согласованность локальных bytes;
 они не удостоверяют автора receipts и не обеспечивают OS isolation.
+
+## Tooling: отдельная версия work-state v4
+
+Версии пакета, task contract, state, review и receipt независимы. Выбор
+`execution`, `review_execution` или явный `tooling_schema_version: 1` включает
+tooling path. У plan его также включает execution selection отдельного узла.
+Контракт без этих полей не получает скрытых defaults, нового digest или
+автоматической квалификации.
+
+| Данные | Закрытая schema | Семантика |
+| --- | --- | --- |
+| Contract с tooling | [work-contract.tooling.v1](../schemas/work-contract.tooling.v1.schema.json) | Сохраняет contract `schema_version` 1/2, добавляет execution selection |
+| Plan с tooling | [agent-plan.tooling.v1](../schemas/agent-plan.tooling.v1.schema.json) | Сохраняет plan 1/2, допускает backend/profile на узле |
+| Work-state tooling | [work-state.v4](../schemas/work-state.v4.schema.json) | `schema_version: 4`, `base_schema_version: 2/3`, provenance и source checkpoint |
+| Completion с tool artifacts | [execution-receipt.tooling.v1](../schemas/execution-receipt.tooling.v1.schema.json), [tooling.v2](../schemas/execution-receipt.tooling.v2.schema.json) | Версия receipt 1/2 сохраняется; только typed completion допускает extension |
+| Agent projection | [agent-state.v3](../schemas/agent-state.v3.schema.json) | Backend/profile/session и tool binding внутри существующего store |
+
+[`tooling_state.ensure`](../src/agent_harness/tooling_state.py) выполняет явный
+opt-in transition state v2/v3 в v4 под supervisor mutex. Сохранённый predecessor
+остаётся в checkpoint/journal chain. Потенциально живой процесс запрещает
+переход. V1 сначала требует штатной legacy migration; номер `4` не является
+shortcut для ручной правки YAML. Команда `work migrate` не предлагает
+`--target-version 4`.
+
+State v4 с `base_schema_version: 3` сохраняет обязательную plan-quality policy
+и frozen schema refs. Base2 не получает такую policy от tooling upgrade.
+Переход не меняет backend/model/provider, не вызывает модель, не продолжает
+сессию и не сбрасывает attempts, usage или deadline. Old migration readers
+отклоняют state4 вместо silent downgrade. Это source-format переход,
+а не доказательство готовности runtime.
+
+### Completion-only tooling variants и frozen history
+
+Historical `execution-receipt.schema.json` и `execution-receipt.v2.schema.json`
+не расширяются до произвольного payload. Reader выбирает tooling variant
+только при наличии `payload.tool_artifacts`; schema разрешает его только у
+`record_type: completion`. Intent/review/coverage и остальные records сохраняют
+закрытые payloads. Unknown fields и будущие версии отклоняются.
+
+Каждый tool artifact — типизированная ссылка `kind/path/sha256` на ordinary
+run-owned bounded файл. Completion обязан включать capability receipt ref и
+artifact hashes в `input_refs`. Reader повторно сверяет bytes; path-only ссылка,
+duplicate path, traversal, чужой каталог или подменённый hash не принимаются.
+Runtime proof дополнительно связывает session, role, worktree и native JSONL.
+Диагностический catalog не подменяет completion artifact.
+
+Это варианты внутри существующей journal/checkpoint модели. Новая database,
+parallel history или переписывание старых v1/v2 receipts не нужны. Отсутствие
+tool artifacts в старом receipt не превращает его в evidence нового tooling
+запуска. Потеря закреплённых runtime artifacts делает связанную приёмку stale.

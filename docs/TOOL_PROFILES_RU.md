@@ -5,6 +5,9 @@ Tool Profile — Strict YAML политика воспроизводимой к�
 остаются обычными CLI. Harness не проксирует модельные MCP вызовы и не создаёт
 новую БД, daemon или LLM API. Supervisor сохраняет scopes, slots, review и gate.
 
+Пошаговая настройка, матрица native/managed, interruption и troubleshooting:
+[Эксплуатация Tool Profiles](TOOLING_OPERATIONS_RU.md).
+
 ## Профили
 
 | ID, version | Назначение | Зависимости |

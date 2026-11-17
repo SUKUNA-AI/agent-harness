@@ -6,6 +6,18 @@ Python stdlib для управляющего слоя и файлы private sta
 Модельная сессия самого Codex использует штатные model/provider и авторизацию
 своей среды; установка harness их не заменяет.
 
+Дополнения исходной ветки: [Tool Profiles](../docs/TOOL_PROFILES_RU.md) и
+[операторское руководство](../docs/TOOLING_OPERATIONS_RU.md). Они описывают
+native MCP конфигурацию Codex/OpenCode, execution qualification и runtime
+receipts. Это отдельный путь от read-only metadata MCP самого harness.
+Состав уже опубликованного ZIP от изменения документов не меняется.
+
+Serena, Graphify, Context7, ast-grep и browser tooling — optional dependencies
+выбранного сценария. Core installer их автоматически не устанавливает.
+Docling не нужен обычной разработке; documents profile можно явно исключить
+по выбору оператора. Required dependency выбранного профиля нельзя считать
+успешной при отсутствии binary, соединения или qualification.
+
 Scanner/snapshot и RepoMap могут использовать bundled Rust helper. Python
 snapshot fallback работает без него; syntactic RepoMap требует native backend.
 Semantic code commands используют отдельно доступный language server, child

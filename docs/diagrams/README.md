@@ -24,6 +24,8 @@ acceptance и восстановления в пределах исходных 
 | [Инструкции нового процесса Codex](instruction-discovery.svg) | [.drawio](instruction-discovery.drawio) | [Autoload](../AUTOLOAD_RU.md), Mermaid #1 | [installation.py](../../src/agent_harness/installation.py), [diagnostics.py](../../src/agent_harness/diagnostics.py) |
 | [Native-сессия: bootstrap и продолжение](native-session.svg) | [.drawio](native-session.drawio) | [Native-сессия](../NATIVE_SESSION_RU.md), Mermaid #1 | [native_session.py](../../src/agent_harness/native_session.py), [native_observability.py](../../src/agent_harness/native_observability.py) |
 | [Совместимый ручной Run API](legacy-run.svg) | [.drawio](legacy-run.drawio) | [Operations](../OPERATIONS.md), Mermaid #1 | [core.py](../../src/agent_harness/core.py), [runner.py](../../src/agent_harness/runner.py) |
+| [Tool Profile: политика, клиент и допуск](tool-profile-pipeline.svg) | [.drawio](tool-profile-pipeline.drawio) | [Tooling operations](../TOOLING_OPERATIONS_RU.md), §1–5 | [tool_profiles.py](../../src/agent_harness/tool_profiles.py), [execution.py](../../src/agent_harness/execution.py), [opencode_qualification.py](../../src/agent_harness/opencode_qualification.py) |
+| [Managed tooling: isolation, resume и acceptance](tooling-isolation-resume.svg) | [.drawio](tooling-isolation-resume.drawio) | [Tooling operations](../TOOLING_OPERATIONS_RU.md), §6–8 | [execution_receipts.py](../../src/agent_harness/execution_receipts.py), [managed_execution.py](../../src/agent_harness/managed_execution.py), [supervisor.py](../../src/agent_harness/supervisor.py) |
 | [Gate и повторная проверка evidence](acceptance-gate.svg) | [.drawio](acceptance-gate.drawio) | [Acceptance](../ACCEPTANCE.md), Mermaid #1 | [runner.py](../../src/agent_harness/runner.py) |
 | [Supervisor: edit, verify, repair](supervisor-repair.svg) | [.drawio](supervisor-repair.drawio) | [Supervisor](../EXECUTION_SUPERVISOR_RU.md), Mermaid #1 | [supervisor.py](../../src/agent_harness/supervisor.py), [failure_policy.py](../../src/agent_harness/failure_policy.py) |
 | [Managed v2: DAG и единая приёмка](managed-worktrees.svg) | [.drawio](managed-worktrees.drawio) | [Dynamic agents](../DYNAMIC_AGENTS_RU.md), Mermaid #1 | [managed_execution.py](../../src/agent_harness/managed_execution.py), [verified_flow.py](../../src/agent_harness/verified_flow.py) |
@@ -92,6 +94,27 @@ drawio --export --format png --theme light --border 24 --timeout 30 --output /ab
 оператор `&`. Для автоматизации допустим отдельный
 `--user-data-dir=<private-directory>` и `--disable-update`, сохраняющие основной
 профиль приложения. Не обходите ограничения среды ради запуска renderer.
+
+У Linux desktop installation команда `drawio` может отсутствовать в PATH,
+хотя приложение установлено как Flatpak. Проверьте application ID:
+
+```sh
+flatpak list --app --columns=application,name
+flatpak run com.jgraph.drawio.desktop --export --format svg --theme light --embed-svg-fonts false --border 24 --timeout 30 --output docs/diagrams/tool-profile-pipeline.svg docs/diagrams/tool-profile-pipeline.drawio
+flatpak run com.jgraph.drawio.desktop --export --format png --theme light --border 24 --timeout 30 --output /absolute/private/tool-profile-pipeline.png docs/diagrams/tool-profile-pipeline.drawio
+```
+
+Проверьте доступ sandbox приложения к input/output; при необходимости передайте
+полные разрешённые пути. Успешный export подтверждайте exit code и свежим файлом.
+Предупреждение DBus без system bus само по себе не означает отказ renderer.
+Обе tooling схемы имеют отдельные shapes/connectors, экспортированы draw.io
+Desktop, а соответствующие PNG предназначены для просмотра перед review.
+Draw.io Desktop 32.6.10 добавляет `foreignObject` даже для plain text shapes,
+одновременно сохраняя эквивалентный SVG `<text>/<tspan>` fallback. Для переносимых
+tooling SVG HTML-блоки удалены, native text fallback сохранён без изменения
+геометрии. Итоговые SVG повторно отрендерены через librsvg; исходные app exports
+и hashes хранятся в private evidence. При повторном экспорте проверьте это
+условие заново: наличие plain text style не гарантирует отсутствие HTML.
 
 Для уже подготовленного SVG достаточно локального SVG renderer. Например,
 при установленном librsvg:

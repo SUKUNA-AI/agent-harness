@@ -42,10 +42,15 @@ OpenCode V2 проходит native preflight без inference, затем пр�
 и права в процессе каждого исполнения. Непрошедшая проверка даёт
 `BLOCKED_NOT_QUALIFIED`; fixture PASS сам по себе допуска не даёт.
 Квалифицированная граница и ограничения описаны в [OpenCode](docs/OPENCODE_RU.md).
+Пошаговое подключение, матрица native/managed, recovery и диагностика —
+[Эксплуатация Tool Profiles](docs/TOOLING_OPERATIONS_RU.md). Потоки конфигурации
+и проверки показаны в [редактируемых схемах draw.io](docs/diagrams/README.md).
 Лимиты 12 managed sessions и 3 reviewers,
 worktree ownership, независимые checks и final gate общие. Матрица сценариев и
 границы проверки — [Tooling acceptance](docs/TOOLING_ACCEPTANCE_RU.md).
 Новые исходники не меняют ранее опубликованный ZIP 1.6.1.
+Внешние MCP/CLI включаются по потребности. Docling не является зависимостью
+обычной инженерной работы; невыбранный documents profile можно явно пропустить.
 
 ```text
 python tools/harness.py tools list
