@@ -70,7 +70,7 @@ def _config_args(config):
 
 class _AppServer:
     """One contained stdio client, sequential RPCs, bounded strict JSONL."""
-    def __init__(self, argv, root, environment, timeout):
+    def __init__(self, argv, root, environment, timeout, *, on_notification=None, on_request=None):
         self.deadline = time.monotonic() + timeout
         self.inbox = queue.Queue()
         self.process, self.job = _start_contained(argv, str(root), env=environment, stdin=subprocess.PIPE)
@@ -80,10 +80,13 @@ class _AppServer:
         self.messages = 0
         self.events_digest = hashlib.sha256()
         self.errors_digest = hashlib.sha256()
+        self.stderr_tail = ''
         self.readers = []
         self.writer = None
         self.startup_notifications = []
         self.stopped = False
+        self.on_notification, self.on_request = on_notification, on_request
+        self.server_requests = set()
         for stream, name in ((self.process.stdout, "stdout"), (self.process.stderr, "stderr")):
             reader = threading.Thread(target=self._read, args=(stream, name), daemon=True)
             reader.start()
@@ -103,7 +106,9 @@ class _AppServer:
                 if len(raw) > MAX_MESSAGE_BYTES or total > MAX_STREAM_BYTES:
                     raise ValueError("Catalog stream bound exceeded")
                 if name == "stderr":
-                    self.errors_digest.update(sanitized(raw.decode("utf-8", errors="replace")).encode())
+                    clean=sanitized(raw.decode("utf-8", errors="replace"))
+                    self.stderr_tail=(self.stderr_tail+clean)[-4096:]
+                    self.errors_digest.update(clean.encode())
                     continue
                 if not raw.endswith(b"\n"):
                     raise ValueError("Partial catalog JSONL event")
@@ -125,12 +130,16 @@ class _AppServer:
 
     def _receive(self):
         while True:
+            if getattr(self, 'cancel_check', None) is not None and self.cancel_check():
+                raise HarnessError('MCP_CLIENT_CANCELLED')
             remaining = self.deadline - time.monotonic()
             if remaining <= 0:
                 raise HarnessError("MCP_CLIENT_TIMEOUT")
             try:
-                kind, value = self.inbox.get(timeout=remaining)
+                kind, value = self.inbox.get(timeout=min(remaining, .1) if getattr(self, 'cancel_check', None) is not None else remaining)
             except queue.Empty as error:
+                if getattr(self, 'cancel_check', None) is not None:
+                    continue
                 raise HarnessError("MCP_CLIENT_TIMEOUT") from error
             if kind == "eof" and value == "stderr":
                 continue
@@ -162,8 +171,12 @@ class _AppServer:
                 done.set()
         self.writer = threading.Thread(target=write, daemon=True)
         self.writer.start()
-        if not done.wait(remaining):
-            raise HarnessError("MCP_CLIENT_TIMEOUT")
+        while not done.wait(min(remaining,.1)):
+            if getattr(self,'cancel_check',None) is not None and self.cancel_check():
+                raise HarnessError('MCP_CLIENT_CANCELLED')
+            remaining=self.deadline-time.monotonic()
+            if remaining<=0:
+                raise HarnessError("MCP_CLIENT_TIMEOUT")
         self.writer.join()
         if errors:
             raise HarnessError(errors[0])
@@ -186,6 +199,11 @@ class _AppServer:
                     raise HarnessError("MCP_CLIENT_INVALID_NOTIFICATION")
                 if value["method"] == "mcpServer/startupStatus/updated":
                     self.startup_notifications.append(value.get("params", {}))
+                if self.on_notification is not None:
+                    self.on_notification(value)
+                continue
+            if "method" in value and self.on_request is not None:
+                self._server_request(value)
                 continue
             if type(value["id"]) is not int or value["id"] != ident or value["id"] in self.responses or "method" in value:
                 # Never answer permission/tool/approval requests in diagnostics.
@@ -196,6 +214,44 @@ class _AppServer:
             if "result" not in value or not isinstance(value["result"], dict):
                 raise HarnessError("MCP_CLIENT_INVALID_RESPONSE")
             return value["result"]
+
+    def _server_request(self, value):
+        ident = value.get("id")
+        if (type(ident) not in (str, int) or isinstance(ident, str) and not 1 <= len(ident) <= 4096
+                or ident in self.server_requests or not isinstance(value.get("method"), str)):
+            raise HarnessError("MCP_CLIENT_INVALID_SERVER_REQUEST")
+        self.server_requests.add(ident)
+        response = self.on_request(value)
+        if not isinstance(response, dict):
+            raise HarnessError("MCP_CLIENT_INVALID_SERVER_REQUEST_RESULT")
+        self._send({"id": ident, "result": response})
+
+    def next_notification(self):
+        while True:
+            value = self._receive()
+            if "id" in value:
+                if "method" not in value or self.on_request is None:
+                    raise HarnessError("MCP_CLIENT_UNEXPECTED_RESPONSE_OR_REQUEST")
+                self._server_request(value)
+                continue
+            if not isinstance(value.get("method"), str):
+                raise HarnessError("MCP_CLIENT_INVALID_NOTIFICATION")
+            if self.on_notification is not None:
+                self.on_notification(value)
+            return value
+
+    def drain(self):
+        """After cleanup, trailing corrupt/partial data must still fail closed."""
+        while not self.inbox.empty():
+            kind, value = self.inbox.get_nowait()
+            if kind == "eof":
+                continue
+            if kind != "message":
+                raise HarnessError("MCP_CLIENT_TRAILING_PROTOCOL_ERROR")
+            if "id" in value or not isinstance(value.get("method"), str):
+                raise HarnessError("MCP_CLIENT_TRAILING_RESPONSE_OR_REQUEST")
+            if self.on_notification is not None:
+                self.on_notification(value)
 
     def close(self):
         try:

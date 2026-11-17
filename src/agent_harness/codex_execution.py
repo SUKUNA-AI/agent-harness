@@ -227,6 +227,13 @@ class CodexAdapter:
     # durable capture and uncertain-outcome handling.
     _stream_reader = staticmethod(_read_stream)
 
+    def with_managed_tools(self, *, root):
+        """Explicit optional native policy path; legacy exec remains unchanged."""
+        if type(self) is not CodexAdapter:
+            raise HarnessError('MANAGED_TOOLS_CLONE_CONTRACT_REQUIRED: subclass must choose its native transport')
+        from .codex_app_server import StrictCodexAdapter
+        return StrictCodexAdapter.configured(self, getattr(self, '_tool_config', {'mcp_servers': {}}), root)
+
     def with_tool_config(self, config, *, root=None, config_path=None):
         """Per-invocation MCP overlays; authentication/model/security untouched."""
         if not isinstance(config, dict) or set(config) - {"mcp_servers"}:
